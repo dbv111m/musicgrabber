@@ -1,0 +1,3043 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>Music Grabber</title>
+    <link rel="icon" type="image/png" href="/static/favicon.png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&family=Space+Grotesk:wght@400;600&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="logo">🎵</div>
+            <h1>Music Grabber</h1>
+            <div style="margin-left: auto; display: flex; align-items: center; gap: 12px;">
+                <label style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary); cursor: pointer;" title="When enabled, converts all downloads to FLAC format. When disabled, keeps the original format (usually opus/m4a).">
+                    <span>FLAC</span>
+                    <div class="toggle-switch" id="flacToggle">
+                        <input type="checkbox" id="convertToFlac" checked>
+                        <span class="toggle-slider"></span>
+                    </div>
+                </label>
+                <button id="themeToggle" style="background: none; border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; cursor: pointer; font-size: 16px; line-height: 1; color: var(--text-secondary); transition: all 0.2s;" title="Toggle light/dark theme">🌙</button>
+                <span id="versionLabel" style="font-size: 11px; color: var(--text-secondary);"></span>
+            </div>
+        </header>
+
+        <div class="search-box">
+            <input
+                type="text"
+                class="search-input"
+                id="searchInput"
+                placeholder="Search for a song..."
+                autocomplete="off"
+                autocapitalize="off"
+            >
+            <!-- Source selector hidden — always search all sources. Kept for easy rollback -->
+            <div class="source-selector" id="sourceSelector" style="display:none">
+                <button class="source-option" data-source="youtube" title="Search YouTube">YT</button>
+                <button class="source-option" data-source="soundcloud" title="Search SoundCloud">SC</button>
+                <button class="source-option" data-source="monochrome" title="Search Monochrome (Tidal lossless)">MO</button>
+                <button class="source-option active" data-source="all" title="Search all sources">All</button>
+            </div>
+            <button class="search-btn" id="searchBtn">Search</button>
+            <div class="search-history" id="searchHistory"></div>
+        </div>
+
+        <div class="tabs">
+            <button class="tab active" data-tab="results">Results</button>
+            <button class="tab" data-tab="bulk">Bulk Import</button>
+            <button class="tab" data-tab="watched">Watched</button>
+            <button class="tab" data-tab="queue">Queue</button>
+            <button class="tab" data-tab="stats">Stats</button>
+            <button class="tab" data-tab="settings">Settings</button>
+        </div>
+
+        <div id="relatedSuggestions" style="display: none;"></div>
+        <div id="resultsTab" class="results"></div>
+
+        <div id="bulkTabContainer" style="display: none;">
+            <div style="margin-bottom: 12px;">
+                <p style="font-size: 13px; color: var(--text-secondary); margin-bottom: 12px;">
+                    Upload a text file or paste your song list below (one per line in format: Artist - Song Title).
+                </p>
+                <div style="margin-bottom: 12px;">
+                    <label class="file-upload">
+                        <input type="file" id="fileUpload" accept=".txt">
+                        📁 Choose File
+                    </label>
+                    <span id="fileName" style="margin-left: 12px; font-size: 13px; color: var(--text-secondary);"></span>
+                </div>
+                <div style="margin-bottom: 12px;">
+                    <div style="display: flex; gap: 8px;">
+                        <input
+                            type="text"
+                            id="spotifyUrlInput"
+                            placeholder="Playlist or album URL"
+                            style="flex: 1; padding: 10px 14px; font-size: 13px; font-family: inherit; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 8px; color: var(--text-primary);"
+                        >
+                        <button
+                            id="fetchSpotifyBtn"
+                            style="padding: 10px 16px; font-size: 13px; font-family: inherit; font-weight: 600; background: #1DB954; color: #000; border: none; border-radius: 8px; cursor: pointer; transition: all 0.2s; white-space: nowrap;"
+                        >
+                            Fetch Playlist
+                        </button>
+                    </div>
+                    <div id="spotifyError" style="margin-top: 8px; font-size: 12px; color: var(--error); display: none;"></div>
+                    <div style="margin-top: 6px; display: flex; align-items: center; gap: 6px;">
+                        <span id="playlistServicesHint" style="font-size: 11px; color: var(--text-secondary);">Supported services: Spotify, YouTube, Amazon Music</span>
+                        <span
+                            id="playlistServicesTooltip"
+                            title="Supported services: Spotify, YouTube, Amazon Music"
+                            style="width: 16px; height: 16px; border-radius: 50%; border: 1px solid var(--border); color: var(--text-secondary); display: inline-flex; align-items: center; justify-content: center; font-size: 11px; cursor: help;"
+                        >i</span>
+                    </div>
+                    <div style="margin-top: 6px; font-size: 11px; color: var(--text-secondary);">
+                        Large Spotify playlists may take a few seconds to load. YouTube playlists are unlimited.
+                    </div>
+                </div>
+                <div style="position: relative;">
+                    <textarea
+                        id="bulkInput"
+                        placeholder="ABBA – Dancing Queen&#10;ABBA – Super Trouper&#10;Backstreet Boys – I Want It That Way"
+                        class="bulk-textarea"
+                        maxlength="500000"
+                    ></textarea>
+                    <div id="lineCounter" style="position: absolute; bottom: 8px; right: 12px; font-size: 11px; color: var(--text-secondary); background: var(--bg-tertiary); padding: 4px 8px; border-radius: 4px;">0 lines</div>
+                </div>
+                <div style="margin-top: 12px; margin-bottom: 12px;">
+                    <label style="display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--text-primary); cursor: pointer;">
+                        <input type="checkbox" id="createPlaylistCheckbox" style="width: 16px; height: 16px; cursor: pointer;">
+                        <span>Create M3U playlist from these songs</span>
+                    </label>
+                    <input
+                        type="text"
+                        id="playlistNameInput"
+                        placeholder="Playlist name (e.g., My Mixtape 2026)"
+                        style="width: 100%; margin-top: 8px; padding: 10px 14px; font-size: 13px; font-family: inherit; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 8px; color: var(--text-primary); display: none;"
+                    >
+                </div>
+                <button
+                    id="bulkImportBtn"
+                    style="width: 100%; padding: 14px; font-size: 14px; font-family: inherit; font-weight: 600; background: var(--accent); color: #000; border: none; border-radius: 12px; cursor: pointer; transition: all 0.2s;"
+                >
+                    Import & Download All
+                </button>
+            </div>
+            <div id="bulkResults" class="results"></div>
+        </div>
+
+        <div id="watchedTabContainer" style="display: none;">
+            <div class="queue-header">
+                <h2 style="font-size: 14px; font-weight: 600; color: var(--text-secondary);">Watched Playlists</h2>
+                <button class="clear-btn" id="refreshAllWatchedBtn" style="color: var(--accent); border-color: var(--accent);">Check All Now</button>
+            </div>
+            <div style="margin-bottom: 16px; padding: 14px; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 12px;">
+                <p style="font-size: 13px; color: var(--text-secondary); margin-bottom: 8px;">
+                    Add a Spotify, YouTube, or Amazon Music playlist to automatically download new tracks when they're added.
+                </p>
+                <p id="watchedScheduleInfo" style="font-size: 11px; color: var(--text-secondary); margin-bottom: 12px; opacity: 0.8;"></p>
+                <div style="display: flex; gap: 8px; margin-bottom: 8px;">
+                    <input
+                        type="text"
+                        id="watchedUrlInput"
+                        placeholder="Spotify, YouTube, or Amazon Music playlist URL"
+                        style="flex: 1; padding: 10px 14px; font-size: 13px; font-family: inherit; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 8px; color: var(--text-primary);"
+                    >
+                    <button
+                        id="addWatchedBtn"
+                        style="padding: 10px 16px; font-size: 13px; font-family: inherit; font-weight: 600; background: var(--accent); color: #000; border: none; border-radius: 8px; cursor: pointer; transition: all 0.2s; white-space: nowrap;"
+                    >
+                        Watch
+                    </button>
+                </div>
+                <div style="display: flex; gap: 16px; align-items: center;">
+                    <label style="display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-secondary);">
+                        Check this playlist:
+                        <select id="watchedIntervalSelect" style="padding: 6px 10px; font-size: 12px; font-family: inherit; background: var(--bg-tertiary); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary);">
+                            <option value="24" selected>Daily</option>
+                            <option value="168">Weekly</option>
+                            <option value="720">Monthly</option>
+                        </select>
+                    </label>
+                    <label style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-secondary);" title="Convert new tracks to FLAC as they are added">
+                        <span>Convert to FLAC</span>
+                        <div class="toggle-switch" id="watchedFlacToggle">
+                            <input type="checkbox" id="watchedConvertToFlac" checked>
+                            <span class="toggle-slider"></span>
+                        </div>
+                    </label>
+                </div>
+                <div id="watchedError" style="margin-top: 8px; font-size: 12px; color: var(--error); display: none;"></div>
+            </div>
+            <div id="watchedList" class="results"></div>
+        </div>
+
+        <div id="queueTabContainer" style="display: none;">
+            <div class="queue-header">
+                <h2 style="font-size: 14px; font-weight: 600; color: var(--text-secondary);">Download Queue</h2>
+                <button class="clear-btn" id="clearQueueBtn">Clear Queue</button>
+            </div>
+            <div id="queueTab" class="results"></div>
+        </div>
+
+        <div id="statsTabContainer" style="display: none;">
+            <div class="queue-header">
+                <h2 style="font-size: 14px; font-weight: 600; color: var(--text-secondary);">Statistics</h2>
+                <button class="clear-btn" id="resetStatsBtn" style="color: var(--warning); border-color: var(--warning);">Reset Stats</button>
+            </div>
+            <div id="statsContent" class="results"></div>
+        </div>
+
+        <div id="settingsTabContainer" style="display: none;">
+            <div class="settings-section">
+                <h3 class="settings-section-title">General</h3>
+                <div class="settings-grid">
+                    <label class="settings-label">
+                        <span>MusicBrainz Metadata</span>
+                        <div class="toggle-switch">
+                            <input type="checkbox" id="settingEnableMusicbrainz" checked>
+                            <span class="toggle-slider"></span>
+                        </div>
+                    </label>
+                    <label class="settings-label">
+                        <span>Fetch Lyrics (LRClib)</span>
+                        <div class="toggle-switch">
+                            <input type="checkbox" id="settingEnableLyrics" checked>
+                            <span class="toggle-slider"></span>
+                        </div>
+                    </label>
+                    <label class="settings-label">
+                        <span>Convert to FLAC by Default</span>
+                        <div class="toggle-switch">
+                            <input type="checkbox" id="settingDefaultFlac" checked>
+                            <span class="toggle-slider"></span>
+                        </div>
+                    </label>
+                    <label class="settings-label">
+                        <span>Organise by Artist<br><span style="font-size: 10px; font-weight: normal; color: var(--text-secondary);">Create artist subfolders</span></span>
+                        <div class="toggle-switch">
+                            <input type="checkbox" id="settingOrganiseByArtist" checked>
+                            <span class="toggle-slider"></span>
+                        </div>
+                    </label>
+                </div>
+                <div class="settings-form" style="margin-top: 8px;">
+                    <div class="settings-row">
+                        <label for="settingMinBitrate">Minimum Audio Bitrate (kbps)</label>
+                        <input type="number" id="settingMinBitrate" placeholder="0 (disabled)" value="0" min="0" max="320" style="width: 120px;">
+                        <span style="font-size: 11px; color: var(--text-secondary);">Downloads below this bitrate are rejected. 0 = no minimum.</span>
+                    </div>
+                    <div class="settings-row">
+                        <label for="settingSinglesSubdir">Singles Subfolder</label>
+                        <div style="display: flex; gap: 6px; align-items: center;">
+                            <select id="settingSinglesSubdir" style="width: 320px; padding: 8px; border-radius: 8px; border: 1px solid var(--border); background: var(--bg-primary); color: var(--text-primary); font-size: 14px;">
+                                <option value="Singles">/music/Singles</option>
+                            </select>
+                        </div>
+                        <div id="customSubdirRow" style="display:none; margin-top: 6px;">
+                            <input type="text" id="customSubdirInput" placeholder="Path under /music (e.g. Singles/Rock)" style="width: 320px;">
+                        </div>
+                        <span style="font-size: 11px; color: var(--text-secondary);">Choose an existing folder, use <code>/music</code> root, or pick <code>Custom path…</code>.</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="settings-section">
+                <h3 class="settings-section-title">Soulseek (slskd)</h3>
+                <div class="settings-form">
+                    <div class="settings-row">
+                        <label for="settingSlskdUrl">URL</label>
+                        <input type="text" id="settingSlskdUrl" placeholder="http://192.168.1.100:5030">
+                    </div>
+                    <div class="settings-row">
+                        <label for="settingSlskdUser">Username</label>
+                        <input type="text" id="settingSlskdUser" placeholder="username">
+                    </div>
+                    <div class="settings-row">
+                        <label for="settingSlskdPass">Password</label>
+                        <div class="password-field">
+                            <input type="password" id="settingSlskdPass" placeholder="password">
+                            <button type="button" class="password-toggle" data-target="settingSlskdPass">Show</button>
+                        </div>
+                    </div>
+                    <div class="settings-row">
+                        <label for="settingSlskdDownloads">Downloads Path</label>
+                        <input type="text" id="settingSlskdDownloads" placeholder="/downloads">
+                    </div>
+                    <button type="button" class="test-btn" id="testSlskdBtn">Test Connection</button>
+                    <div id="slskdTestResult" class="test-result"></div>
+                </div>
+            </div>
+
+            <div class="settings-section">
+                <h3 class="settings-section-title">Navidrome</h3>
+                <div class="settings-form">
+                    <div class="settings-row">
+                        <label for="settingNavidromeUrl">URL</label>
+                        <input type="text" id="settingNavidromeUrl" placeholder="https://navidrome.example.com">
+                    </div>
+                    <div class="settings-row">
+                        <label for="settingNavidromeUser">Username</label>
+                        <input type="text" id="settingNavidromeUser" placeholder="username">
+                    </div>
+                    <div class="settings-row">
+                        <label for="settingNavidromePass">Password</label>
+                        <div class="password-field">
+                            <input type="password" id="settingNavidromePass" placeholder="password">
+                            <button type="button" class="password-toggle" data-target="settingNavidromePass">Show</button>
+                        </div>
+                    </div>
+                    <button type="button" class="test-btn" id="testNavidromeBtn">Test Connection</button>
+                    <div id="navidromeTestResult" class="test-result"></div>
+                </div>
+            </div>
+
+            <div class="settings-section">
+                <h3 class="settings-section-title">Jellyfin</h3>
+                <div class="settings-form">
+                    <div class="settings-row">
+                        <label for="settingJellyfinUrl">URL</label>
+                        <input type="text" id="settingJellyfinUrl" placeholder="http://jellyfin:8096">
+                    </div>
+                    <div class="settings-row">
+                        <label for="settingJellyfinApiKey">API Key</label>
+                        <div class="password-field">
+                            <input type="password" id="settingJellyfinApiKey" placeholder="api-key">
+                            <button type="button" class="password-toggle" data-target="settingJellyfinApiKey">Show</button>
+                        </div>
+                    </div>
+                    <button type="button" class="test-btn" id="testJellyfinBtn">Test Connection</button>
+                    <div id="jellyfinTestResult" class="test-result"></div>
+                </div>
+            </div>
+
+            <div class="settings-section">
+                <h3 class="settings-section-title">YouTube</h3>
+                <div class="settings-form">
+                    <div class="settings-row">
+                        <label for="settingYoutubeCookies">Browser Cookies</label>
+                        <textarea id="settingYoutubeCookies" rows="6" placeholder="Paste cookies.txt content here..."></textarea>
+                        <span class="settings-hint">Export cookies from youtube.com while logged in using a browser extension like "Get cookies.txt LOCALLY". Cookies typically expire within a few hours — re-export when you start getting 403 errors.</span>
+                    </div>
+                    <input type="file" id="youtubeCookiesFile" accept=".txt,text/plain" style="display:none">
+                    <button type="button" class="test-btn" id="uploadYoutubeCookiesBtn">Upload cookies.txt</button>
+                    <button type="button" class="test-btn" id="clearYoutubeCookiesBtn">Clear Cookies</button>
+                    <button type="button" class="test-btn" id="testYoutubeCookiesBtn">Test Cookies</button>
+                    <div id="youtubeCookiesTestResult" class="test-result"></div>
+                </div>
+            </div>
+
+            <div class="settings-section">
+                <h3 class="settings-section-title">Notifications</h3>
+                <div class="settings-form">
+                    <div class="settings-row">
+                        <label for="settingNotifyOn">Notify On</label>
+                        <input type="text" id="settingNotifyOn" placeholder="playlists,bulk,errors">
+                        <span class="settings-hint">Options: singles, playlists, bulk, errors</span>
+                    </div>
+                    <div class="settings-row">
+                        <label for="settingTelegramUrl">Telegram Webhook</label>
+                        <div class="password-field">
+                            <input type="password" id="settingTelegramUrl" placeholder="https://api.telegram.org/bot.../sendMessage?chat_id=...">
+                            <button type="button" class="password-toggle" data-target="settingTelegramUrl">Show</button>
+                        </div>
+                    </div>
+                    <div class="settings-row">
+                        <label for="settingWebhookUrl">Webhook URL</label>
+                        <input type="text" id="settingWebhookUrl" placeholder="https://example.com/webhook">
+                        <span class="settings-hint">Receives a JSON POST on download completion with event, type, title, artist, status, etc.</span>
+                    </div>
+                </div>
+                <details class="settings-details">
+                    <summary>Email (SMTP)</summary>
+                    <div class="settings-form" style="margin-top: 12px;">
+                        <div class="settings-row">
+                            <label for="settingSmtpHost">SMTP Host</label>
+                            <input type="text" id="settingSmtpHost" placeholder="smtp.example.com">
+                        </div>
+                        <div class="settings-row">
+                            <label for="settingSmtpPort">SMTP Port</label>
+                            <input type="number" id="settingSmtpPort" placeholder="587" value="587">
+                        </div>
+                        <div class="settings-row">
+                            <label for="settingSmtpUser">Username</label>
+                            <input type="text" id="settingSmtpUser" placeholder="user@example.com">
+                        </div>
+                        <div class="settings-row">
+                            <label for="settingSmtpPass">Password</label>
+                            <div class="password-field">
+                                <input type="password" id="settingSmtpPass" placeholder="password">
+                                <button type="button" class="password-toggle" data-target="settingSmtpPass">Show</button>
+                            </div>
+                        </div>
+                        <div class="settings-row">
+                            <label for="settingSmtpFrom">From Address</label>
+                            <input type="text" id="settingSmtpFrom" placeholder="musicgrabber@example.com">
+                        </div>
+                        <div class="settings-row">
+                            <label for="settingSmtpTo">To Address</label>
+                            <input type="text" id="settingSmtpTo" placeholder="you@example.com">
+                        </div>
+                        <label class="settings-label">
+                            <span>Use TLS</span>
+                            <div class="toggle-switch">
+                                <input type="checkbox" id="settingSmtpTls" checked>
+                                <span class="toggle-slider"></span>
+                            </div>
+                        </label>
+                    </div>
+                </details>
+            </div>
+
+            <div class="settings-section">
+                <h3 class="settings-section-title">Blacklist</h3>
+                <p style="font-size: 12px; color: var(--text-secondary); margin: 0 0 12px;">Reported tracks and blocked uploaders. Blacklisted videos are hidden from search results; blocked uploaders are penalised in ranking.</p>
+                <div id="blacklistContent" style="font-size: 13px; color: var(--text-secondary);">Loading...</div>
+            </div>
+
+            <div class="settings-section">
+                <h3 class="settings-section-title">Security</h3>
+                <div class="settings-form">
+                    <div class="settings-row">
+                        <label for="settingApiKey">API Key (Server)</label>
+                        <div class="password-field">
+                            <input type="password" id="settingApiKey" placeholder="Leave empty to disable authentication">
+                            <button type="button" class="password-toggle" data-target="settingApiKey">Show</button>
+                        </div>
+                        <span class="settings-hint">When set, all API requests require this key. Rate limit: 60 requests/minute per IP.</span>
+                    </div>
+                    <div class="settings-row">
+                        <label>Browser API Key</label>
+                        <div style="display: flex; gap: 8px; align-items: center;">
+                            <span id="browserApiKeyStatus" style="font-size: 13px; color: var(--text-secondary);"></span>
+                            <button type="button" id="clearApiKeyBtn" class="clear-btn" style="padding: 6px 12px; font-size: 12px;">Clear Stored Key</button>
+                        </div>
+                        <span class="settings-hint">The API key stored in this browser for authentication</span>
+                    </div>
+                </div>
+            </div>
+
+            <div class="settings-actions" style="padding-bottom: 20px;">
+                <button type="button" class="save-btn" id="saveSettingsBtn">Save Settings</button>
+                <div id="settingsSaveResult" class="save-result"></div>
+                <a
+                    class="donation-link"
+                    href="https://ko-fi.com/geekphreek"
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    title="Support Music Grabber on Ko-fi"
+                >
+                    <span class="donation-link-icon" aria-hidden="true">☕</span>
+                    <span>Buy me a coffee</span>
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Report / Blacklist modal -->
+    <div id="reportOverlay" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:1000; align-items:center; justify-content:center;">
+        <div style="background:var(--bg-secondary); border:1px solid var(--border); border-radius:12px; padding:24px; width:min(400px,90vw); max-width:90vw;">
+            <h3 style="margin:0 0 16px; font-size:15px; color:var(--text-primary);">Report Bad Track</h3>
+            <input type="hidden" id="reportJobId">
+            <input type="hidden" id="reportVideoId">
+            <input type="hidden" id="reportSource">
+            <input type="hidden" id="reportUploader">
+
+            <div style="margin-bottom:12px;">
+                <label style="display:block; font-size:12px; color:var(--text-secondary); margin-bottom:4px;">Reason</label>
+                <select id="reportReason" style="width:100%; padding:8px; font-size:13px; font-family:inherit; background:var(--bg-primary); color:var(--text-primary); border:1px solid var(--border); border-radius:6px;">
+                    <option value="wrong_track">Wrong track</option>
+                    <option value="poor_quality">Poor quality</option>
+                    <option value="slowed_pitched">Slowed / pitched</option>
+                    <option value="contentid">ContentID dodge</option>
+                    <option value="other">Other</option>
+                </select>
+            </div>
+
+            <div style="margin-bottom:12px;">
+                <label style="display:block; font-size:12px; color:var(--text-secondary); margin-bottom:4px;">Notes (optional)</label>
+                <input type="text" id="reportNote" placeholder="Any extra detail..." style="width:100%; padding:8px; font-size:13px; font-family:inherit; background:var(--bg-primary); color:var(--text-primary); border:1px solid var(--border); border-radius:6px; box-sizing:border-box;">
+            </div>
+
+            <div id="reportUploaderRow" style="margin-bottom:16px;">
+                <label style="display:flex; align-items:center; gap:8px; font-size:13px; color:var(--text-primary); cursor:pointer;">
+                    <input type="checkbox" id="reportBlockUploader" style="accent-color:var(--warning);">
+                    <span>Also block uploader: <strong id="reportUploaderName"></strong></span>
+                </label>
+            </div>
+
+            <div style="display:flex; gap:8px; justify-content:flex-end;">
+                <button onclick="closeReportDialog()" style="padding:8px 16px; font-size:12px; font-family:inherit; font-weight:600; background:var(--bg-tertiary); color:var(--text-secondary); border:1px solid var(--border); border-radius:6px; cursor:pointer;">Cancel</button>
+                <button onclick="submitReport()" id="reportSubmitBtn" style="padding:8px 16px; font-size:12px; font-family:inherit; font-weight:600; background:var(--warning); color:#000; border:none; border-radius:6px; cursor:pointer;">Report</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="toast" id="toast"></div>
+    <audio id="previewAudio" preload="none"></audio>
+
+    <script>
+        // =============================================================================
+        // API Authentication
+        // =============================================================================
+
+        let authRequired = false;
+
+        function getApiKey() {
+            return localStorage.getItem('apiKey') || '';
+        }
+
+        function setApiKey(key) {
+            if (key) {
+                localStorage.setItem('apiKey', key);
+            } else {
+                localStorage.removeItem('apiKey');
+            }
+        }
+
+        function promptForApiKey(message = 'This server requires an API key to access.') {
+            const key = prompt(message + '\n\nEnter your API key:');
+            if (key) {
+                setApiKey(key);
+                return true;
+            }
+            return false;
+        }
+
+        async function apiFetch(url, options = {}) {
+            const apiKey = getApiKey();
+
+            // Merge headers with API key
+            const headers = {
+                ...options.headers
+            };
+
+            if (apiKey) {
+                headers['X-API-Key'] = apiKey;
+            }
+
+            const response = await fetch(url, {
+                ...options,
+                headers
+            });
+
+            // Handle auth failures
+            if (response.status === 401) {
+                if (promptForApiKey('Authentication failed. Please check your API key.')) {
+                    // Retry with new key
+                    return apiFetch(url, options);
+                }
+                throw new Error('Authentication required');
+            }
+
+            // Handle rate limiting
+            if (response.status === 429) {
+                const retryAfter = response.headers.get('Retry-After') || 60;
+                showToast(`Rate limited. Try again in ${retryAfter} seconds.`, true);
+                throw new Error('Rate limited');
+            }
+
+            return response;
+        }
+
+        // =============================================================================
+        // Theme Toggle
+        // =============================================================================
+
+        function getTheme() {
+            return localStorage.getItem('theme') || 'dark';
+        }
+
+        function setTheme(theme) {
+            document.documentElement.setAttribute('data-theme', theme);
+            localStorage.setItem('theme', theme);
+            const btn = document.getElementById('themeToggle');
+            if (btn) btn.textContent = theme === 'dark' ? '🌙' : '☀️';
+        }
+
+        // Apply saved theme immediately
+        setTheme(getTheme());
+
+        document.getElementById('themeToggle').addEventListener('click', () => {
+            setTheme(getTheme() === 'dark' ? 'light' : 'dark');
+        });
+
+        // =============================================================================
+        // DOM Elements
+        // =============================================================================
+
+        const searchInput = document.getElementById('searchInput');
+        const searchBtn = document.getElementById('searchBtn');
+        const searchHistory = document.getElementById('searchHistory');
+        const relatedSuggestions = document.getElementById('relatedSuggestions');
+        const resultsTab = document.getElementById('resultsTab');
+        const bulkTabContainer = document.getElementById('bulkTabContainer');
+        const bulkInput = document.getElementById('bulkInput');
+        const bulkImportBtn = document.getElementById('bulkImportBtn');
+        const bulkResults = document.getElementById('bulkResults');
+        const fileUpload = document.getElementById('fileUpload');
+        const fileName = document.getElementById('fileName');
+        const spotifyUrlInput = document.getElementById('spotifyUrlInput');
+        const playlistServicesHint = document.getElementById('playlistServicesHint');
+        const playlistServicesTooltip = document.getElementById('playlistServicesTooltip');
+        const fetchSpotifyBtn = document.getElementById('fetchSpotifyBtn');
+        const spotifyError = document.getElementById('spotifyError');
+        const queueTabContainer = document.getElementById('queueTabContainer');
+        const queueTab = document.getElementById('queueTab');
+        const clearQueueBtn = document.getElementById('clearQueueBtn');
+        const resetStatsBtn = document.getElementById('resetStatsBtn');
+        const watchedTabContainer = document.getElementById('watchedTabContainer');
+        const watchedList = document.getElementById('watchedList');
+        const watchedUrlInput = document.getElementById('watchedUrlInput');
+        const addWatchedBtn = document.getElementById('addWatchedBtn');
+        const watchedIntervalSelect = document.getElementById('watchedIntervalSelect');
+        const watchedError = document.getElementById('watchedError');
+        const refreshAllWatchedBtn = document.getElementById('refreshAllWatchedBtn');
+        const watchedScheduleInfo = document.getElementById('watchedScheduleInfo');
+        const watchedConvertToFlac = document.getElementById('watchedConvertToFlac');
+        const toast = document.getElementById('toast');
+        const tabs = document.querySelectorAll('.tab');
+        const lineCounter = document.getElementById('lineCounter');
+        const statsTabContainer = document.getElementById('statsTabContainer');
+        const statsContent = document.getElementById('statsContent');
+        const settingsTabContainer = document.getElementById('settingsTabContainer');
+        const createPlaylistCheckbox = document.getElementById('createPlaylistCheckbox');
+        const playlistNameInput = document.getElementById('playlistNameInput');
+        const convertToFlacCheckbox = document.getElementById('convertToFlac');
+
+        const versionLabel = document.getElementById('versionLabel');
+        const PLAYLIST_SERVICES = ["Spotify", "YouTube", "Amazon Music"];
+
+        function renderPlaylistServicesText() {
+            const text = PLAYLIST_SERVICES.join(", ");
+            if (playlistServicesHint) {
+                playlistServicesHint.textContent = `Supported services: ${text}`;
+            }
+            if (playlistServicesTooltip) {
+                playlistServicesTooltip.title = `Supported services: ${text}`;
+            }
+        }
+
+        renderPlaylistServicesText();
+
+        // Load config from server (version, FLAC preference, auth status)
+        fetch('/api/config')
+            .then((response) => response.ok ? response.json() : null)
+            .then((config) => {
+                if (config) {
+                    // Set version label
+                    if (config.version) {
+                        versionLabel.textContent = `v${config.version}`;
+                    }
+                    // Set FLAC preference from server if not already saved locally
+                    const savedFlacPref = localStorage.getItem('convertToFlac');
+                    if (savedFlacPref === null && typeof config.default_convert_to_flac === 'boolean') {
+                        convertToFlacCheckbox.checked = config.default_convert_to_flac;
+                        if (watchedConvertToFlac && !watchedFlacTouched) {
+                            watchedConvertToFlac.checked = config.default_convert_to_flac;
+                        }
+                    }
+                    // Check if auth is required
+                    authRequired = config.auth_required === true;
+                    if (authRequired && !getApiKey()) {
+                        promptForApiKey();
+                    }
+                    // Show warning if music directory isn't mounted
+                    if (config.volume_mounted === false) {
+                        showVolumeMountWarning();
+                    }
+                }
+            })
+            .catch(() => {});
+
+        // Load FLAC preference from localStorage if saved
+        const savedFlacPref = localStorage.getItem('convertToFlac');
+        if (savedFlacPref !== null) {
+            convertToFlacCheckbox.checked = savedFlacPref === 'true';
+        }
+
+        if (watchedConvertToFlac) {
+            watchedConvertToFlac.checked = convertToFlacCheckbox.checked;
+            watchedConvertToFlac.addEventListener('change', () => {
+                watchedFlacTouched = true;
+            });
+        }
+
+        // Save FLAC preference when changed
+        convertToFlacCheckbox.addEventListener('change', () => {
+            localStorage.setItem('convertToFlac', convertToFlacCheckbox.checked);
+            if (watchedConvertToFlac && !watchedFlacTouched) {
+                watchedConvertToFlac.checked = convertToFlacCheckbox.checked;
+            }
+        });
+
+        let currentTab = 'results';
+        let downloadingIds = new Set();
+        let lastResults = [];
+        let currentSearchToken = 0;
+        let pendingSlskdToken = 0;
+        let currentSearchLogToken = null;
+        let currentSource = 'all'; // Always search all sources
+        const expandedJobIds = new Set();
+
+        // Source selector — restore saved preference and wire up clicks
+        (function initSourceSelector() {
+            const buttons = document.querySelectorAll('.source-option');
+            buttons.forEach(btn => {
+                if (btn.dataset.source === currentSource) {
+                    btn.classList.add('active');
+                } else {
+                    btn.classList.remove('active');
+                }
+                btn.addEventListener('click', () => {
+                    buttons.forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    currentSource = btn.dataset.source;
+                    localStorage.setItem('searchSource', currentSource);
+                });
+            });
+        })();
+        const MAX_QUEUE_SIZE = 100;
+        let currentBulkImportId = null;
+        let bulkImportPollInterval = null;
+        let watchedFlacTouched = false;
+
+        // Preview state
+        const previewAudio = document.getElementById('previewAudio');
+        let hoverTimeout = null;
+        let currentPreviewId = null;
+        let previewCache = new Map(); // Cache preview URLs
+        const MAX_PREVIEW_CACHE = 100;
+        const HOVER_DELAY = 2000; // 2 seconds before preview starts
+
+        // Preview functions
+        function startHoverTimer(videoId, element, result) {
+            clearHoverTimer();
+            hoverTimeout = setTimeout(() => {
+                startPreview(videoId, element, result);
+            }, HOVER_DELAY);
+        }
+
+        function clearHoverTimer() {
+            if (hoverTimeout) {
+                clearTimeout(hoverTimeout);
+                hoverTimeout = null;
+            }
+        }
+
+        async function startPreview(videoId, element, result) {
+            // Don't preview if already downloading
+            if (downloadingIds.has(videoId)) return;
+
+            // Stop any current preview
+            stopPreview();
+
+            element.classList.add('loading-preview');
+
+            try {
+                let audioUrl = previewCache.get(videoId);
+
+                if (!audioUrl) {
+                    // Build preview URL with source params
+                    const previewSource = (result && result.source) || 'youtube';
+                    const params = new URLSearchParams({ source: previewSource });
+                    if (previewSource === 'soundcloud' && result.source_url) {
+                        params.set('url', result.source_url);
+                    }
+                    const response = await apiFetch(`/api/preview/${encodeURIComponent(videoId)}?${params}`);
+                    if (!response.ok) throw new Error('Failed to get preview');
+
+                    const data = await response.json();
+                    audioUrl = data.url;
+                    previewCache.set(videoId, audioUrl);
+                    if (previewCache.size > MAX_PREVIEW_CACHE) {
+                        const oldestKey = previewCache.keys().next().value;
+                        previewCache.delete(oldestKey);
+                    }
+                }
+
+                element.classList.remove('loading-preview');
+                element.classList.add('previewing');
+                currentPreviewId = videoId;
+
+                previewAudio.src = audioUrl;
+                previewAudio.volume = 0.5;
+                previewAudio.play().catch(() => {
+                    // Autoplay blocked or other error
+                    stopPreview();
+                });
+
+            } catch (error) {
+                element.classList.remove('loading-preview');
+                // Silently fail - preview is a nice-to-have
+            }
+        }
+
+        function stopPreview() {
+            clearHoverTimer();
+            previewAudio.pause();
+            previewAudio.src = '';
+            currentPreviewId = null;
+
+            // Remove previewing class from all items
+            document.querySelectorAll('.result-item.previewing').forEach(item => {
+                item.classList.remove('previewing');
+            });
+            document.querySelectorAll('.result-item.loading-preview').forEach(item => {
+                item.classList.remove('loading-preview');
+            });
+        }
+
+        // Search history management
+        function getSearchHistory() {
+            const history = localStorage.getItem('searchHistory');
+            return history ? JSON.parse(history) : [];
+        }
+
+        function saveSearchHistory(query) {
+            let history = getSearchHistory();
+            // Remove duplicates
+            history = history.filter(q => q !== query);
+            // Add to front
+            history.unshift(query);
+            // Keep last 10
+            history = history.slice(0, 10);
+            localStorage.setItem('searchHistory', JSON.stringify(history));
+        }
+
+        function showSearchHistory() {
+            const history = getSearchHistory();
+            if (history.length === 0) {
+                searchHistory.classList.remove('show');
+                return;
+            }
+
+            searchHistory.innerHTML = history.map(q => `
+                <div class="history-item" data-query="${escapeHtml(q)}">
+                    ${escapeHtml(q)}
+                </div>
+            `).join('');
+
+            searchHistory.querySelectorAll('.history-item').forEach(item => {
+                item.addEventListener('click', () => {
+                    searchInput.value = item.dataset.query;
+                    searchHistory.classList.remove('show');
+                    search();
+                });
+            });
+
+            searchHistory.classList.add('show');
+        }
+
+        function hideSearchHistory() {
+            setTimeout(() => {
+                searchHistory.classList.remove('show');
+            }, 200);
+        }
+
+        // Tab switching
+        tabs.forEach(tab => {
+            tab.addEventListener('click', () => {
+                tabs.forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+                currentTab = tab.dataset.tab;
+
+                resultsTab.style.display = currentTab === 'results' ? 'flex' : 'none';
+                bulkTabContainer.style.display = currentTab === 'bulk' ? 'block' : 'none';
+                watchedTabContainer.style.display = currentTab === 'watched' ? 'block' : 'none';
+                queueTabContainer.style.display = currentTab === 'queue' ? 'block' : 'none';
+                statsTabContainer.style.display = currentTab === 'stats' ? 'block' : 'none';
+                settingsTabContainer.style.display = currentTab === 'settings' ? 'block' : 'none';
+
+                // Stop preview when leaving results tab
+                if (currentTab !== 'results') {
+                    stopPreview();
+                }
+
+                if (currentTab === 'queue') {
+                    loadJobs();
+                }
+
+                if (currentTab === 'watched') {
+                    loadWatchedPlaylists();
+                }
+
+                if (currentTab === 'stats') {
+                    loadStats();
+                }
+
+                if (currentTab === 'settings') {
+                    loadSettings();
+                    loadBlacklist();
+                }
+            });
+        });
+
+        // Search
+        async function search() {
+            if (searchBtn.disabled) return;
+            const query = searchInput.value.trim();
+            if (!query) return;
+            const searchToken = ++currentSearchToken;
+            currentSearchLogToken = null;
+
+            // Save to history
+            saveSearchHistory(query);
+            hideSearchHistory();
+
+            searchBtn.disabled = true;
+            resultsTab.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+            relatedSuggestions.style.display = 'none';
+            stopPreview(); // Stop any playing preview
+
+            try {
+                const response = await apiFetch('/api/search', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query, limit: 15, source: currentSource })
+                });
+
+                if (!response.ok) throw new Error('Search failed');
+
+                const data = await response.json();
+                if (searchToken !== currentSearchToken) {
+                    return;
+                }
+                lastResults = data.results;
+                currentSearchLogToken = data.search_token || null;
+                renderResults(data.results);
+                showRelatedSuggestions(data.results);
+
+                // If slskd is enabled and we're searching YouTube or All, fetch slskd results too
+                if (data.slskd_enabled && (currentSource === 'youtube' || currentSource === 'all')) {
+                    pendingSlskdToken = searchToken;
+                    fetchSlskdResults(query, searchToken);
+                }
+            } catch (error) {
+                resultsTab.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-state-icon">😕</div>
+                        <p>Search failed. Try again.</p>
+                    </div>
+                `;
+                showToast('Search failed', true);
+            } finally {
+                searchBtn.disabled = false;
+            }
+        }
+
+        async function fetchSlskdResults(query, searchToken) {
+            try {
+                const response = await apiFetch('/api/search/slskd', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query, limit: 15 })
+                });
+
+                if (!response.ok) return;
+
+                const data = await response.json();
+                if (searchToken !== currentSearchToken || pendingSlskdToken !== searchToken) {
+                    return;
+                }
+                if (data.results && data.results.length > 0) {
+                    // Merge slskd results with existing results
+                    mergeSlskdResults(data.results);
+                }
+            } catch (error) {
+                console.log('slskd search failed:', error);
+            } finally {
+                if (pendingSlskdToken === searchToken) {
+                    pendingSlskdToken = 0;
+                }
+            }
+        }
+
+        function mergeSlskdResults(slskdResults) {
+            // Interleave slskd results with existing YouTube results
+            // Insert 1 slskd result after every 2 YouTube results
+            const merged = [];
+            let ytIndex = 0;
+            let slskdIndex = 0;
+
+            while (ytIndex < lastResults.length || slskdIndex < slskdResults.length) {
+                // Add 2 YouTube results
+                for (let i = 0; i < 2 && ytIndex < lastResults.length; i++) {
+                    merged.push(lastResults[ytIndex++]);
+                }
+                // Add 1 slskd result
+                if (slskdIndex < slskdResults.length) {
+                    merged.push(slskdResults[slskdIndex++]);
+                }
+            }
+
+            lastResults = merged;
+            renderResults(merged);
+        }
+
+        // Show related search suggestions based on artists
+        function showRelatedSuggestions(results) {
+            if (!results || results.length === 0) return;
+
+            // Extract unique artists/channels
+            const artists = [...new Set(results.map(r => r.channel))].slice(0, 5);
+
+            if (artists.length === 0) return;
+
+            relatedSuggestions.innerHTML = `
+                <div class="related-suggestions">
+                    <div class="related-title">Related searches</div>
+                    <div class="suggestion-chips">
+                        ${artists.map(artist => `
+                            <button class="suggestion-chip" data-query="${escapeHtml(artist)}">
+                                ${escapeHtml(artist)}
+                            </button>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+
+            relatedSuggestions.querySelectorAll('.suggestion-chip').forEach(chip => {
+                chip.addEventListener('click', () => {
+                    searchInput.value = chip.dataset.query;
+                    search();
+                });
+            });
+
+            relatedSuggestions.style.display = 'block';
+        }
+
+        function getSourceBadge(source) {
+            const badges = { youtube: 'YT', soundcloud: 'SC', monochrome: 'MO', soulseek: 'SLK' };
+            return badges[source] || source.toUpperCase().slice(0, 3);
+        }
+
+        function getSourceLabel(source) {
+            const labels = { youtube: 'YouTube', soundcloud: 'SoundCloud', monochrome: 'Monochrome', soulseek: 'Soulseek' };
+            return labels[source] || source;
+        }
+
+        function getQualityBadgeClass(quality) {
+            if (!quality) return '';
+            const q = quality.toUpperCase();
+            if (q === 'HI_RES_LOSSLESS') return 'hires';
+            if (q === 'LOSSLESS' || q.includes('FLAC')) return 'flac';
+            if (q === 'HIGH' || q.includes('320') || q.includes('256')) return 'mp3-high';
+            return '';
+        }
+
+        function formatQualityLabel(quality) {
+            if (!quality) return '';
+            const labels = {
+                'HI_RES_LOSSLESS': 'Hi-Res',
+                'LOSSLESS': 'Lossless',
+                'HIGH': 'HQ',
+            };
+            return labels[quality] || quality;
+        }
+
+        function formatResultMeta(result) {
+            const parts = [];
+            if (result.artist) {
+                if (result.channel && result.channel !== result.artist) {
+                    parts.push(`${escapeHtml(result.artist)} • ${escapeHtml(result.channel)}`);
+                } else {
+                    parts.push(escapeHtml(result.artist));
+                }
+            } else {
+                parts.push(escapeHtml(result.channel || ''));
+            }
+            // Show album for Monochrome results — they have proper metadata
+            if (result.album) {
+                parts.push(escapeHtml(result.album));
+            }
+            return parts.join(' • ');
+        }
+
+        function renderResults(results) {
+            // Store results for later access (needed for slskd fields on download)
+            lastResults = results;
+
+            if (!results.length) {
+                resultsTab.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-state-icon">🔍</div>
+                        <p>No results found</p>
+                    </div>
+                `;
+                return;
+            }
+
+            resultsTab.innerHTML = results.map((r, index) => `
+                <div class="result-item ${downloadingIds.has(r.video_id) ? 'downloading' : ''} ${r.source === 'soulseek' ? 'soulseek' : ''}"
+                     data-video-id="${r.video_id}"
+                     data-index="${index}"
+                     data-title="${escapeHtml(r.title)}"
+                     data-tooltip="${r.source !== 'soulseek' ? 'Hover to preview, click to download' : 'Click to download'}">
+                    ${r.source !== 'soulseek' ? '<div class="preview-indicator">▶</div>' : ''}
+                    ${r.thumbnail ? `<img class="result-thumb" src="${r.thumbnail}" alt="" loading="lazy">` : '<div class="result-thumb"></div>'}
+                    <div class="result-info">
+                        <div class="result-title">${escapeHtml(r.title)}</div>
+                        <div class="result-meta">${formatResultMeta(r)}</div>
+                        <div class="result-badges">
+                            <span class="source-badge ${r.source}">${getSourceBadge(r.source)}</span>
+                            ${r.quality ? `<span class="quality-badge ${getQualityBadgeClass(r.quality)}">${formatQualityLabel(r.quality)}</span>` : ''}
+                            ${r.duration ? `<span class="result-duration">${r.duration}</span>` : ''}
+                        </div>
+                    </div>
+                </div>
+            `).join('');
+
+            // Add click and hover handlers
+            resultsTab.querySelectorAll('.result-item').forEach(item => {
+                const videoId = item.dataset.videoId;
+                const index = parseInt(item.dataset.index);
+                const result = lastResults[index];
+
+                // Click to download
+                item.addEventListener('click', () => {
+                    if (!downloadingIds.has(videoId)) {
+                        stopPreview();
+                        downloadTrack(result, item);
+                    }
+                });
+
+                // Hover to preview (desktop only, not Soulseek)
+                item.addEventListener('mouseenter', () => {
+                    if (!downloadingIds.has(videoId) && result.source !== 'soulseek') {
+                        startHoverTimer(videoId, item, result);
+                    }
+                });
+
+                item.addEventListener('mouseleave', () => {
+                    stopPreview();
+                });
+            });
+        }
+
+        async function downloadTrack(result, element) {
+            // Check queue size limit
+            const queueSize = await getQueueSize();
+            if (queueSize >= MAX_QUEUE_SIZE) {
+                showToast(`Queue limit reached (max ${MAX_QUEUE_SIZE})`, true);
+                return;
+            }
+
+            downloadingIds.add(result.video_id);
+            element.classList.add('downloading');
+
+            showToast(`Processing (${getSourceLabel(result.source)})...`, false);
+
+            try {
+                const payload = {
+                    video_id: result.video_id,
+                    title: result.title,
+                    convert_to_flac: convertToFlacCheckbox.checked,
+                    source: result.source || 'youtube',
+                    search_token: currentSearchLogToken
+                };
+
+                // URL-based sources need the full URL for downloading
+                if ((result.source === 'soundcloud' || result.source === 'monochrome') && result.source_url) {
+                    payload.source_url = result.source_url;
+                }
+
+                // Add slskd-specific fields if this is a Soulseek result
+                if (result.source === 'soulseek') {
+                    payload.slskd_username = result.slskd_username;
+                    payload.slskd_filename = result.slskd_filename;
+                    if (result.artist) {
+                        payload.artist = result.artist;
+                    }
+                }
+
+                const response = await apiFetch('/api/download', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (!response.ok) throw new Error('Download failed');
+
+                const data = await response.json();
+
+                // Update toast with success message
+                const formatMsg = convertToFlacCheckbox.checked ? '' : ' (original format)';
+                const qualityMsg = result.quality ? ` [${formatQualityLabel(result.quality)}]` : '';
+                showToast(`Added to queue ✓${qualityMsg}${formatMsg}`);
+            } catch (error) {
+                downloadingIds.delete(result.video_id);
+                element.classList.remove('downloading');
+                showToast('Failed to queue', true);
+            }
+        }
+
+        async function getQueueSize() {
+            try {
+                const response = await apiFetch('/api/jobs?limit=100');
+                if (!response.ok) return 0;
+                const data = await response.json();
+                // Count queued and downloading jobs
+                return data.jobs.filter(j => j.status === 'queued' || j.status === 'downloading').length;
+            } catch (error) {
+                return 0;
+            }
+        }
+
+        async function loadJobs(showLoading = true) {
+            if (showLoading) {
+                queueTab.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+            }
+
+            try {
+                const response = await apiFetch('/api/jobs?limit=30');
+                if (!response.ok) throw new Error('Failed to load jobs');
+
+                const data = await response.json();
+                renderJobs(data.jobs);
+            } catch (error) {
+                if (showLoading) {
+                    queueTab.innerHTML = `
+                        <div class="empty-state">
+                            <div class="empty-state-icon">😕</div>
+                            <p>Failed to load queue</p>
+                        </div>
+                    `;
+                }
+            }
+        }
+
+        function renderJobs(jobs) {
+            if (!jobs.length) {
+                expandedJobIds.clear();
+                queueTab.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-state-icon">📭</div>
+                        <p>No downloads yet</p>
+                    </div>
+                `;
+                return;
+            }
+
+            const visibleJobIds = new Set(jobs.map(j => j.id));
+            for (const id of Array.from(expandedJobIds)) {
+                if (!visibleJobIds.has(id)) expandedJobIds.delete(id);
+            }
+
+            queueTab.innerHTML = jobs.map(job => {
+                const hasDetails = job.status === 'completed' || job.status === 'completed_with_errors' || job.status === 'failed';
+                const isExpanded = hasDetails && expandedJobIds.has(job.id);
+                const sourceLabel = getSourceLabel(job.source || 'youtube');
+                const sourceUrl = job.source_url || '';
+                const isClickableUrl = sourceUrl.startsWith('https://');
+                const fileDeleted = Number(job.file_deleted || 0) === 1;
+                return `
+                <div class="job-item ${hasDetails ? 'has-details' : ''} ${isExpanded ? 'expanded' : ''}" data-job-id="${job.id}" ${hasDetails ? 'onclick="toggleJobDetails(this)"' : ''}>
+                    <div class="job-status ${job.status}"></div>
+                    <div class="job-info">
+                        <div class="job-title">${escapeHtml(job.artist ? `${job.artist} - ${job.title}` : job.title)}${job.status === 'completed_with_errors' ? '<span class="job-warning-badge">ISSUES</span>' : ''}</div>
+                        <div class="job-meta">${formatJobStatus(job.status)} • ${formatTime(job.created_at)}</div>
+                        ${job.error ? `<div class="job-error">${escapeHtml(job.error)}</div>` : ''}
+                        ${hasDetails ? `
+                        <div class="job-details" style="display:${isExpanded ? 'block' : 'none'};">
+                            ${job.audio_quality ? `<div class="job-details-row"><span class="job-details-label">Quality:</span> ${escapeHtml(job.audio_quality)}</div>` : ''}
+                            <div class="job-details-row"><span class="job-details-label">Source:</span> ${escapeHtml(sourceLabel)}</div>
+                            ${job.metadata_source ? `<div class="job-details-row"><span class="job-details-label">Metadata:</span> ${escapeHtml(formatMetadataSource(job.metadata_source))}</div>` : ''}
+                            ${sourceUrl ? `<div class="job-details-row"><span class="job-details-label">URL:</span> ${isClickableUrl ? `<a href="${escapeHtml(sourceUrl)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${escapeHtml(sourceUrl)}</a>` : `<span class="job-details-url">${escapeHtml(sourceUrl)}</span>`}</div>` : ''}
+                            <div class="job-details-row"><span class="job-details-label">Queued:</span> ${formatTimeFull(job.created_at)}</div>
+                            ${job.completed_at ? `<div class="job-details-row"><span class="job-details-label">Completed:</span> ${formatTimeFull(job.completed_at)}</div>` : ''}
+                            ${job.completed_at && job.created_at ? `<div class="job-details-row"><span class="job-details-label">Duration:</span> ${formatDuration(job.created_at, job.completed_at)}</div>` : ''}
+                            <div style="display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap;">
+                                <button onclick="event.stopPropagation(); redownloadJob('${job.id}')" style="padding: 6px 12px; font-size: 11px; font-family: inherit; font-weight: 600; background: var(--bg-tertiary); color: var(--accent); border: 1px solid var(--border); border-radius: 6px; cursor: pointer;">Re-download</button>
+                                <button class="report-btn" data-job-id="${escapeHtml(job.id || '')}" data-video-id="${escapeHtml(job.video_id || '')}" data-uploader="${escapeHtml(job.uploader || '')}" data-source="${escapeHtml(job.source || 'youtube')}" onclick="event.stopPropagation()" style="padding: 6px 12px; font-size: 11px; font-family: inherit; font-weight: 600; background: var(--bg-tertiary); color: var(--warning); border: 1px solid var(--border); border-radius: 6px; cursor: pointer;">Report</button>
+                                ${job.status !== 'failed' ? (fileDeleted
+                                    ? `<button disabled style="padding: 6px 12px; font-size: 11px; font-family: inherit; font-weight: 600; background: var(--bg-secondary); color: var(--text-muted); border: 1px solid var(--border); border-radius: 6px; cursor: not-allowed; opacity: 0.8;">File Deleted</button>`
+                                    : `<button class="delete-file-btn" data-job-id="${escapeHtml(job.id || '')}" data-track-name="${escapeHtml(job.artist ? job.artist + ' - ' + job.title : job.title)}" onclick="event.stopPropagation()" style="padding: 6px 12px; font-size: 11px; font-family: inherit; font-weight: 600; background: var(--bg-tertiary); color: var(--error); border: 1px solid var(--border); border-radius: 6px; cursor: pointer;">Delete File</button>`) : ''}
+                            </div>
+                        </div>` : ''}
+                    </div>
+                    <span class="source-badge job-source-badge ${job.source || 'youtube'}">${getSourceBadge(job.source || 'youtube')}</span>
+                </div>`;
+            }).join('');
+
+            queueTab.querySelectorAll('.delete-file-btn').forEach((btn) => {
+                btn.addEventListener('click', (event) => {
+                    event.stopPropagation();
+                    deleteJobFile(btn.dataset.jobId || '', btn.dataset.trackName || '');
+                });
+            });
+
+            queueTab.querySelectorAll('.report-btn').forEach((btn) => {
+                btn.addEventListener('click', (event) => {
+                    event.stopPropagation();
+                    openReportDialog(
+                        btn.dataset.jobId || '',
+                        btn.dataset.videoId || '',
+                        btn.dataset.uploader || '',
+                        btn.dataset.source || 'youtube'
+                    );
+                });
+            });
+
+            // If there are active jobs, poll for updates
+            const hasActive = jobs.some(j => j.status === 'queued' || j.status === 'downloading');
+            if (hasActive && currentTab === 'queue') {
+                setTimeout(() => loadJobs(false), 3000);
+            }
+        }
+
+        function formatJobStatus(status) {
+            if (status === 'completed_with_errors') {
+                return 'completed (with errors)';
+            }
+            return status;
+        }
+
+        function formatMetadataSource(metadataSource) {
+            const source = (metadataSource || '').toLowerCase();
+            const labels = {
+                'acoustid_fingerprint': 'AcoustID fingerprint',
+                'musicbrainz_text': 'MusicBrainz text match',
+                'youtube_guessed': 'YouTube embedded/guessed',
+                'soundcloud_guessed': 'SoundCloud embedded/guessed',
+                'monochrome_guessed': 'Monochrome embedded/guessed',
+                'monochrome_api': 'Monochrome/Tidal API',
+                'soulseek_guessed': 'Soulseek embedded/guessed',
+            };
+            return labels[source] || metadataSource;
+        }
+
+        function formatDateYmd(isoString) {
+            if (!isoString) return '';
+            const normalized = /Z$|[+-]\d{2}:\d{2}$/.test(isoString) ? isoString : `${isoString.replace(' ', 'T')}Z`;
+            const date = new Date(normalized);
+            if (Number.isNaN(date.getTime())) return '';
+            const y = date.getFullYear();
+            const m = String(date.getMonth() + 1).padStart(2, '0');
+            const d = String(date.getDate()).padStart(2, '0');
+            return `${y}-${m}-${d}`;
+        }
+
+        function formatTime(isoString) {
+            return formatDateYmd(isoString);
+        }
+
+        function toggleJobDetails(el) {
+            const details = el.querySelector('.job-details');
+            if (details) {
+                const isOpen = details.style.display !== 'none';
+                details.style.display = isOpen ? 'none' : 'block';
+                el.classList.toggle('expanded', !isOpen);
+                const jobId = el.dataset.jobId;
+                if (jobId) {
+                    if (isOpen) expandedJobIds.delete(jobId);
+                    else expandedJobIds.add(jobId);
+                }
+            }
+        }
+
+        async function redownloadJob(jobId) {
+            try {
+                showToast('Re-downloading...');
+                const response = await apiFetch(`/api/jobs/${jobId}/retry`, { method: 'POST' });
+                if (!response.ok) {
+                    const data = await response.json();
+                    throw new Error(data.detail || 'Re-download failed');
+                }
+                showToast('Queued for re-download');
+                loadJobs();
+            } catch (error) {
+                showToast(error.message || 'Re-download failed', true);
+            }
+        }
+
+        async function deleteJobFile(jobId, trackName) {
+            if (!confirm(`Delete "${trackName}" from your library?`)) return;
+
+            try {
+                const response = await apiFetch(`/api/jobs/${jobId}/file`, { method: 'DELETE' });
+                if (!response.ok) {
+                    const data = await response.json();
+                    throw new Error(data.detail || 'Delete failed');
+                }
+                const data = await response.json();
+                if (data.deleted.length > 0) {
+                    showToast(`Deleted ${data.deleted.length} file(s)`);
+                } else {
+                    showToast('File was already missing — marked as deleted');
+                }
+                loadJobs();
+            } catch (error) {
+                showToast(error.message || 'Delete failed', true);
+                loadJobs(); // Refresh anyway so buttons reflect current state
+            }
+        }
+
+        // =============================================================================
+        // Report / Blacklist
+        // =============================================================================
+
+        function openReportDialog(jobId, videoId, uploader, source) {
+            document.getElementById('reportJobId').value = jobId;
+            document.getElementById('reportVideoId').value = videoId;
+            document.getElementById('reportSource').value = source;
+            document.getElementById('reportUploader').value = uploader;
+            document.getElementById('reportReason').value = 'wrong_track';
+            document.getElementById('reportNote').value = '';
+            document.getElementById('reportBlockUploader').checked = false;
+
+            const uploaderRow = document.getElementById('reportUploaderRow');
+            const uploaderName = document.getElementById('reportUploaderName');
+            if (uploader) {
+                uploaderName.textContent = uploader;
+                uploaderRow.style.display = 'block';
+            } else {
+                uploaderRow.style.display = 'none';
+            }
+
+            const overlay = document.getElementById('reportOverlay');
+            overlay.style.display = 'flex';
+        }
+
+        function closeReportDialog() {
+            document.getElementById('reportOverlay').style.display = 'none';
+        }
+
+        // Close on overlay click (not the dialog itself)
+        document.getElementById('reportOverlay').addEventListener('click', (e) => {
+            if (e.target === e.currentTarget) closeReportDialog();
+        });
+
+        async function submitReport() {
+            const btn = document.getElementById('reportSubmitBtn');
+            btn.disabled = true;
+            btn.textContent = 'Reporting...';
+
+            try {
+                const payload = {
+                    job_id: document.getElementById('reportJobId').value || null,
+                    video_id: document.getElementById('reportVideoId').value || null,
+                    uploader: document.getElementById('reportUploader').value || null,
+                    source: document.getElementById('reportSource').value || 'youtube',
+                    reason: document.getElementById('reportReason').value,
+                    note: document.getElementById('reportNote').value || null,
+                    block_uploader: document.getElementById('reportBlockUploader').checked
+                };
+
+                const response = await apiFetch('/api/blacklist', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+
+                if (!response.ok) {
+                    const data = await response.json();
+                    throw new Error(data.detail || 'Report failed');
+                }
+
+                showToast('Track reported and blacklisted');
+                closeReportDialog();
+            } catch (error) {
+                showToast(error.message || 'Report failed', true);
+            } finally {
+                btn.disabled = false;
+                btn.textContent = 'Report';
+            }
+        }
+
+        const _reasonLabels = {
+            wrong_track: 'Wrong track',
+            poor_quality: 'Poor quality',
+            slowed_pitched: 'Slowed/pitched',
+            contentid: 'ContentID dodge',
+            other: 'Other'
+        };
+
+        async function loadBlacklist() {
+            const container = document.getElementById('blacklistContent');
+            if (!container) return;
+
+            try {
+                const response = await apiFetch('/api/blacklist?limit=200');
+                if (!response.ok) throw new Error('Failed to load blacklist');
+
+                const data = await response.json();
+                const entries = data.entries || [];
+
+                if (entries.length === 0) {
+                    container.innerHTML = '<p style="color:var(--text-secondary); font-style:italic;">No blacklisted items yet. Use the Report button on queue items to flag bad tracks.</p>';
+                    return;
+                }
+
+                container.innerHTML = `
+                    <table style="width:100%; border-collapse:collapse; font-size:12px;">
+                        <thead>
+                            <tr style="text-align:left; color:var(--text-secondary); border-bottom:1px solid var(--border);">
+                                <th style="padding:6px 8px;">Type</th>
+                                <th style="padding:6px 8px;">Value</th>
+                                <th style="padding:6px 8px;">Source</th>
+                                <th style="padding:6px 8px;">Reason</th>
+                                <th style="padding:6px 8px;">Date</th>
+                                <th style="padding:6px 8px;"></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${entries.map(e => {
+                                const isUploader = !e.video_id && e.uploader;
+                                const typeLabel = isUploader ? 'Uploader' : 'Video';
+                                const value = isUploader ? e.uploader : (e.video_id || '?');
+                                const reasonLabel = _reasonLabels[e.reason] || e.reason || '';
+                                const dateStr = formatDateYmd(e.created_at);
+                                return `<tr style="border-bottom:1px solid var(--border);">
+                                    <td style="padding:6px 8px;"><span style="display:inline-block; padding:2px 6px; font-size:10px; font-weight:600; border-radius:4px; background:${isUploader ? 'var(--warning)' : 'var(--error)'}; color:#000;">${typeLabel}</span></td>
+                                    <td style="padding:6px 8px; max-width:160px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeHtml(value)}">${escapeHtml(value)}</td>
+                                    <td style="padding:6px 8px;">${escapeHtml(e.source || '')}</td>
+                                    <td style="padding:6px 8px;">${escapeHtml(reasonLabel)}</td>
+                                    <td style="padding:6px 8px;">${dateStr}</td>
+                                    <td style="padding:6px 8px;"><button onclick="removeBlacklistEntry(${e.id})" style="padding:3px 8px; font-size:11px; font-family:inherit; font-weight:600; background:var(--bg-tertiary); color:var(--error); border:1px solid var(--border); border-radius:4px; cursor:pointer;">Remove</button></td>
+                                </tr>`;
+                            }).join('')}
+                        </tbody>
+                    </table>
+                    <p style="margin-top:8px; color:var(--text-secondary); font-size:11px;">${entries.length} entr${entries.length === 1 ? 'y' : 'ies'}</p>
+                `;
+            } catch (error) {
+                container.innerHTML = '<p style="color:var(--error);">Failed to load blacklist</p>';
+            }
+        }
+
+        async function removeBlacklistEntry(entryId) {
+            try {
+                const response = await apiFetch(`/api/blacklist/${entryId}`, { method: 'DELETE' });
+                if (!response.ok) {
+                    const data = await response.json();
+                    throw new Error(data.detail || 'Remove failed');
+                }
+                showToast('Blacklist entry removed');
+                loadBlacklist();
+            } catch (error) {
+                showToast(error.message || 'Remove failed', true);
+            }
+        }
+
+        function formatTimeFull(isoString) {
+            return formatDateYmd(isoString);
+        }
+
+        function formatDuration(startIso, endIso) {
+            if (!startIso || !endIso) return '';
+            const start = new Date(startIso);
+            const end = new Date(endIso);
+            const diffMs = end - start;
+            if (diffMs < 0) return '';
+            const secs = Math.floor(diffMs / 1000);
+            if (secs < 60) return `${secs}s`;
+            const mins = Math.floor(secs / 60);
+            const remainSecs = secs % 60;
+            if (mins < 60) return `${mins}m ${remainSecs}s`;
+            const hrs = Math.floor(mins / 60);
+            const remainMins = mins % 60;
+            return `${hrs}h ${remainMins}m`;
+        }
+
+        function showToast(message, isError = false) {
+            toast.textContent = message;
+            toast.className = 'toast' + (isError ? ' error' : '');
+            toast.classList.add('show');
+            setTimeout(() => toast.classList.remove('show'), 2500);
+        }
+
+        function showVolumeMountWarning() {
+            // Don't show if user dismissed it
+            if (localStorage.getItem('dismissedVolumeWarning') === 'true') return;
+
+            const banner = document.createElement('div');
+            banner.className = 'warning-banner';
+            banner.innerHTML = `
+                <div class="warning-content">
+                    <strong>Warning:</strong> Music directory doesn't appear to be mounted.
+                    Downloads will be lost when the container restarts.
+                    <a href="https://gitlab.com/g33kphr33k/musicgrabber#troubleshooting" target="_blank" rel="noopener">See setup guide</a>
+                </div>
+                <button class="warning-dismiss" onclick="dismissVolumeWarning(this.parentElement)">&times;</button>
+            `;
+            document.body.insertBefore(banner, document.body.firstChild);
+        }
+
+        function dismissVolumeWarning(banner) {
+            localStorage.setItem('dismissedVolumeWarning', 'true');
+            banner.remove();
+        }
+
+        async function bulkImport() {
+            const songs = bulkInput.value.trim();
+            if (!songs) {
+                showToast('Please enter some songs', true);
+                return;
+            }
+
+            // Validate playlist name if checkbox is checked
+            const createPlaylist = createPlaylistCheckbox.checked;
+            const playlistName = playlistNameInput.value.trim();
+
+            if (createPlaylist && !playlistName) {
+                showToast('Please enter a playlist name', true);
+                playlistNameInput.focus();
+                return;
+            }
+
+            bulkImportBtn.disabled = true;
+            bulkImportBtn.textContent = 'Starting...';
+            bulkResults.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+
+            try {
+                const requestBody = {
+                    songs,
+                    convert_to_flac: convertToFlacCheckbox.checked
+                };
+                if (createPlaylist) {
+                    requestBody.create_playlist = true;
+                    requestBody.playlist_name = playlistName;
+                }
+
+                // Start the async import
+                const response = await apiFetch('/api/bulk-import-async', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(requestBody)
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail || 'Bulk import failed');
+                }
+
+                const data = await response.json();
+                currentBulkImportId = data.import_id;
+
+                // Clear the textarea
+                bulkInput.value = '';
+                playlistNameInput.value = '';
+                createPlaylistCheckbox.checked = false;
+                playlistNameInput.style.display = 'none';
+                updateLineCounter();
+
+                // Show initial progress
+                showBulkImportProgress({
+                    status: 'pending',
+                    total_tracks: data.total_tracks,
+                    searched: 0,
+                    queued: 0,
+                    failed: 0
+                });
+
+                // Start polling for progress
+                startBulkImportPolling(data.import_id);
+
+            } catch (error) {
+                bulkResults.innerHTML = '';
+                showToast(error.message || 'Bulk import failed', true);
+                bulkImportBtn.disabled = false;
+                bulkImportBtn.textContent = 'Import & Download All';
+            }
+        }
+
+        function showBulkImportProgress(data) {
+            const searchDone = data.status === 'completed' || data.status === 'error';
+            // Show search progress while searching, download progress once searches are done
+            const percent = data.total_tracks > 0
+                ? (searchDone
+                    ? Math.round(((data.completed + data.failed + (data.skipped || 0)) / data.total_tracks) * 100)
+                    : Math.round((data.searched / data.total_tracks) * 100))
+                : 0;
+            const isComplete = data.complete;
+
+            let statusText = 'Processing...';
+            let statusColor = 'var(--accent)';
+            if (data.rate_limited) {
+                statusText = 'Rate limited - waiting...';
+                statusColor = 'var(--warning)';
+            } else if (data.complete) {
+                statusText = 'Complete';
+                statusColor = 'var(--accent)';
+            } else if (data.status === 'completed' && data.queued > 0) {
+                statusText = `Downloading... (${data.queued} remaining)`;
+                statusColor = 'var(--accent)';
+            } else if (data.status === 'error') {
+                statusText = 'Error';
+                statusColor = 'var(--error)';
+            }
+
+            let html = `
+                <div style="padding: 14px; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 12px; margin-bottom: 12px;">
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;">
+                        <div style="font-size: 14px; font-weight: 600;">Import Progress</div>
+                        <div style="font-size: 12px; color: ${statusColor};">${statusText}</div>
+                    </div>
+
+                    <!-- Progress bar -->
+                    <div style="background: var(--bg-tertiary); border-radius: 4px; height: 8px; margin-bottom: 12px; overflow: hidden;">
+                        <div style="background: ${data.rate_limited ? 'var(--warning)' : 'var(--accent)'}; height: 100%; width: ${percent}%; transition: width 0.3s ease;"></div>
+                    </div>
+
+                    <div style="display: grid; grid-template-columns: repeat(5, 1fr); gap: 6px; text-align: center;">
+                        <div>
+                            <div style="font-size: 16px; font-weight: 600;">${data.searched}</div>
+                            <div style="font-size: 10px; color: var(--text-secondary);">Searched</div>
+                        </div>
+                        <div>
+                            <div style="font-size: 16px; font-weight: 600; color: var(--warning);">${data.queued}</div>
+                            <div style="font-size: 10px; color: var(--text-secondary);">Queued</div>
+                        </div>
+                        <div>
+                            <div style="font-size: 16px; font-weight: 600; color: var(--accent);">${data.completed || 0}</div>
+                            <div style="font-size: 10px; color: var(--text-secondary);">Done</div>
+                        </div>
+                        <div>
+                            <div style="font-size: 16px; font-weight: 600; color: var(--error);">${data.failed}</div>
+                            <div style="font-size: 10px; color: var(--text-secondary);">Failed</div>
+                        </div>
+                        <div>
+                            <div style="font-size: 16px; font-weight: 600;">${data.total_tracks}</div>
+                            <div style="font-size: 10px; color: var(--text-secondary);">Total</div>
+                        </div>
+                    </div>
+                </div>
+            `;
+
+            // Show recent tracks
+            if (data.recent_tracks && data.recent_tracks.length > 0) {
+                html += `
+                    <div style="padding: 14px; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 12px;">
+                        <div style="font-size: 13px; font-weight: 600; margin-bottom: 8px; color: var(--text-secondary);">Recent Activity</div>
+                        ${data.recent_tracks.slice(0, 5).map(track => {
+                            let icon = '...';
+                            let color = 'var(--text-secondary)';
+                            if (track.status === 'queued') {
+                                icon = '✓';
+                                color = 'var(--accent)';
+                            } else if (track.status === 'failed') {
+                                icon = '✗';
+                                color = 'var(--error)';
+                            } else if (track.status === 'searching') {
+                                icon = '🔍';
+                            }
+                            return `
+                                <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; display: flex; align-items: center; gap: 8px;">
+                                    <span style="color: ${color}; width: 16px;">${icon}</span>
+                                    <span>${escapeHtml(track.artist)} - ${escapeHtml(track.song)}</span>
+                                    ${track.error ? `<span style="color: var(--error); font-size: 11px;">(${escapeHtml(track.error)})</span>` : ''}
+                                </div>
+                            `;
+                        }).join('')}
+                    </div>
+                `;
+            }
+
+            // Show error if any
+            if (data.error) {
+                html += `
+                    <div style="padding: 14px; background: var(--bg-secondary); border: 1px solid var(--error); border-radius: 12px; margin-top: 12px;">
+                        <div style="font-size: 13px; color: var(--error);">${escapeHtml(data.error)}</div>
+                    </div>
+                `;
+            }
+
+            bulkResults.innerHTML = html;
+
+            // Update button state
+            if (isComplete) {
+                bulkImportBtn.disabled = false;
+                bulkImportBtn.textContent = 'Import & Download All';
+                if (data.status === 'completed') {
+                    showToast(`Import complete: ${data.queued} queued, ${data.failed} failed`);
+                }
+            } else {
+                bulkImportBtn.disabled = true;
+                bulkImportBtn.textContent = `Processing ${data.searched}/${data.total_tracks}...`;
+            }
+        }
+
+        function startBulkImportPolling(importId) {
+            // Clear any existing polling
+            if (bulkImportPollInterval) {
+                clearInterval(bulkImportPollInterval);
+            }
+
+            // Poll every 2 seconds
+            bulkImportPollInterval = setInterval(async () => {
+                try {
+                    const response = await apiFetch(`/api/bulk-import/${importId}/status`);
+                    if (!response.ok) {
+                        throw new Error('Failed to get status');
+                    }
+
+                    const data = await response.json();
+                    showBulkImportProgress(data);
+
+                    // Stop polling when complete
+                    if (data.complete) {
+                        clearInterval(bulkImportPollInterval);
+                        bulkImportPollInterval = null;
+                        currentBulkImportId = null;
+                    }
+                } catch (error) {
+                    console.error('Polling error:', error);
+                    // Keep polling, might be a transient error
+                }
+            }, 2000);
+        }
+
+        async function clearQueue() {
+            if (!confirm('Clear all completed, failed, and stale downloads from the queue?')) {
+                return;
+            }
+
+            clearQueueBtn.disabled = true;
+
+            try {
+                const response = await apiFetch('/api/jobs/cleanup', {
+                    method: 'DELETE'
+                });
+
+                if (!response.ok) throw new Error('Failed to clear queue');
+
+                const data = await response.json();
+                showToast(`Cleared ${data.deleted} job(s)`);
+                loadJobs();
+            } catch (error) {
+                showToast('Failed to clear queue', true);
+            } finally {
+                clearQueueBtn.disabled = false;
+            }
+        }
+
+        async function resetStats() {
+            if (!confirm('Reset all dashboard stats? This clears completed/failed job history and search history.')) {
+                return;
+            }
+
+            resetStatsBtn.disabled = true;
+
+            try {
+                const response = await apiFetch('/api/stats?confirm=true', {
+                    method: 'DELETE'
+                });
+
+                if (!response.ok) throw new Error('Failed to reset stats');
+
+                const data = await response.json();
+                showToast(`Stats reset (${data.deleted_jobs} jobs, ${data.deleted_searches} searches)`);
+                loadJobs();
+                loadStats();
+            } catch (error) {
+                showToast('Failed to reset stats', true);
+            } finally {
+                resetStatsBtn.disabled = false;
+            }
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function escapeAttr(text) {
+            // Safe for use inside single-quoted JS string literals in HTML attributes
+            return escapeHtml(String(text)).replace(/'/g, '&#39;').replace(/\\/g, '\\\\');
+        }
+
+        // Line counter (no limit)
+        function updateLineCounter() {
+            const lines = bulkInput.value.split('\n').filter(line => line.trim());
+            const count = lines.length;
+            lineCounter.textContent = `${count} line${count !== 1 ? 's' : ''}`;
+            lineCounter.style.color = 'var(--text-secondary)';
+            lineCounter.style.background = 'var(--bg-tertiary)';
+        }
+
+        bulkInput.addEventListener('input', updateLineCounter);
+
+        // File upload handler
+        fileUpload.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+
+            fileName.textContent = file.name;
+
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                bulkInput.value = event.target.result;
+                updateLineCounter();
+            };
+            reader.readAsText(file);
+        });
+
+        // Event listeners
+        searchBtn.addEventListener('click', search);
+        searchInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                search();
+            }
+        });
+        searchInput.addEventListener('focus', () => {
+            if (searchInput.value.trim() === '') {
+                showSearchHistory();
+            }
+        });
+        searchInput.addEventListener('blur', hideSearchHistory);
+        searchInput.addEventListener('input', () => {
+            if (searchInput.value.trim() === '') {
+                showSearchHistory();
+            } else {
+                hideSearchHistory();
+            }
+        });
+        bulkImportBtn.addEventListener('click', bulkImport);
+        clearQueueBtn.addEventListener('click', clearQueue);
+        resetStatsBtn.addEventListener('click', resetStats);
+
+        // Spotify playlist/album fetch handler
+        async function fetchSpotifyPlaylist() {
+            const url = spotifyUrlInput.value.trim();
+            if (!url) {
+                spotifyError.textContent = 'Please enter a playlist URL';
+                spotifyError.style.display = 'block';
+                return;
+            }
+
+            // URL validation - Spotify playlists/albums and Amazon Music playlists
+            const isSpotify = url.match(/^https?:\/\/open\.spotify\.com\/(playlist|album)\//);
+            const isAmazon = url.match(/^https?:\/\/music\.amazon\.[a-z.]+\/(user-playlists|playlists)\//);
+            if (!isSpotify && !isAmazon) {
+                spotifyError.textContent = 'Unsupported URL. Paste a Spotify or Amazon Music playlist link.';
+                spotifyError.style.display = 'block';
+                return;
+            }
+
+            spotifyError.style.display = 'none';
+            fetchSpotifyBtn.disabled = true;
+            fetchSpotifyBtn.textContent = isAmazon ? 'Scraping...' : 'Fetching...';
+
+            try {
+                const response = await apiFetch('/api/fetch-playlist', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ url })
+                });
+
+                // Check content type before parsing
+                const contentType = response.headers.get('content-type');
+                if (!contentType || !contentType.includes('application/json')) {
+                    throw new Error('Server error - please check if the app is running');
+                }
+
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.detail || 'Failed to fetch playlist');
+                }
+
+                if (data.tracks && data.tracks.length > 0) {
+                    // Populate the textarea with all tracks (no limit)
+                    bulkInput.value = data.tracks.join('\n');
+                    updateLineCounter();
+
+                    // Auto-fill playlist name if checkbox is checked
+                    if (createPlaylistCheckbox.checked && data.playlist_name) {
+                        playlistNameInput.value = data.playlist_name;
+                    }
+
+                    // Show toast with result (include warning if present)
+                    let toastMsg = `Loaded ${data.tracks.length} tracks from "${data.playlist_name}"`;
+                    if (data.warning) {
+                        toastMsg += ` (Warning: ${data.warning})`;
+                        // Also show in the error area for visibility
+                        spotifyError.textContent = data.warning;
+                        spotifyError.style.color = 'var(--warning, #f59e0b)';
+                        spotifyError.style.display = 'block';
+                    }
+                    showToast(toastMsg);
+
+                    // Clear the URL input
+                    spotifyUrlInput.value = '';
+                } else {
+                    throw new Error('No tracks found in playlist');
+                }
+            } catch (error) {
+                spotifyError.textContent = error.message;
+                spotifyError.style.color = 'var(--error)';
+                spotifyError.style.display = 'block';
+            } finally {
+                fetchSpotifyBtn.disabled = false;
+                fetchSpotifyBtn.textContent = 'Fetch Playlist';
+            }
+        }
+
+        fetchSpotifyBtn.addEventListener('click', fetchSpotifyPlaylist);
+        spotifyUrlInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                fetchSpotifyPlaylist();
+            }
+        });
+
+        // Show/hide playlist name input when checkbox is toggled
+        createPlaylistCheckbox.addEventListener('change', () => {
+            playlistNameInput.style.display = createPlaylistCheckbox.checked ? 'block' : 'none';
+            if (createPlaylistCheckbox.checked) {
+                playlistNameInput.focus();
+            }
+        });
+
+        // Close search history when clicking outside
+        document.addEventListener('click', (e) => {
+            if (!searchInput.contains(e.target) && !searchHistory.contains(e.target)) {
+                searchHistory.classList.remove('show');
+            }
+        });
+
+        // Initial empty state
+        resultsTab.innerHTML = `
+            <div class="empty-state">
+                <div class="empty-state-icon">🎧</div>
+                <p>Search for music to get started</p>
+                <p style="font-size: 12px; margin-top: 8px; opacity: 0.6;">Hover over results to preview</p>
+            </div>
+        `;
+
+        // =============================================================================
+        // Watched Playlists
+        // =============================================================================
+
+        async function loadWatchedPlaylists() {
+            watchedList.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+
+            try {
+                // Fetch schedule info and playlists in parallel
+                const [scheduleRes, playlistsRes] = await Promise.all([
+                    apiFetch('/api/watched-playlists/schedule'),
+                    apiFetch('/api/watched-playlists')
+                ]);
+
+                // Update schedule info
+                if (scheduleRes.ok) {
+                    const schedule = await scheduleRes.json();
+                    if (schedule.enabled) {
+                        const hours = schedule.check_interval_hours;
+                        let intervalText = `${hours} hours`;
+                        if (hours === 24) intervalText = 'daily';
+                        else if (hours === 168) intervalText = 'weekly';
+                        else if (hours >= 720) intervalText = 'monthly';
+                        watchedScheduleInfo.textContent = `Automatic checks run ${intervalText}. Per-playlist intervals determine when each is due.`;
+                    } else {
+                        watchedScheduleInfo.textContent = 'Automatic checks disabled. Use "Check All Now" or set WATCHED_PLAYLIST_CHECK_HOURS.';
+                    }
+                }
+
+                if (!playlistsRes.ok) throw new Error('Failed to load watched playlists');
+
+                const data = await playlistsRes.json();
+                renderWatchedPlaylists(data.playlists);
+            } catch (error) {
+                watchedList.innerHTML = `
+                    <div class="empty-state">
+                        <p style="color: var(--error);">Failed to load watched playlists</p>
+                    </div>
+                `;
+            }
+        }
+
+        function renderWatchedPlaylists(playlists) {
+            if (!playlists || playlists.length === 0) {
+                watchedList.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-state-icon">👁️</div>
+                        <p>No watched playlists yet</p>
+                        <p style="font-size: 12px; margin-top: 8px; opacity: 0.6;">Add a Spotify or YouTube playlist above</p>
+                    </div>
+                `;
+                return;
+            }
+
+            watchedList.innerHTML = playlists.map(p => {
+                const platformIcon = p.platform === 'spotify' ? '🟢' : '🔴';
+                const lastChecked = p.last_checked ? formatTimeAgo(p.last_checked) : 'Never';
+                const statusColor = p.enabled ? 'var(--accent)' : 'var(--text-secondary)';
+                const intervalText = p.refresh_interval_hours === 24 ? 'daily' :
+                                     p.refresh_interval_hours === 168 ? 'weekly' :
+                                     p.refresh_interval_hours >= 720 ? 'monthly' :
+                                     `every ${p.refresh_interval_hours}h`;
+
+                return `
+                    <div class="result-item" style="cursor: default;">
+                        <div style="flex: 1;">
+                            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 4px;">
+                                <span>${platformIcon}</span>
+                                <span style="font-weight: 600;">${escapeHtml(p.name)}</span>
+                                ${!p.enabled ? '<span style="font-size: 11px; color: var(--text-secondary); background: var(--bg-tertiary); padding: 2px 6px; border-radius: 4px;">Paused</span>' : ''}
+                            </div>
+                            <div style="font-size: 12px; color: var(--text-secondary);">
+                                ${p.tracked_count} tracks · ${p.downloaded_count || 0} downloaded · ${intervalText}
+                            </div>
+                            <div style="font-size: 11px; color: var(--text-secondary); margin-top: 4px;">
+                                Last checked: ${lastChecked}
+                            </div>
+                        </div>
+                        <div style="display: flex; flex-direction: column; gap: 6px;">
+                            <div style="display: flex; align-items: center; justify-content: flex-end; gap: 8px; font-size: 11px; color: var(--text-secondary);">
+                                <span>FLAC</span>
+                                <label class="toggle-switch" title="Convert new tracks to FLAC">
+                                    <input type="checkbox" ${p.convert_to_flac ? 'checked' : ''} onchange="updateWatchedPlaylistFlac('${p.id}', this.checked)">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                            <button onclick="refreshWatchedPlaylist('${p.id}')" style="padding: 6px 12px; font-size: 12px; font-family: inherit; background: var(--bg-tertiary); color: var(--text-primary); border: 1px solid var(--border); border-radius: 6px; cursor: pointer;" title="Check for new tracks now">
+                                Refresh
+                            </button>
+                            <button onclick="copyWatchedPlaylistUrl('${escapeHtml(p.url)}')" style="padding: 6px 12px; font-size: 12px; font-family: inherit; background: var(--bg-tertiary); color: var(--text-primary); border: 1px solid var(--border); border-radius: 6px; cursor: pointer;" title="Copy playlist URL">
+                                Copy URL
+                            </button>
+                            <button onclick="toggleWatchedPlaylist('${p.id}', ${p.enabled ? 'false' : 'true'})" style="padding: 6px 12px; font-size: 12px; font-family: inherit; background: var(--bg-tertiary); color: ${statusColor}; border: 1px solid var(--border); border-radius: 6px; cursor: pointer;">
+                                ${p.enabled ? 'Pause' : 'Resume'}
+                            </button>
+                            <button onclick="deleteWatchedPlaylist('${p.id}', '${escapeHtml(p.name)}')" style="padding: 6px 12px; font-size: 12px; font-family: inherit; background: var(--bg-tertiary); color: var(--error); border: 1px solid var(--border); border-radius: 6px; cursor: pointer;">
+                                Delete
+                            </button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        function formatTimeAgo(isoString) {
+            return formatDateYmd(isoString);
+        }
+
+        async function addWatchedPlaylist() {
+            const url = watchedUrlInput.value.trim();
+            if (!url) {
+                watchedError.textContent = 'Please enter a playlist URL';
+                watchedError.style.display = 'block';
+                return;
+            }
+
+            watchedError.style.display = 'none';
+            addWatchedBtn.disabled = true;
+            addWatchedBtn.textContent = 'Adding...';
+
+            try {
+                const response = await apiFetch('/api/watched-playlists', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        url: url,
+                        refresh_interval_hours: parseInt(watchedIntervalSelect.value),
+                        convert_to_flac: watchedConvertToFlac ? watchedConvertToFlac.checked : convertToFlacCheckbox.checked
+                    })
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail || 'Failed to add playlist');
+                }
+
+                const data = await response.json();
+                showToast(`Now watching "${data.name}" (${data.track_count} tracks)`);
+                watchedUrlInput.value = '';
+                loadWatchedPlaylists();
+            } catch (error) {
+                watchedError.textContent = error.message;
+                watchedError.style.display = 'block';
+            } finally {
+                addWatchedBtn.disabled = false;
+                addWatchedBtn.textContent = 'Watch';
+            }
+        }
+
+        async function refreshWatchedPlaylist(playlistId) {
+            try {
+                showToast('Checking for new tracks...');
+                const response = await apiFetch(`/api/watched-playlists/${playlistId}/refresh`, {
+                    method: 'POST'
+                });
+
+                if (!response.ok) throw new Error('Refresh failed');
+
+                const data = await response.json();
+                if (data.error) {
+                    showToast(`Error: ${data.error}`, true);
+                } else {
+                    const newCount = data.new_tracks || 0;
+                    const missingCount = data.missing_tracks || 0;
+                    if (newCount > 0 || missingCount > 0) {
+                        const parts = [];
+                        if (newCount > 0) parts.push(`${newCount} new`);
+                        if (missingCount > 0) parts.push(`${missingCount} missing`);
+                        showToast(`Found ${parts.join(' + ')} tracks, queued ${data.queued} for download`);
+                    } else {
+                        showToast('No new tracks found');
+                    }
+                }
+                loadWatchedPlaylists();
+            } catch (error) {
+                showToast('Failed to refresh playlist', true);
+            }
+        }
+
+        async function copyWatchedPlaylistUrl(url) {
+            try {
+                if (navigator.clipboard && window.isSecureContext) {
+                    await navigator.clipboard.writeText(url);
+                } else {
+                    const tempInput = document.createElement('input');
+                    tempInput.value = url;
+                    document.body.appendChild(tempInput);
+                    tempInput.select();
+                    document.execCommand('copy');
+                    document.body.removeChild(tempInput);
+                }
+                showToast('Playlist URL copied');
+            } catch (error) {
+                showToast('Failed to copy playlist URL', true);
+            }
+        }
+
+        async function toggleWatchedPlaylist(playlistId, enabled) {
+            try {
+                const response = await apiFetch(`/api/watched-playlists/${playlistId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ enabled: enabled === 'true' })
+                });
+
+                if (!response.ok) throw new Error('Update failed');
+
+                loadWatchedPlaylists();
+                showToast(enabled === 'true' ? 'Playlist watching resumed' : 'Playlist watching paused');
+            } catch (error) {
+                showToast('Failed to update playlist', true);
+            }
+        }
+
+        async function updateWatchedPlaylistFlac(playlistId, convertToFlac) {
+            try {
+                const response = await apiFetch(`/api/watched-playlists/${playlistId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ convert_to_flac: convertToFlac })
+                });
+
+                if (!response.ok) throw new Error('Update failed');
+
+                showToast(convertToFlac ? 'Convert to FLAC enabled' : 'Convert to FLAC disabled');
+            } catch (error) {
+                showToast('Failed to update FLAC setting', true);
+                loadWatchedPlaylists();
+            }
+        }
+
+        async function deleteWatchedPlaylist(playlistId, name) {
+            if (!confirm(`Stop watching "${name}"? This won't delete any downloaded files.`)) {
+                return;
+            }
+
+            try {
+                const response = await apiFetch(`/api/watched-playlists/${playlistId}`, {
+                    method: 'DELETE'
+                });
+
+                if (!response.ok) throw new Error('Delete failed');
+
+                showToast(`Stopped watching "${name}"`);
+                loadWatchedPlaylists();
+            } catch (error) {
+                showToast('Failed to delete playlist', true);
+            }
+        }
+
+        async function refreshAllWatched() {
+            refreshAllWatchedBtn.disabled = true;
+            refreshAllWatchedBtn.textContent = 'Checking...';
+
+            try {
+                const response = await apiFetch('/api/watched-playlists/check-all', {
+                    method: 'POST'
+                });
+
+                if (!response.ok) throw new Error('Check failed');
+
+                const data = await response.json();
+                if (data.checked === 0) {
+                    showToast('No playlists due for refresh');
+                } else if (data.total_new_tracks > 0) {
+                    showToast(`Checked ${data.checked} playlists: ${data.total_new_tracks} new tracks, ${data.total_queued} queued`);
+                } else {
+                    showToast(`Checked ${data.checked} playlists: no new tracks`);
+                }
+                loadWatchedPlaylists();
+            } catch (error) {
+                showToast('Failed to check playlists', true);
+            } finally {
+                refreshAllWatchedBtn.disabled = false;
+                refreshAllWatchedBtn.textContent = 'Check All Now';
+            }
+        }
+
+        // Event listeners for watched playlists
+        addWatchedBtn.addEventListener('click', addWatchedPlaylist);
+        watchedUrlInput.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                addWatchedPlaylist();
+            }
+        });
+        refreshAllWatchedBtn.addEventListener('click', refreshAllWatched);
+
+        // =============================================================================
+        // Statistics Dashboard
+        // =============================================================================
+
+        async function loadStats() {
+            statsContent.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+
+            try {
+                const response = await apiFetch('/api/stats');
+                if (!response.ok) throw new Error('Failed to load stats');
+
+                const data = await response.json();
+                renderStats(data);
+            } catch (error) {
+                statsContent.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-state-icon">😕</div>
+                        <p>Failed to load statistics</p>
+                    </div>
+                `;
+            }
+        }
+
+        function formatBytes(bytes) {
+            if (bytes === 0) return '0 B';
+            const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(1024));
+            return (bytes / Math.pow(1024, i)).toFixed(i > 0 ? 1 : 0) + ' ' + units[i];
+        }
+
+        function renderStats(data) {
+            const successRate = data.total_jobs > 0
+                ? Math.round((data.completed / data.total_jobs) * 100)
+                : 0;
+            const searchSuccessRate = data.total_searches > 0
+                ? Math.round((data.successful_searches / data.total_searches) * 100)
+                : 0;
+            const searchToDownloadRate = data.total_searches > 0
+                ? Math.round((data.converted_searches / data.total_searches) * 100)
+                : 0;
+
+            // Build daily chart (simple bar chart using divs)
+            const maxDaily = Math.max(...data.daily.map(d => d.count), 1);
+            const dailyBars = data.daily.length > 0
+                ? data.daily.slice(-14).map(d => {
+                    const height = Math.max(4, Math.round((d.count / maxDaily) * 80));
+                    const dayLabel = d.day;
+                    return `
+                        <div style="display: flex; flex-direction: column; align-items: center; gap: 4px; flex: 1; min-width: 0;">
+                            <div style="font-size: 10px; color: var(--text-secondary);">${d.count}</div>
+                            <div style="width: 100%; max-width: 24px; height: ${height}px; background: var(--accent); border-radius: 3px;"></div>
+                            <div style="font-size: 9px; color: var(--text-secondary); white-space: nowrap;">${dayLabel}</div>
+                        </div>
+                    `;
+                }).join('')
+                : '<div style="text-align: center; color: var(--text-secondary); font-size: 13px; padding: 20px;">No downloads yet</div>';
+
+            // Source breakdown
+            const ytCount = data.sources.youtube || 0;
+            const scCount = data.sources.soundcloud || 0;
+            const moCount = data.sources.monochrome || 0;
+            const slkCount = data.sources.soulseek || 0;
+            const sourceTotal = ytCount + scCount + moCount + slkCount || 1;
+
+            let html = `
+                <!-- Summary cards -->
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 12px; margin-bottom: 16px;">
+                    <div style="padding: 14px; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 12px; text-align: center;">
+                        <div style="font-size: 22px; font-weight: 600;">${data.completed}</div>
+                        <div style="font-size: 11px; color: var(--text-secondary);">Completed</div>
+                    </div>
+                    <div style="padding: 14px; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 12px; text-align: center;">
+                        <div style="font-size: 22px; font-weight: 600; color: var(--error);">${data.failed}</div>
+                        <div style="font-size: 11px; color: var(--text-secondary);">Failed</div>
+                    </div>
+                    <div style="padding: 14px; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 12px; text-align: center;">
+                        <div style="font-size: 22px; font-weight: 600;">${successRate}%</div>
+                        <div style="font-size: 11px; color: var(--text-secondary);">Success</div>
+                    </div>
+                    <div style="padding: 14px; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 12px; text-align: center;">
+                        <div style="font-size: 22px; font-weight: 600;">${data.file_count}</div>
+                        <div style="font-size: 11px; color: var(--text-secondary);">${formatBytes(data.storage_bytes)}</div>
+                    </div>
+                    <div style="padding: 14px; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 12px; text-align: center;">
+                        <div style="font-size: 22px; font-weight: 600;">${data.total_searches || 0}</div>
+                        <div style="font-size: 11px; color: var(--text-secondary);">Searches</div>
+                    </div>
+                    <div style="padding: 14px; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 12px; text-align: center;">
+                        <div style="font-size: 22px; font-weight: 600;">${searchToDownloadRate}%</div>
+                        <div style="font-size: 11px; color: var(--text-secondary);">Search → Download</div>
+                    </div>
+                </div>
+
+                <!-- Search quality -->
+                <div style="padding: 16px; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 12px; margin-bottom: 16px;">
+                    <div style="font-size: 13px; font-weight: 600; color: var(--text-secondary); margin-bottom: 8px;">Search Performance</div>
+                    <div style="font-size: 13px; color: var(--text-secondary);">
+                        Successful searches: <strong style="color: var(--text-primary);">${data.successful_searches || 0}</strong> /
+                        ${data.total_searches || 0}
+                        (${searchSuccessRate}% found at least one result)
+                    </div>
+                </div>
+
+                <!-- Daily downloads chart -->
+                <div style="padding: 16px; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 12px; margin-bottom: 16px;">
+                    <div style="font-size: 13px; font-weight: 600; color: var(--text-secondary); margin-bottom: 12px;">Downloads (last 14 days)</div>
+                    <div style="display: flex; align-items: flex-end; gap: 4px; min-height: 100px;">
+                        ${dailyBars}
+                    </div>
+                </div>
+
+                <!-- Source breakdown -->
+                <div style="padding: 16px; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 12px; margin-bottom: 16px;">
+                    <div style="font-size: 13px; font-weight: 600; color: var(--text-secondary); margin-bottom: 12px;">Sources</div>
+                    <div style="display: flex; gap: 8px; height: 8px; border-radius: 4px; overflow: hidden; margin-bottom: 8px;">
+                        ${ytCount > 0 ? `<div style="flex: ${ytCount}; background: #ff0000; border-radius: 4px;"></div>` : ''}
+                        ${scCount > 0 ? `<div style="flex: ${scCount}; background: #ff5500; border-radius: 4px;"></div>` : ''}
+                        ${moCount > 0 ? `<div style="flex: ${moCount}; background: #111111; border-radius: 4px;"></div>` : ''}
+                        ${slkCount > 0 ? `<div style="flex: ${slkCount}; background: #4a9eff; border-radius: 4px;"></div>` : ''}
+                    </div>
+                    <div style="display: flex; gap: 16px; font-size: 12px; flex-wrap: wrap;">
+                        <span style="color: var(--text-secondary);"><span style="display: inline-block; width: 8px; height: 8px; background: #ff0000; border-radius: 2px; margin-right: 4px;"></span>YouTube: ${ytCount}</span>
+                        ${scCount > 0 ? `<span style="color: var(--text-secondary);"><span style="display: inline-block; width: 8px; height: 8px; background: #ff5500; border-radius: 2px; margin-right: 4px;"></span>SoundCloud: ${scCount}</span>` : ''}
+                        ${moCount > 0 ? `<span style="color: var(--text-secondary);"><span style="display: inline-block; width: 8px; height: 8px; background: #111111; border-radius: 2px; margin-right: 4px;"></span>Monochrome: ${moCount}</span>` : ''}
+                        <span style="color: var(--text-secondary);"><span style="display: inline-block; width: 8px; height: 8px; background: #4a9eff; border-radius: 2px; margin-right: 4px;"></span>Soulseek: ${slkCount}</span>
+                    </div>
+                </div>
+            `;
+
+            // Top artists
+            if (data.top_artists.length > 0) {
+                const maxArtistCount = data.top_artists[0].count;
+                html += `
+                    <div style="padding: 16px; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 12px; margin-bottom: 16px;">
+                        <div style="font-size: 13px; font-weight: 600; color: var(--text-secondary); margin-bottom: 12px;">Top Artists</div>
+                        ${data.top_artists.map((a, i) => `
+                            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">
+                                <span style="font-size: 11px; color: var(--text-secondary); width: 16px; text-align: right;">${i + 1}</span>
+                                <div style="flex: 1; min-width: 0;">
+                                    <div style="display: flex; align-items: center; gap: 8px;">
+                                        <span style="font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(a.artist)}</span>
+                                        <span style="font-size: 11px; color: var(--text-secondary); flex-shrink: 0;">${a.count}</span>
+                                    </div>
+                                    <div style="height: 4px; background: var(--bg-tertiary); border-radius: 2px; margin-top: 4px;">
+                                        <div style="height: 100%; width: ${Math.round((a.count / maxArtistCount) * 100)}%; background: var(--accent); border-radius: 2px;"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                `;
+            }
+
+            // Top searched artists
+            if (data.top_searched_artists && data.top_searched_artists.length > 0) {
+                const maxSearchCount = data.top_searched_artists[0].count;
+                html += `
+                    <div style="padding: 16px; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 12px; margin-bottom: 16px;">
+                        <div style="font-size: 13px; font-weight: 600; color: var(--text-secondary); margin-bottom: 12px;">Most Searched Artists</div>
+                        ${data.top_searched_artists.map((a, i) => `
+                            <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">
+                                <span style="font-size: 11px; color: var(--text-secondary); width: 16px; text-align: right;">${i + 1}</span>
+                                <div style="flex: 1; min-width: 0;">
+                                    <div style="display: flex; align-items: center; gap: 8px;">
+                                        <span style="font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(a.artist)}</span>
+                                        <span style="font-size: 11px; color: var(--text-secondary); flex-shrink: 0;">${a.count}</span>
+                                    </div>
+                                    <div style="height: 4px; background: var(--bg-tertiary); border-radius: 2px; margin-top: 4px;">
+                                        <div style="height: 100%; width: ${Math.round((a.count / maxSearchCount) * 100)}%; background: #f59e0b; border-radius: 2px;"></div>
+                                    </div>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                `;
+            }
+
+            // Recent downloads
+            if (data.recent.length > 0) {
+                html += `
+                    <div style="padding: 16px; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 12px;">
+                        <div style="font-size: 13px; font-weight: 600; color: var(--text-secondary); margin-bottom: 12px;">Recent Downloads</div>
+                        ${data.recent.map(r => `
+                            <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 12px;">
+                                <span class="source-badge ${r.source || 'youtube'}" style="flex-shrink: 0;">${getSourceBadge(r.source || 'youtube')}</span>
+                                <span style="white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">${escapeHtml(r.artist ? `${r.artist} - ${r.title}` : r.title)}</span>
+                                <span style="margin-left: auto; color: var(--text-secondary); white-space: nowrap; flex-shrink: 0;">${r.completed_at ? formatTime(r.completed_at) : ''}</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                `;
+            }
+
+            statsContent.innerHTML = html;
+        }
+
+        // =============================================================================
+        // Settings Management
+        // =============================================================================
+
+        // Mapping from setting keys to form element IDs
+        const settingsFieldMap = {
+            'enable_musicbrainz': 'settingEnableMusicbrainz',
+            'enable_lyrics': 'settingEnableLyrics',
+            'default_convert_to_flac': 'settingDefaultFlac',
+            'min_audio_bitrate': 'settingMinBitrate',
+            'singles_subdir': 'settingSinglesSubdir',
+            'organise_by_artist': 'settingOrganiseByArtist',
+            'slskd_url': 'settingSlskdUrl',
+            'slskd_user': 'settingSlskdUser',
+            'slskd_pass': 'settingSlskdPass',
+            'slskd_downloads_path': 'settingSlskdDownloads',
+            'navidrome_url': 'settingNavidromeUrl',
+            'navidrome_user': 'settingNavidromeUser',
+            'navidrome_pass': 'settingNavidromePass',
+            'jellyfin_url': 'settingJellyfinUrl',
+            'jellyfin_api_key': 'settingJellyfinApiKey',
+            'notify_on': 'settingNotifyOn',
+            'telegram_webhook_url': 'settingTelegramUrl',
+            'webhook_url': 'settingWebhookUrl',
+            'smtp_host': 'settingSmtpHost',
+            'smtp_port': 'settingSmtpPort',
+            'smtp_user': 'settingSmtpUser',
+            'smtp_pass': 'settingSmtpPass',
+            'smtp_from': 'settingSmtpFrom',
+            'smtp_to': 'settingSmtpTo',
+            'smtp_tls': 'settingSmtpTls',
+            'youtube_cookies': 'settingYoutubeCookies',
+            'api_key': 'settingApiKey'
+        };
+
+        // Track which fields are locked by env vars
+        let envOverrides = [];
+        let sensitiveFields = [];
+        let settingsLoaded = false;
+        let originalValues = {}; // Track original values to detect changes
+
+        async function loadSettings() {
+            if (settingsLoaded) return; // Only load once per session
+
+            try {
+                const response = await apiFetch('/api/settings');
+                if (!response.ok) throw new Error('Failed to load settings');
+
+                const data = await response.json();
+                const settings = data.settings;
+                envOverrides = data.env_overrides || [];
+                sensitiveFields = data.sensitive_fields || [];
+
+                // Populate form fields and track original values
+                for (const [key, elementId] of Object.entries(settingsFieldMap)) {
+                    const element = document.getElementById(elementId);
+                    if (!element) continue;
+
+                    const value = settings[key];
+                    const isLocked = envOverrides.includes(key);
+
+                    // Store original value for change detection
+                    if (!element.dataset.defaultPlaceholder) {
+                        element.dataset.defaultPlaceholder = element.placeholder || '';
+                    }
+
+                    if (element.type === 'checkbox') {
+                        originalValues[key] = value === true || value === 'true';
+                    } else if (sensitiveFields.includes(key) && value === '••••••••') {
+                        originalValues[key] = null; // Indicates "configured but hidden"
+                    } else {
+                        originalValues[key] = value || '';
+                    }
+
+                    if (element.type === 'checkbox') {
+                        element.checked = value === true || value === 'true';
+                    } else {
+                        // For sensitive fields, only show placeholder if value is masked
+                        if (sensitiveFields.includes(key) && value === '••••••••') {
+                            element.placeholder = 'Configured (hidden)';
+                            element.value = '';
+                        } else {
+                            element.value = value || '';
+                        }
+                    }
+
+                    // Mark fields locked by env vars
+                    if (isLocked) {
+                        element.disabled = true;
+                        const row = element.closest('.settings-row') || element.closest('.settings-label');
+                        if (row) {
+                            row.classList.add('env-locked');
+                            row.title = 'Set via environment variable (e.g., docker-compose.yml)';
+                        }
+                    }
+                }
+
+                settingsLoaded = true;
+
+                // Populate singles subfolder dropdown from actual directories
+                await _populateSubdirDropdown(settings['singles_subdir'] || 'Singles');
+
+                // Update browser API key status
+                updateBrowserApiKeyStatus();
+
+                // Inject clear buttons into settings rows
+                _injectSettingsClearButtons();
+            } catch (error) {
+                console.error('Failed to load settings:', error);
+                showToast('Failed to load settings', true);
+            }
+        }
+
+        const SUBDIR_CUSTOM_VALUE = '__custom__';
+
+        function _normaliseSubdirPath(rawValue) {
+            const raw = String(rawValue || '').trim();
+            if (!raw) return '';
+            if (raw === '.') return '.';
+
+            const parts = raw
+                .replace(/\\/g, '/')
+                .split('/')
+                .map(part => part.trim())
+                .filter(part => part && part !== '.');
+
+            if (parts.some(part => part === '..')) return '';
+            return parts.join('/');
+        }
+
+        async function _populateSubdirDropdown(currentValue) {
+            const select = document.getElementById('settingSinglesSubdir');
+            const customRow = document.getElementById('customSubdirRow');
+            const customInput = document.getElementById('customSubdirInput');
+            if (!select || !customRow || !customInput) return;
+
+            const currentRaw = (currentValue || 'Singles').trim();
+            const current = currentRaw === '.' ? '.' : (_normaliseSubdirPath(currentRaw) || 'Singles');
+
+            let dirs = [];
+            try {
+                const resp = await apiFetch('/api/music-dirs?recursive=true&max_depth=2');
+                if (resp.ok) {
+                    const data = await resp.json();
+                    dirs = Array.isArray(data.directories) ? data.directories : [];
+                }
+            } catch (e) {
+                console.warn('Could not fetch music directories:', e);
+            }
+
+            const unique = new Set();
+            for (const dir of dirs) {
+                const normalised = _normaliseSubdirPath(dir);
+                if (normalised && normalised !== '.') {
+                    unique.add(normalised);
+                }
+            }
+
+            // Keep defaults/current value available even if folder disappeared.
+            unique.add('Singles');
+            if (current !== '.') {
+                unique.add(current);
+            }
+
+            const sortedDirs = Array.from(unique).sort((a, b) =>
+                a.localeCompare(b, undefined, { sensitivity: 'base' })
+            );
+
+            select.innerHTML = '';
+
+            const rootOpt = document.createElement('option');
+            rootOpt.value = '.';
+            rootOpt.textContent = '/music (root)';
+            select.appendChild(rootOpt);
+
+            for (const relPath of sortedDirs) {
+                const opt = document.createElement('option');
+                opt.value = relPath;
+                opt.textContent = `/music/${relPath}`;
+                select.appendChild(opt);
+            }
+
+            const customOpt = document.createElement('option');
+            customOpt.value = SUBDIR_CUSTOM_VALUE;
+            customOpt.textContent = 'Custom path\u2026';
+            select.appendChild(customOpt);
+
+            const currentIsKnown = current === '.' || sortedDirs.includes(current);
+            customInput.disabled = !!select.disabled;
+            if (currentIsKnown) {
+                select.value = current;
+                customRow.style.display = 'none';
+                customInput.value = '';
+            } else {
+                select.value = SUBDIR_CUSTOM_VALUE;
+                customRow.style.display = 'block';
+                customInput.value = current;
+            }
+
+            select.onchange = () => {
+                if (select.value === SUBDIR_CUSTOM_VALUE) {
+                    customRow.style.display = 'block';
+                    customInput.focus();
+                    return;
+                }
+                customRow.style.display = 'none';
+                customInput.value = '';
+            };
+        }
+
+        function _injectSettingsClearButtons() {
+            // Skip these — they already have dedicated clear mechanisms
+            const skipIds = new Set(['settingYoutubeCookies', 'settingSmtpPort', 'settingMinBitrate', 'customSubdirInput']);
+
+            for (const row of document.querySelectorAll('.settings-row')) {
+                const input = row.querySelector('input[type="text"], input[type="password"], input[type="number"]');
+                if (!input || skipIds.has(input.id)) continue;
+                if (input.disabled) continue; // env-locked
+
+                const clearBtn = document.createElement('button');
+                clearBtn.type = 'button';
+                clearBtn.className = 'setting-clear-btn';
+                clearBtn.textContent = 'Clear';
+
+                // Find the settings key for this input
+                const settingsKey = Object.entries(settingsFieldMap).find(([, id]) => id === input.id)?.[0];
+
+                clearBtn.addEventListener('click', async () => {
+                    input.value = '';
+                    if (settingsKey && sensitiveFields.includes(settingsKey)) {
+                        input.dataset.forceClear = 'true';
+                        input.placeholder = input.defaultValue || '';
+                    }
+                    await saveSettings();
+                });
+
+                // Wrap input (or password-field div) and clear button together
+                const passwordField = row.querySelector('.password-field');
+                const target = passwordField || input;
+
+                const wrapper = document.createElement('div');
+                wrapper.className = 'setting-input-group';
+                target.parentNode.insertBefore(wrapper, target);
+                wrapper.appendChild(target);
+                wrapper.appendChild(clearBtn);
+            }
+        }
+
+        function updateBrowserApiKeyStatus() {
+            const statusEl = document.getElementById('browserApiKeyStatus');
+            const clearBtn = document.getElementById('clearApiKeyBtn');
+            const storedKey = getApiKey();
+
+            if (storedKey) {
+                statusEl.textContent = `Key stored (${storedKey.length} chars)`;
+                statusEl.style.color = 'var(--success)';
+                clearBtn.style.display = 'inline-block';
+            } else {
+                statusEl.textContent = 'No key stored';
+                statusEl.style.color = 'var(--text-secondary)';
+                clearBtn.style.display = authRequired ? 'inline-block' : 'none';
+            }
+        }
+
+        // Clear stored API key button
+        document.getElementById('clearApiKeyBtn')?.addEventListener('click', () => {
+            setApiKey('');
+            updateBrowserApiKeyStatus();
+            showToast('Stored API key cleared');
+
+            // If auth is required, prompt for new key
+            if (authRequired) {
+                promptForApiKey('API key cleared. Enter a new key to continue using the app.');
+                updateBrowserApiKeyStatus();
+            }
+        });
+
+        async function saveSettings() {
+            const saveBtn = document.getElementById('saveSettingsBtn');
+            const resultDiv = document.getElementById('settingsSaveResult');
+
+            saveBtn.disabled = true;
+            saveBtn.textContent = 'Saving...';
+            resultDiv.textContent = '';
+            resultDiv.classList.remove('error');
+
+            try {
+                const updates = {};
+
+                for (const [key, elementId] of Object.entries(settingsFieldMap)) {
+                    // Skip env-locked fields
+                    if (envOverrides.includes(key)) continue;
+
+                    const element = document.getElementById(elementId);
+                    if (!element) continue;
+
+                    if (element.type === 'checkbox') {
+                        const currentValue = element.checked;
+                        // Only include if changed from original
+                        if (currentValue !== originalValues[key]) {
+                            updates[key] = currentValue;
+                        }
+                    } else {
+                        let value = element.value.trim();
+                        // Singles subfolder: use direct picker value or custom path
+                        if (key === 'singles_subdir') {
+                            if (value === '.') {
+                                value = '.';
+                            } else if (value === SUBDIR_CUSTOM_VALUE) {
+                                const customInput = document.getElementById('customSubdirInput');
+                                value = _normaliseSubdirPath(customInput?.value || '') || 'Singles';
+                            } else {
+                                value = _normaliseSubdirPath(value) || 'Singles';
+                            }
+                        }
+                        // For sensitive fields with hidden values (null), only send if user entered something
+                        if (sensitiveFields.includes(key)) {
+                            if (originalValues[key] === null) {
+                                // Field was "configured (hidden)" - only send if user typed something new
+                                if (value && value !== '') {
+                                    updates[key] = value;
+                                } else if (element.dataset.forceClear === 'true') {
+                                    updates[key] = '';
+                                }
+                            } else if (value !== originalValues[key]) {
+                                // Field had visible value - send if changed (including to empty)
+                                updates[key] = value;
+                            }
+                        } else {
+                            // Non-sensitive field - only send if changed from original
+                            if (value !== originalValues[key]) {
+                                updates[key] = value;
+                            }
+                        }
+                    }
+                }
+
+                // Don't make API call if nothing changed
+                if (Object.keys(updates).length === 0) {
+                    resultDiv.textContent = 'No changes to save';
+                    saveBtn.disabled = false;
+                    saveBtn.textContent = 'Save Settings';
+                    return;
+                }
+
+                const response = await apiFetch('/api/settings', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(updates)
+                });
+
+                if (!response.ok) throw new Error('Failed to save settings');
+
+                const data = await response.json();
+                resultDiv.textContent = `Saved ${data.updated.length} setting(s)`;
+                showToast('Settings saved');
+
+                // Update original values and clear sensitive fields after save
+                for (const [key, value] of Object.entries(updates)) {
+                    if (sensitiveFields.includes(key)) {
+                        const elementId = settingsFieldMap[key];
+                        if (elementId) {
+                            const element = document.getElementById(elementId);
+                            if (element && element.type !== 'checkbox') {
+                                if (value === '') {
+                                    originalValues[key] = '';
+                                    element.value = '';
+                                    element.placeholder = element.dataset.defaultPlaceholder || '';
+                                } else {
+                                    // Mark as "configured but hidden" and clear the field
+                                    originalValues[key] = null;
+                                    element.value = '';
+                                    element.placeholder = 'Configured (hidden)';
+                                }
+                                element.dataset.forceClear = '';
+                            }
+                        }
+                    } else {
+                        // Update tracked original value
+                        originalValues[key] = value;
+
+                        // Sync FLAC default setting with header toggle
+                        if (key === 'default_convert_to_flac') {
+                            convertToFlacCheckbox.checked = value;
+                            localStorage.setItem('convertToFlac', value);
+                            if (watchedConvertToFlac && !watchedFlacTouched) {
+                                watchedConvertToFlac.checked = value;
+                            }
+                        }
+                    }
+                }
+            } catch (error) {
+                console.error('Failed to save settings:', error);
+                resultDiv.textContent = 'Failed to save settings';
+                resultDiv.classList.add('error');
+                showToast('Failed to save settings', true);
+            } finally {
+                saveBtn.disabled = false;
+                saveBtn.textContent = 'Save Settings';
+            }
+        }
+
+        async function testConnection(service) {
+            const idMap = { 'youtube-cookies': { btn: 'testYoutubeCookiesBtn', result: 'youtubeCookiesTestResult', label: 'Test Cookies' } };
+            const ids = idMap[service] || { btn: `test${service.charAt(0).toUpperCase() + service.slice(1)}Btn`, result: `${service}TestResult`, label: 'Test Connection' };
+            const btn = document.getElementById(ids.btn);
+            const resultDiv = document.getElementById(ids.result);
+
+            const btnLabel = ids.label;
+            btn.disabled = true;
+            btn.textContent = 'Testing...';
+            resultDiv.className = 'test-result';
+            resultDiv.style.display = 'none';
+
+            // Gather current form values to test with (before saving)
+            let body = {};
+            if (service === 'slskd') {
+                body = {
+                    url: document.getElementById('settingSlskdUrl').value.trim(),
+                    username: document.getElementById('settingSlskdUser').value.trim(),
+                    password: document.getElementById('settingSlskdPass').value.trim()
+                };
+            } else if (service === 'navidrome') {
+                body = {
+                    url: document.getElementById('settingNavidromeUrl').value.trim(),
+                    username: document.getElementById('settingNavidromeUser').value.trim(),
+                    password: document.getElementById('settingNavidromePass').value.trim()
+                };
+            } else if (service === 'jellyfin') {
+                body = {
+                    url: document.getElementById('settingJellyfinUrl').value.trim(),
+                    api_key: document.getElementById('settingJellyfinApiKey').value.trim()
+                };
+            } else if (service === 'youtube-cookies') {
+                body = {
+                    cookies: document.getElementById('settingYoutubeCookies').value
+                };
+            }
+
+            try {
+                const response = await apiFetch(`/api/settings/test/${service}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    resultDiv.textContent = data.message;
+                    resultDiv.className = 'test-result success';
+                } else {
+                    resultDiv.textContent = data.message || 'Connection failed';
+                    resultDiv.className = 'test-result error';
+                }
+                resultDiv.style.display = 'block';
+            } catch (error) {
+                resultDiv.textContent = 'Connection test failed';
+                resultDiv.className = 'test-result error';
+                resultDiv.style.display = 'block';
+            } finally {
+                btn.disabled = false;
+                btn.textContent = btnLabel;
+            }
+        }
+
+        // Password field toggle
+        document.querySelectorAll('.password-toggle').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const targetId = btn.dataset.target;
+                const input = document.getElementById(targetId);
+                if (input) {
+                    if (input.type === 'password') {
+                        input.type = 'text';
+                        btn.textContent = 'Hide';
+                    } else {
+                        input.type = 'password';
+                        btn.textContent = 'Show';
+                    }
+                }
+            });
+        });
+
+        // Settings event listeners
+        document.getElementById('saveSettingsBtn').addEventListener('click', saveSettings);
+        document.getElementById('testSlskdBtn').addEventListener('click', () => testConnection('slskd'));
+        document.getElementById('testNavidromeBtn').addEventListener('click', () => testConnection('navidrome'));
+        document.getElementById('testJellyfinBtn').addEventListener('click', () => testConnection('jellyfin'));
+        document.getElementById('testYoutubeCookiesBtn').addEventListener('click', () => testConnection('youtube-cookies'));
+        const uploadYoutubeCookiesBtn = document.getElementById('uploadYoutubeCookiesBtn');
+        const youtubeCookiesFile = document.getElementById('youtubeCookiesFile');
+        const youtubeCookiesTextarea = document.getElementById('settingYoutubeCookies');
+        const clearYoutubeCookiesBtn = document.getElementById('clearYoutubeCookiesBtn');
+
+        uploadYoutubeCookiesBtn?.addEventListener('click', () => {
+            if (envOverrides.includes('youtube_cookies')) {
+                showToast('YouTube cookies are locked by environment settings', true);
+                return;
+            }
+            youtubeCookiesFile?.click();
+        });
+
+        youtubeCookiesFile?.addEventListener('change', async (event) => {
+            const file = event.target.files?.[0];
+            if (!file) return;
+            try {
+                const text = await file.text();
+                if (youtubeCookiesTextarea) {
+                    youtubeCookiesTextarea.value = text;
+                }
+                showToast('Cookies loaded, saving...');
+                await saveSettings();
+                showToast('Cookies updated');
+            } catch (error) {
+                console.error('Failed to read cookies file:', error);
+                showToast('Failed to read cookies file', true);
+            } finally {
+                event.target.value = '';
+            }
+        });
+
+        clearYoutubeCookiesBtn?.addEventListener('click', async () => {
+            if (envOverrides.includes('youtube_cookies')) {
+                showToast('YouTube cookies are locked by environment settings', true);
+                return;
+            }
+            if (!youtubeCookiesTextarea) return;
+            youtubeCookiesTextarea.value = '';
+            youtubeCookiesTextarea.dataset.forceClear = 'true';
+            showToast('Clearing cookies...');
+            await saveSettings();
+        });
+
+        // Sync FLAC toggles: Settings checkbox <-> Header toggle
+        const settingDefaultFlac = document.getElementById('settingDefaultFlac');
+        settingDefaultFlac.addEventListener('change', () => {
+            convertToFlacCheckbox.checked = settingDefaultFlac.checked;
+            localStorage.setItem('convertToFlac', settingDefaultFlac.checked);
+        });
+
+        // Also sync header toggle -> settings checkbox (if Settings tab is visible)
+        convertToFlacCheckbox.addEventListener('change', () => {
+            settingDefaultFlac.checked = convertToFlacCheckbox.checked;
+        });
+    </script>
+</body>
+</html>
