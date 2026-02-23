@@ -240,11 +240,14 @@ async def download_track(video_id: str, title: str, artist: str, source: str,
                         metadata = check_data.get("metadata", {})
                         audio_quality = metadata.get("audio_quality", "Unknown") if metadata else "Unknown"
 
-                        # Send info about existing file
-                        # Note: We don't send the actual audio file to avoid timeouts
-                        # with large FLAC files. User can access it via their music server.
-
-                        text = f"""✅ <b>Уже загружен</b>
+                        # Send audio file with extended timeout
+                        from pathlib import Path
+                        audio_file = Path(file_path)
+                        if audio_file.exists():
+                            try:
+                                # For large files (>50MB), send text only
+                                if size_mb > 50:
+                                    text = f"""✅ <b>Уже загружен</b>
 
 🎵 {title}
 🎤 {artist}
@@ -253,10 +256,84 @@ async def download_track(video_id: str, title: str, artist: str, source: str,
 🎼 Качество: {audio_quality}
 📦 Размер: {size_mb:.1f} MB
 
-⚠️ Файл уже есть в вашей библиотеке!
+⚠️ Файл слишком большой для отправки в Telegram.
 Используйте Navidrome/Jellyfin для прослушивания."""
 
-                        await update.effective_message.reply_text(text, parse_mode="HTML")
+                                    await update.effective_message.reply_text(text, parse_mode="HTML")
+                                else:
+                                    # Send audio file with extended timeout
+                                    import asyncio
+                                    with open(audio_file, 'rb') as f:
+                                        await asyncio.wait_for(
+                                            update.effective_message.reply_audio(
+                                                f,
+                                                filename=filename,
+                                                title=title,
+                                                performer=artist,
+                                                caption=f"🎵 {title}\n🎤 {artist}\n\n✅ Из вашей библиотеки MusicGrabber"
+                                            ),
+                                            timeout=60.0  # 60 seconds for audio upload
+                                        )
+
+                                    # Send success message
+                                    text = f"""✅ <b>Уже загружен</b>
+
+🎵 {title}
+🎤 {artist}
+
+📁 Файл: {filename}
+🎼 Качество: {audio_quality}
+📦 Размер: {size_mb:.1f} MB
+
+Файл отправлен из вашей библиотеки!"""
+
+                                    await update.effective_message.reply_text(text, parse_mode="HTML")
+
+                            except asyncio.TimeoutError:
+                                logger.error(f"Timeout sending audio file: {filename}")
+                                # Fallback to text only
+                                text = f"""✅ <b>Уже загружен</b>
+
+🎵 {title}
+🎤 {artist}
+
+📁 Файл: {filename}
+🎼 Качество: {audio_quality}
+📦 Размер: {size_mb:.1f} MB
+
+⚠️ Файл не отправлен (timeout).
+Найдите его в вашей музыкальной библиотеке."""
+
+                                await update.effective_message.reply_text(text, parse_mode="HTML")
+
+                            except Exception as e:
+                                logger.error(f"Error sending audio file: {e}")
+                                # Fallback to text only
+                                text = f"""✅ <b>Уже загружен</b>
+
+🎵 {title}
+🎤 {artist}
+
+📁 Файл: {filename}
+🎼 Качество: {audio_quality}
+📦 Размер: {size_mb:.1f} MB
+
+⚠️ Ошибка отправки: {str(e)}
+Найдите файл в вашей музыкальной библиотеке."""
+
+                                await update.effective_message.reply_text(text, parse_mode="HTML")
+                        else:
+                            # File not found on disk
+                            text = f"""❌ <b>Файл не найден</b>
+
+🎵 {title}
+🎤 {artist}
+
+⚠️ Файл указан в базе, но отсутствует на диске.
+Будет загружен заново."""
+
+                            await update.effective_message.reply_text(text, parse_mode="HTML")
+
 
                     return {"status": "existing", "file": file_path}
     except Exception as e:
