@@ -222,7 +222,7 @@ async def download_track(video_id: str, title: str, artist: str, source: str,
     """
     # First check if file already exists
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
+        async with httpx.AsyncClient(timeout=30) as client:  # Increased timeout
             check_response = await client.get(
                 "http://localhost:8080/api/check-file",
                 params={"artist": artist, "title": title}
@@ -240,7 +240,25 @@ async def download_track(video_id: str, title: str, artist: str, source: str,
                         metadata = check_data.get("metadata", {})
                         audio_quality = metadata.get("audio_quality", "Unknown") if metadata else "Unknown"
 
-                        text = f"""✅ <b>Уже загружен</b>
+                        # Send the audio file
+                        from pathlib import Path
+                        audio_file = Path(file_path)
+                        if audio_file.exists():
+                            try:
+                                with open(audio_file, 'rb') as f:
+                                    await update.effective_message.reply_audio(
+                                        f,
+                                        filename=filename,
+                                        title=title,
+                                        performer=artist,
+                                        caption=f"🎵 {title}\n🎤 {artist}\n\n✅ Из вашей библиотеки MusicGrabber"
+                                    )
+                            except Exception as e:
+                                logger.error(f"Error sending audio file: {e}")
+                                # Fall back to text message if audio fails
+                                pass
+
+                            text = f"""✅ <b>Уже загружен</b>
 
 🎵 {title}
 🎤 {artist}
@@ -251,22 +269,7 @@ async def download_track(video_id: str, title: str, artist: str, source: str,
 
 Файл отправлен из вашей библиотеки!"""
 
-                        # Send the audio file
-                        from pathlib import Path
-                        audio_file = Path(file_path)
-                        if audio_file.exists():
-                            with open(audio_file, 'rb') as f:
-                                await update.effective_message.reply_audio(
-                                    f,
-                                    filename=filename,
-                                    title=title,
-                                    performer=artist,
-                                    caption=f"🎵 {title}\n🎤 {artist}\n\nИз вашей библиотеки MusicGrabber"
-                                )
-                        else:
-                            # File in DB but not on disk - queue re-download
-                            pass
-                        await update.effective_message.reply_text(text, parse_mode="HTML")
+                            await update.effective_message.reply_text(text, parse_mode="HTML")
 
                     return {"status": "existing", "file": file_path}
     except Exception as e:
@@ -275,7 +278,7 @@ async def download_track(video_id: str, title: str, artist: str, source: str,
 
     # Queue download
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
+        async with httpx.AsyncClient(timeout=30) as client:  # Increased timeout
             payload = {
                 "video_id": video_id,
                 "title": title,
@@ -305,7 +308,8 @@ async def download_track(video_id: str, title: str, artist: str, source: str,
             conn.commit()
             conn.close()
 
-            return job_id
+            return {"status": "queued", "job_id": job_id}
+
     except Exception as e:
         logger.error(f"Download error: {e}")
         return None
@@ -825,32 +829,32 @@ async def callback_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("❌ Ошибка: результат не найден.")
         return
 
-    result = results[result_idx]
+    track = results[result_idx]
 
     # Get settings
     settings = get_user_settings(chat_id)
 
     # Download
-    result = await download_track(
-        video_id=result["video_id"],
-        title=result.get("title", "Unknown"),
-        artist=result.get("artist") or result.get("channel", "Unknown"),
-        source=result.get("source", "youtube"),
+    download_result = await download_track(
+        video_id=track["video_id"],
+        title=track.get("title", "Unknown"),
+        artist=track.get("artist") or track.get("channel", "Unknown"),
+        source=track.get("source", "youtube"),
         convert_to_flac=settings["convert_to_flac"],
         chat_id=chat_id,
-        source_url=result.get("source_url"),
+        source_url=track.get("source_url"),
         update=update
     )
 
-    if not result:
+    if not download_result:
         await query.edit_message_text("❌ Ошибка при добавлении в очередь.")
         return
 
     # File already exists - messages already sent by download_track
-    if result.get("status") == "existing":
+    if download_result.get("status") == "existing":
         return
 
-    job_id = result.get("job_id")
+    job_id = download_result.get("job_id")
     if not job_id:
         await query.edit_message_text("❌ Ошибка при добавлении в очередь.")
         return
