@@ -32,12 +32,26 @@ if [ "$PUID" != "0" ] || [ "$PGID" != "0" ]; then
     # Ensure ownership of key directories
     chown -R "$PUID:$PGID" /app /data 2>/dev/null || true
 
-    # Run as the specified user
+    # Check if Telegram bot should be started
+    if [ -n "$TELEGRAM_BOT_TOKEN" ]; then
+        echo "  Telegram bot: ENABLED"
+    else
+        echo "  Telegram bot: DISABLED (set TELEGRAM_BOT_TOKEN to enable)"
+    fi
+
     echo "=========================================="
     echo ""
     exec gosu musicgrabber uvicorn app:app --host 0.0.0.0 --port 8080
 else
     echo "  Running as root (set PUID/PGID for custom user)"
+
+    # Check if Telegram bot should be started
+    if [ -n "$TELEGRAM_BOT_TOKEN" ]; then
+        echo "  Telegram bot: ENABLED"
+    else
+        echo "  Telegram bot: DISABLED (set TELEGRAM_BOT_TOKEN to enable)"
+    fi
+
     echo "=========================================="
     echo ""
     exec uvicorn app:app --host 0.0.0.0 --port 8080

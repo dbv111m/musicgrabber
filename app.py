@@ -1592,6 +1592,27 @@ def check_all_watched_playlists():
 start_scheduler()
 
 
+# =============================================================================
+# Start Telegram Bot (if enabled)
+# =============================================================================
+
+try:
+    from telegram_bot import setup_bot, run_bot_thread
+    if os.getenv("TELEGRAM_BOT_TOKEN"):
+        bot_app = setup_bot()
+        if bot_app:
+            run_bot_thread()
+            print("Telegram bot started")
+        else:
+            print("Failed to start Telegram bot")
+    else:
+        print("Telegram bot disabled (set TELEGRAM_BOT_TOKEN to enable)")
+except ImportError:
+    print("python-telegram-bot not installed, Telegram bot disabled")
+except Exception as e:
+    print(f"Failed to start Telegram bot: {e}")
+
+
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=8080)

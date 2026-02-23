@@ -23,6 +23,10 @@ services:
       # - PGID=1000
       # Optional: slskd downloads path (if using Soulseek)
       # - SLSKD_DOWNLOADS_PATH=/downloads
+      # Optional: Telegram Bot (get token from @BotFather)
+      # - TELEGRAM_BOT_TOKEN=your_bot_token_here
+      # Optional: Restrict bot access to specific users (comma-separated chat IDs)
+      # - TELEGRAM_ALLOWED_USERS=123456789,987654321
     # Optional: add to your existing network if running with Navidrome/Jellyfin
     # networks:
     #   - your-network

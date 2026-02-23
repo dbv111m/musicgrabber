@@ -20,7 +20,8 @@ RUN pip install --no-cache-dir \
     httpx~=0.28.1 \
     pydantic~=2.12.5 \
     mutagen~=1.47.0 \
-    playwright~=1.58.0
+    playwright~=1.58.0 \
+    python-telegram-bot~=20.7
 
 # Install Playwright browsers (Chromium only to save space)
 RUN playwright install chromium --with-deps
