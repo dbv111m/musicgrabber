@@ -101,7 +101,7 @@ def get_user_settings(chat_id: int) -> dict:
     # Default settings
     return {
         "search_source": "all",
-        "convert_to_flac": True,
+        "convert_to_flac": False,  # Default to original/MP3, not FLAC
         "download_folder": "Singles",
         "min_bitrate": 0,
     }
@@ -240,25 +240,11 @@ async def download_track(video_id: str, title: str, artist: str, source: str,
                         metadata = check_data.get("metadata", {})
                         audio_quality = metadata.get("audio_quality", "Unknown") if metadata else "Unknown"
 
-                        # Send the audio file
-                        from pathlib import Path
-                        audio_file = Path(file_path)
-                        if audio_file.exists():
-                            try:
-                                with open(audio_file, 'rb') as f:
-                                    await update.effective_message.reply_audio(
-                                        f,
-                                        filename=filename,
-                                        title=title,
-                                        performer=artist,
-                                        caption=f"🎵 {title}\n🎤 {artist}\n\n✅ Из вашей библиотеки MusicGrabber"
-                                    )
-                            except Exception as e:
-                                logger.error(f"Error sending audio file: {e}")
-                                # Fall back to text message if audio fails
-                                pass
+                        # Send info about existing file
+                        # Note: We don't send the actual audio file to avoid timeouts
+                        # with large FLAC files. User can access it via their music server.
 
-                            text = f"""✅ <b>Уже загружен</b>
+                        text = f"""✅ <b>Уже загружен</b>
 
 🎵 {title}
 🎤 {artist}
@@ -267,9 +253,10 @@ async def download_track(video_id: str, title: str, artist: str, source: str,
 🎼 Качество: {audio_quality}
 📦 Размер: {size_mb:.1f} MB
 
-Файл отправлен из вашей библиотеки!"""
+⚠️ Файл уже есть в вашей библиотеке!
+Используйте Navidrome/Jellyfin для прослушивания."""
 
-                            await update.effective_message.reply_text(text, parse_mode="HTML")
+                        await update.effective_message.reply_text(text, parse_mode="HTML")
 
                     return {"status": "existing", "file": file_path}
     except Exception as e:
