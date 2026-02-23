@@ -1,6 +1,9 @@
 # GitLab token - DO NOT COMMIT
 .gitlab-token
 
+# Environment variables (contains secrets)
+.env
+
 # Python
 __pycache__/
 *.py[cod]

@@ -14,19 +14,8 @@ services:
       - ./data:/data
       # Optional: slskd downloads directory for Soulseek integration
       # - /path/to/slskd/downloads:/downloads
-    environment:
-      # Required paths
-      - MUSIC_DIR=/music
-      - DB_PATH=/data/music_grabber.db
-      # Optional: Run as specific user (like *arr stack)
-      # - PUID=1000
-      # - PGID=1000
-      # Optional: slskd downloads path (if using Soulseek)
-      # - SLSKD_DOWNLOADS_PATH=/downloads
-      # Optional: Telegram Bot (get token from @BotFather)
-      # - TELEGRAM_BOT_TOKEN=your_bot_token_here
-      # Optional: Restrict bot access to specific users (comma-separated chat IDs)
-      # - TELEGRAM_ALLOWED_USERS=123456789,987654321
+    env_file:
+      - .env
     # Optional: add to your existing network if running with Navidrome/Jellyfin
     # networks:
     #   - your-network
@@ -37,7 +26,9 @@ services:
 # Most settings can now be configured via the Settings tab in the web UI.
 # Settings are stored in the SQLite database and persist across restarts.
 #
-# Environment variables can still be used to override UI settings:
+# Environment variables can be configured in .env file:
+#   - TELEGRAM_BOT_TOKEN (required for bot)
+#   - TELEGRAM_ALLOWED_USERS (optional, empty = all users allowed)
 #   - SLSKD_URL, SLSKD_USER, SLSKD_PASS
 #   - NAVIDROME_URL, NAVIDROME_USER, NAVIDROME_PASS
 #   - JELLYFIN_URL, JELLYFIN_API_KEY
@@ -46,6 +37,6 @@ services:
 #   - NOTIFY_ON (singles,playlists,bulk,errors)
 #   - ENABLE_MUSICBRAINZ, ENABLE_LYRICS, DEFAULT_CONVERT_TO_FLAC
 #   - API_KEY (for authentication)
+#   - PUID, PGID (run as specific user)
 #
 # When an env var is set, that setting will be locked in the UI.
-      - DEFAULT_CONVERT_TO_FLAC=true

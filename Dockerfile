@@ -13,18 +13,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN curl -L https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp -o /usr/local/bin/yt-dlp \
     && chmod a+rx /usr/local/bin/yt-dlp
 
-# Install Python dependencies
+# Install Python dependencies (let pip resolve versions)
 RUN pip install --no-cache-dir \
-    fastapi~=0.128.0 \
-    uvicorn[standard]~=0.40.0 \
-    httpx~=0.28.1 \
-    pydantic~=2.12.5 \
-    mutagen~=1.47.0 \
-    playwright~=1.58.0 \
-    python-telegram-bot~=20.7
-
-# Install Playwright browsers (Chromium only to save space)
-RUN playwright install chromium --with-deps
+    fastapi \
+    uvicorn[standard] \
+    httpx \
+    pydantic \
+    mutagen \
+    python-telegram-bot
 
 # Create app directory
 WORKDIR /app

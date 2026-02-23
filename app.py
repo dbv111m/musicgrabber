@@ -1597,14 +1597,10 @@ start_scheduler()
 # =============================================================================
 
 try:
-    from telegram_bot import setup_bot, run_bot_thread
+    from telegram_bot import run_bot_process
     if os.getenv("TELEGRAM_BOT_TOKEN"):
-        bot_app = setup_bot()
-        if bot_app:
-            run_bot_thread()
-            print("Telegram bot started")
-        else:
-            print("Failed to start Telegram bot")
+        run_bot_process()
+        print("Telegram bot started in background process")
     else:
         print("Telegram bot disabled (set TELEGRAM_BOT_TOKEN to enable)")
 except ImportError:

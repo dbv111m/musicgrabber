@@ -884,13 +884,26 @@ def run_bot():
     app.run_polling(allowed_updates=["message", "callback_query"])
 
 
-def run_bot_thread():
-    """Run bot in background thread."""
-    import threading
-    thread = threading.Thread(target=run_bot, daemon=True)
-    thread.start()
-    logger.info("Telegram bot started in background thread")
-    return thread
+async def run_bot_async():
+    """Run bot asynchronously (for integration with FastAPI)."""
+    app = setup_bot()
+    if not app:
+        logger.error("Failed to setup bot")
+        return
+
+    logger.info("Starting MusicGrabber Telegram bot (async)...")
+    await app.initialize()
+    await app.start()
+    await app.updater.start_polling(drop_pending_updates=True)
+
+
+def run_bot_process():
+    """Run bot in separate process (for background execution)."""
+    import multiprocessing
+    process = multiprocessing.Process(target=run_bot, daemon=True)
+    process.start()
+    logger.info("Telegram bot started in background process")
+    return process
 
 
 # =============================================================================
