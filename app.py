@@ -193,6 +193,37 @@ def list_music_dirs(path: str = "", recursive: bool = False, max_depth: int | No
     }
 
 
+@app.get("/api/check-file")
+def check_existing_file(artist: str, title: str):
+    """Check if a track already exists in the library.
+
+    Returns the file path if found, along with metadata from the jobs database.
+    This allows Telegram bot to send existing files instead of re-downloading.
+    """
+    from utils import check_duplicate
+
+    existing_file = check_duplicate(artist, title)
+    if not existing_file:
+        return {"exists": False, "file": None}
+
+    # Get job metadata if available
+    with db_conn() as conn:
+        conn.row_factory = sqlite3.Row
+        job = conn.execute(
+            "SELECT * FROM jobs WHERE artist = ? AND title = ? AND status = 'completed' ORDER BY completed_at DESC LIMIT 1",
+            (artist, title)
+        ).fetchone()
+
+    return {
+        "exists": True,
+        "file": str(existing_file.relative_to(MUSIC_DIR)),
+        "full_path": str(existing_file),
+        "filename": existing_file.name,
+        "size": existing_file.stat().st_size,
+        "metadata": dict(job) if job else None
+    }
+
+
 # =============================================================================
 # Settings API
 # =============================================================================
@@ -1590,6 +1621,88 @@ def check_all_watched_playlists():
 # =============================================================================
 
 start_scheduler()
+
+
+# =============================================================================
+# File System Sync Scheduler
+# =============================================================================
+
+def sync_file_system():
+    """Sync database with actual files on disk.
+
+    Runs periodically to update file paths when users manually move files.
+    Mark jobs as file_deleted=True if the file no longer exists.
+    """
+    try:
+        from utils import check_duplicate
+
+        with db_conn() as conn:
+            conn.row_factory = sqlite3.Row
+
+            # Get all completed jobs
+            jobs = conn.execute(
+                "SELECT id, artist, title, file_deleted FROM jobs WHERE status = 'completed'"
+            ).fetchall()
+
+            updated_count = 0
+            for job in jobs:
+                artist = job["artist"] or ""
+                title = job["title"] or ""
+
+                # Skip if no artist/title
+                if not artist or not title:
+                    continue
+
+                # Check if file still exists
+                existing = check_duplicate(artist, title)
+
+                if existing:
+                    # File exists, make sure file_deleted is False
+                    if job["file_deleted"]:
+                        conn.execute(
+                            "UPDATE jobs SET file_deleted = 0 WHERE id = ?",
+                            (job["id"],)
+                        )
+                        updated_count += 1
+                else:
+                    # File doesn't exist, mark as deleted
+                    if not job["file_deleted"]:
+                        conn.execute(
+                            "UPDATE jobs SET file_deleted = 1 WHERE id = ?",
+                            (job["id"],)
+                        )
+                        updated_count += 1
+
+            conn.commit()
+
+        if updated_count > 0:
+            print(f"File system sync: updated {updated_count} jobs")
+
+    except Exception as e:
+        print(f"File system sync error: {e}")
+
+
+def start_file_system_sync():
+    """Start periodic file system sync in background."""
+    import threading
+    import time
+
+    def sync_worker():
+        while True:
+            try:
+                sync_file_system()
+            except Exception as e:
+                print(f"File system sync worker error: {e}")
+            # Sync every hour
+            time.sleep(3600)
+
+    thread = threading.Thread(target=sync_worker, daemon=True)
+    thread.start()
+    print("File system sync scheduler started (every hour)")
+
+
+# Start file system sync
+start_file_system_sync()
 
 
 # =============================================================================

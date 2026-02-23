@@ -211,19 +211,85 @@ async def search_music(query: str, source: str, limit: int = 10) -> list:
 
 
 async def download_track(video_id: str, title: str, artist: str, source: str,
-                        convert_to_flac: bool, chat_id: int) -> Optional[str]:
-    """Queue track download and return job ID."""
+                        convert_to_flac: bool, chat_id: int, source_url: str = None,
+                        update: Update = None) -> Optional[dict]:
+    """Queue track download and return job ID.
+
+    If file already exists, returns 'existing' status with file info.
+    Otherwise queues download and returns job ID.
+
+    If update is provided, sends message to Telegram (for existing files).
+    """
+    # First check if file already exists
     try:
         async with httpx.AsyncClient(timeout=10) as client:
+            check_response = await client.get(
+                "http://localhost:8080/api/check-file",
+                params={"artist": artist, "title": title}
+            )
+            if check_response.status_code == 200:
+                check_data = check_response.json()
+                if check_data.get("exists"):
+                    # File exists! Send it to user
+                    file_path = check_data.get("full_path")
+                    filename = check_data.get("filename")
+                    size = check_data.get("size", 0)
+                    size_mb = size / (1024 * 1024)
+
+                    if update:
+                        metadata = check_data.get("metadata", {})
+                        audio_quality = metadata.get("audio_quality", "Unknown") if metadata else "Unknown"
+
+                        text = f"""✅ <b>Уже загружен</b>
+
+🎵 {title}
+🎤 {artist}
+
+📁 Файл: {filename}
+🎼 Качество: {audio_quality}
+📦 Размер: {size_mb:.1f} MB
+
+Файл отправлен из вашей библиотеки!"""
+
+                        # Send the audio file
+                        from pathlib import Path
+                        audio_file = Path(file_path)
+                        if audio_file.exists():
+                            with open(audio_file, 'rb') as f:
+                                await update.effective_message.reply_audio(
+                                    f,
+                                    filename=filename,
+                                    title=title,
+                                    performer=artist,
+                                    caption=f"🎵 {title}\n🎤 {artist}\n\nИз вашей библиотеки MusicGrabber"
+                                )
+                        else:
+                            # File in DB but not on disk - queue re-download
+                            pass
+                        await update.effective_message.reply_text(text, parse_mode="HTML")
+
+                    return {"status": "existing", "file": file_path}
+    except Exception as e:
+        logger.error(f"Error checking existing file: {e}")
+        # Continue to download if check fails
+
+    # Queue download
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            payload = {
+                "video_id": video_id,
+                "title": title,
+                "artist": artist,
+                "source": source,
+                "convert_to_flac": convert_to_flac
+            }
+            # Add source_url for non-YouTube sources
+            if source_url and source in ["soundcloud", "monochrome"]:
+                payload["source_url"] = source_url
+
             response = await client.post(
                 "http://localhost:8080/api/download",
-                json={
-                    "video_id": video_id,
-                    "title": title,
-                    "artist": artist,
-                    "source": source,
-                    "convert_to_flac": convert_to_flac
-                }
+                json=payload
             )
             response.raise_for_status()
             data = response.json()
@@ -765,15 +831,26 @@ async def callback_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
     settings = get_user_settings(chat_id)
 
     # Download
-    job_id = await download_track(
+    result = await download_track(
         video_id=result["video_id"],
         title=result.get("title", "Unknown"),
         artist=result.get("artist") or result.get("channel", "Unknown"),
         source=result.get("source", "youtube"),
         convert_to_flac=settings["convert_to_flac"],
-        chat_id=chat_id
+        chat_id=chat_id,
+        source_url=result.get("source_url"),
+        update=update
     )
 
+    if not result:
+        await query.edit_message_text("❌ Ошибка при добавлении в очередь.")
+        return
+
+    # File already exists - messages already sent by download_track
+    if result.get("status") == "existing":
+        return
+
+    job_id = result.get("job_id")
     if not job_id:
         await query.edit_message_text("❌ Ошибка при добавлении в очередь.")
         return
