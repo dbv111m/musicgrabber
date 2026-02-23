@@ -337,8 +337,8 @@ def build_results_keyboard(results: list, page: int = 0, per_page: int = 5):
         }.get(result.get("source", "youtube"), "⚪")
 
         quality = result.get("quality", "N/A")
-        title = result.get("title", "Unknown")[:30]
-        artist = result.get("artist", result.get("channel", "Unknown"))[:20]
+        title = (result.get("title") or "Unknown")[:30]
+        artist = (result.get("artist") or result.get("channel") or "Unknown")[:20]
 
         label = f"{idx}. {source_emoji} {artist} - {title} [{quality}]"
         callback = f"download_{start + i}"
