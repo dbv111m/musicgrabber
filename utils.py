@@ -116,10 +116,13 @@ def check_duplicate(artist: str, title: str) -> Optional[Path]:
     """Check if a track already exists in the library (any audio format).
 
     Checks the current download directory (artist subfolder or flat) and also
-    peeks at the other layout so switching modes doesn't silently re-download.
+    peeks at the other layout so switching modes don't cause silent re-downloads.
     """
     try:
         sanitized_title = sanitize_filename(title)
+
+        # Normalize unicode - replace various apostrophe variants with standard one
+        sanitized_title = sanitized_title.replace('\u2019', "'").replace('\u2018', "'").replace('\u02bb', "'")
 
         # Check both possible locations so mode switches don't cause re-downloads
         dirs_to_check = [
@@ -139,13 +142,16 @@ def check_duplicate(artist: str, title: str) -> Optional[Path]:
                 if expected_file.exists():
                     return expected_file
 
-            # Case-insensitive fallback
+            # Case-insensitive fallback with apostrophe normalization
             title_lower = sanitized_title.lower()
             for ext in AUDIO_EXTENSIONS:
                 for file in d.glob(f"*{ext}"):
-                    if file.stem.lower() == title_lower:
+                    file_stem = file.stem.replace('\u2019', "'").replace('\u2018', "'").replace('\u02bb', "'")
+                    if file_stem.lower() == title_lower:
                         return file
 
+        return None
+    except Exception:
         return None
     except Exception:
         return None

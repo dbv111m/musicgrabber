@@ -96,6 +96,7 @@ SETTINGS_SCHEMA = {
     # Notifications
     "notify_on": {"type": "str", "default": "playlists,bulk,errors", "env": "NOTIFY_ON"},
     "telegram_webhook_url": {"type": "str", "default": "", "env": "TELEGRAM_WEBHOOK_URL", "sensitive": True},
+    "telegram_convert_to_mp3": {"type": "bool", "default": True, "env": "TELEGRAM_CONVERT_TO_MP3"},
     "smtp_host": {"type": "str", "default": "", "env": "SMTP_HOST"},
     "smtp_port": {"type": "int", "default": 587, "env": "SMTP_PORT"},
     "smtp_user": {"type": "str", "default": "", "env": "SMTP_USER"},

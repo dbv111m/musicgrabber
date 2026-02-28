@@ -4,12 +4,18 @@ MusicGrabber - Notification System
 Telegram webhook and SMTP email dispatch.
 """
 
+import asyncio
+import os
 import smtplib
+import sqlite3
+import subprocess
+import tempfile
 from email.mime.text import MIMEText
+from pathlib import Path
 
 import httpx
 
-from constants import TIMEOUT_HTTP_REQUEST
+from constants import DB_PATH, TIMEOUT_HTTP_REQUEST, MUSIC_DIR
 from settings import get_setting, get_setting_bool, get_setting_int
 
 
@@ -225,4 +231,113 @@ def send_notification(
         notification_type, title, artist, source, status,
         error, track_count, failed_count, skipped_count, playlist_name
     )
+
+
+def send_audio_to_telegram(job_id: str):
+    """Send downloaded audio file to Telegram user who requested it."""
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.row_factory = sqlite3.Row
+            job = conn.execute(
+                "SELECT artist, title, telegram_chat_id, file_path FROM jobs WHERE id = ?",
+                (job_id,)
+            ).fetchone()
+
+            if not job:
+                return
+
+            chat_id = job["telegram_chat_id"]
+            if not chat_id:
+                return
+
+            file_path = job["file_path"]
+            if not file_path:
+                return
+
+            # Resolve full path
+            if not Path(file_path).is_absolute():
+                file_path = MUSIC_DIR / file_path
+
+            audio_file = Path(file_path)
+            if not audio_file.exists():
+                print(f"Notifications: File not found: {audio_file}")
+                return
+
+            artist = job["artist"] or "Unknown"
+            title = job["title"] or "Unknown"
+            size_mb = audio_file.stat().st_size / (1024 * 1024)
+
+            if size_mb > 50:
+                print(f"Notifications: File too large for Telegram: {size_mb:.1f}MB")
+                return
+
+            # Convert to MP3 if needed (controlled by setting, default True)
+            audio_path = str(audio_file)
+            is_flac = audio_file.suffix.lower() == '.flac'
+            is_opus = audio_file.suffix.lower() == '.opus'
+            is_m4a = audio_file.suffix.lower() == '.m4a'
+            temp_mp3 = None
+            filename = audio_file.name
+            
+            # Default to True for Telegram - always convert to MP3
+            convert_to_mp3 = get_setting_bool("telegram_convert_to_mp3", True)
+            
+            if convert_to_mp3 and (is_flac or is_opus or is_m4a):
+                temp_mp3 = tempfile.NamedTemporaryFile(suffix='.mp3', delete=False)
+                temp_mp3.close()
+                try:
+                    subprocess.run([
+                        'ffmpeg', '-i', audio_path,
+                        '-b:a', '320k',
+                        '-y', temp_mp3.name
+                    ], check=True, capture_output=True, timeout=60)
+                    audio_path = temp_mp3.name
+                    filename = audio_file.stem + '.mp3'
+                except subprocess.TimeoutExpired:
+                    print(f"Notifications: FFmpeg timeout for {filename}")
+                    if temp_mp3 and os.path.exists(temp_mp3.name):
+                        os.unlink(temp_mp3.name)
+                    return
+                except subprocess.CalledProcessError as e:
+                    print(f"Notifications: FFmpeg conversion failed: {e}")
+                    if temp_mp3 and os.path.exists(temp_mp3.name):
+                        os.unlink(temp_mp3.name)
+                    return
+
+            # Send audio via Telegram Bot API using curl with longer timeout
+            bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
+            if not bot_token:
+                return
+            
+            # Use curl for better compatibility with longer timeout
+            caption = f"🎵 {title}\n🎤 {artist}\n\n✅ Скачано MusicGrabber"
+            
+            # Use 30 minute timeout for large files (slow upload speeds)
+            # Specify filename to ensure Telegram recognizes it as audio
+            try:
+                result = subprocess.run([
+                    'curl', '-s', '-X', 'POST',
+                    f'https://api.telegram.org/bot{bot_token}/sendAudio',
+                    '-F', f'chat_id={chat_id}',
+                    '-F', f'title={title}',
+                    '-F', f'performer={artist}',
+                    '-F', f'caption={caption}',
+                    '-F', f'audio=@{audio_path};type=audio/mpeg'
+                ], capture_output=True, text=True, timeout=1800)
+                
+                if '"ok":true' in result.stdout:
+                    print(f"Notifications: Sent audio to {chat_id}: {artist} - {title}")
+                else:
+                    print(f"Notifications: Failed to send audio: {result.stdout[:200]}")
+            except subprocess.TimeoutExpired:
+                print(f"Notifications: Timeout sending audio to {chat_id}")
+            except Exception as e:
+                print(f"Notifications: Error sending audio: {e}")
+
+            # Cleanup temp file
+            if temp_mp3 and os.path.exists(temp_mp3.name):
+                os.unlink(temp_mp3.name)
+
+    except Exception as e:
+        print(f"Notifications: Error sending audio: {e}")
 

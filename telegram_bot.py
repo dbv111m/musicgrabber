@@ -240,7 +240,7 @@ async def download_track(video_id: str, title: str, artist: str, source: str,
                         metadata = check_data.get("metadata", {})
                         audio_quality = metadata.get("audio_quality", "Unknown") if metadata else "Unknown"
 
-                        # Send audio file with extended timeout
+                        # Send audio file via direct HTTP API with extended timeout
                         from pathlib import Path
                         audio_file = Path(file_path)
                         if audio_file.exists():
@@ -261,19 +261,67 @@ async def download_track(video_id: str, title: str, artist: str, source: str,
 
                                     await update.effective_message.reply_text(text, parse_mode="HTML")
                                 else:
-                                    # Send audio file with extended timeout
                                     import asyncio
-                                    with open(audio_file, 'rb') as f:
-                                        await asyncio.wait_for(
-                                            update.effective_message.reply_audio(
-                                                f,
-                                                filename=filename,
-                                                title=title,
-                                                performer=artist,
-                                                caption=f"🎵 {title}\n🎤 {artist}\n\n✅ Из вашей библиотеки MusicGrabber"
-                                            ),
-                                            timeout=60.0  # 60 seconds for audio upload
-                                        )
+                                    import httpx as httpx_client
+                                    import subprocess
+                                    import tempfile
+                                    import os
+
+                                    bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
+                                    send_url = f"https://api.telegram.org/bot{bot_token}/sendAudio"
+
+                                    # Convert to MP3 if needed (controlled by setting, default True)
+                                    audio_path = str(audio_file)
+                                    is_flac = audio_file.suffix.lower() == '.flac'
+                                    is_opus = audio_file.suffix.lower() == '.opus'
+                                    is_m4a = audio_file.suffix.lower() == '.m4a'
+                                    temp_mp3 = None
+
+                                    # Default to True - always convert to MP3
+                                    convert_to_mp3 = os.getenv("TELEGRAM_CONVERT_TO_MP3", "true").lower() == "true"
+
+                                    if convert_to_mp3 and (is_flac or is_opus or is_m4a):
+                                        # Convert to MP3 using ffmpeg
+                                        temp_mp3 = tempfile.NamedTemporaryFile(suffix='.mp3', delete=False)
+                                        temp_mp3.close()
+                                        try:
+                                            subprocess.run([
+                                                'ffmpeg', '-i', audio_path,
+                                                '-b:a', '320k',
+                                                '-y', temp_mp3.name
+                                            ], check=True, capture_output=True)
+                                            audio_path = temp_mp3.name
+                                            filename = filename.replace('.flac', '.mp3').replace('.opus', '.mp3').replace('.m4a', '.mp3')
+                                            content_type = "audio/mpeg"
+                                        except subprocess.CalledProcessError as e:
+                                            logger.error(f"FFmpeg conversion failed: {e}")
+                                            await update.effective_message.reply_text(
+                                                f"❌ Ошибка конвертации файла: {str(e)}",
+                                                parse_mode="HTML"
+                                            )
+                                            return
+                                    else:
+                                        content_type = "audio/mpeg"
+
+                                    # Prepare multipart form data
+                                    data = {
+                                        "chat_id": str(chat_id),
+                                        "filename": filename.replace('.flac', '.mp3') if is_flac else filename,
+                                        "title": title,
+                                        "performer": artist,
+                                        "caption": f"🎵 {title}\n🎤 {artist}\n\n✅ Из вашей библиотеки MusicGrabber"
+                                    }
+
+                                    try:
+                                        async with httpx_client.AsyncClient(timeout=1800.0) as api_client:
+                                            with open(audio_path, 'rb') as f:
+                                                files = {"audio": (filename.replace('.flac', '.mp3') if is_flac else filename, f, content_type)}
+                                                response = await api_client.post(send_url, data=data, files=files)
+                                                response.raise_for_status()
+                                    finally:
+                                        # Clean up temp file
+                                        if temp_mp3 and os.path.exists(temp_mp3.name):
+                                            os.unlink(temp_mp3.name)
 
                                     # Send success message
                                     text = f"""✅ <b>Уже загружен</b>
@@ -348,7 +396,8 @@ async def download_track(video_id: str, title: str, artist: str, source: str,
                 "title": title,
                 "artist": artist,
                 "source": source,
-                "convert_to_flac": convert_to_flac
+                "convert_to_flac": convert_to_flac,
+                "telegram_chat_id": chat_id
             }
             # Add source_url for non-YouTube sources
             if source_url and source in ["soundcloud", "monochrome"]:
@@ -362,15 +411,6 @@ async def download_track(video_id: str, title: str, artist: str, source: str,
             data = response.json()
 
             job_id = data.get("job_id")
-
-            # Link job to chat
-            conn = get_db_connection()
-            conn.execute(
-                "UPDATE jobs SET telegram_chat_id = ? WHERE id = ?",
-                (chat_id, job_id)
-            )
-            conn.commit()
-            conn.close()
 
             return {"status": "queued", "job_id": job_id}
 
@@ -916,6 +956,10 @@ async def callback_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # File already exists - messages already sent by download_track
     if download_result.get("status") == "existing":
+        try:
+            await query.edit_message_text("✅ Файл отправлен!", parse_mode="HTML")
+        except Exception:
+            pass
         return
 
     job_id = download_result.get("job_id")
@@ -925,13 +969,13 @@ async def callback_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     text = f"""⏳ <b>Добавлено в очередь</b>
 
-🎵 {result.get('title', 'Unknown')}
-🎤 {result.get('artist') or result.get('channel', 'Unknown')}
+🎵 {track.get('title', 'Unknown')}
+🎤 {track.get('artist') or track.get('channel', 'Unknown')}
 
 Используйте /queue для отслеживания прогресса."""
 
     await query.edit_message_text(text, parse_mode="HTML")
-    log_bot_action(chat_id, "download", f"{result.get('title')}, job: {job_id}")
+    log_bot_action(chat_id, "download", f"{track.get('title')}, job: {job_id}")
 
 
 async def callback_page(update: Update, context: ContextTypes.DEFAULT_TYPE):

@@ -224,6 +224,44 @@ def check_existing_file(artist: str, title: str):
     }
 
 
+@app.get("/api/file/{file_path:path}")
+def serve_music_file(file_path: str):
+    """Serve a music file for Telegram URL-based upload.
+    
+    Telegram will download the file from this URL instead of us pushing it.
+    This is more reliable than direct upload which can timeout.
+    """
+    from fastapi import Header
+    from fastapi.responses import FileResponse
+    
+    file_path_clean = file_path.replace("..", "")
+    full_path = MUSIC_DIR / file_path_clean
+    
+    if not full_path.exists():
+        raise HTTPException(status_code=404, detail="File not found")
+    
+    if not full_path.is_file():
+        raise HTTPException(status_code=400, detail="Not a file")
+    
+    # Determine content type
+    suffix = full_path.suffix.lower()
+    content_types = {
+        '.mp3': 'audio/mpeg',
+        '.flac': 'audio/flac',
+        '.m4a': 'audio/mp4',
+        '.ogg': 'audio/ogg',
+        '.opus': 'audio/ogg',
+        '.wav': 'audio/wav',
+    }
+    content_type = content_types.get(suffix, 'audio/mpeg')
+    
+    return FileResponse(
+        full_path,
+        media_type=content_type,
+        filename=full_path.name
+    )
+
+
 # =============================================================================
 # Settings API
 # =============================================================================
@@ -896,16 +934,16 @@ def download(request: DownloadRequest):
 
         if request.download_type == "playlist":
             conn.execute(
-                """INSERT INTO jobs (id, video_id, title, status, download_type, playlist_name, source, convert_to_flac, source_url, search_token)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (job_id, request.video_id, title, "queued", "playlist", title, "youtube", int(request.convert_to_flac), source_url, valid_search_token)
+                """INSERT INTO jobs (id, video_id, title, status, download_type, playlist_name, source, convert_to_flac, source_url, search_token, telegram_chat_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (job_id, request.video_id, title, "queued", "playlist", title, "youtube", int(request.convert_to_flac), source_url, valid_search_token, request.telegram_chat_id)
             )
         else:
             conn.execute(
-                """INSERT INTO jobs (id, video_id, title, artist, status, download_type, source, slskd_username, slskd_filename, convert_to_flac, source_url, search_token)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                """INSERT INTO jobs (id, video_id, title, artist, status, download_type, source, slskd_username, slskd_filename, convert_to_flac, source_url, search_token, telegram_chat_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (job_id, request.video_id, title, artist or "", "queued", "single", source,
-                 request.slskd_username, request.slskd_filename, int(request.convert_to_flac), source_url, valid_search_token)
+                 request.slskd_username, request.slskd_filename, int(request.convert_to_flac), source_url, valid_search_token, request.telegram_chat_id)
             )
         conn.commit()
 

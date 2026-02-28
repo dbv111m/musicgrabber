@@ -678,9 +678,14 @@ def process_slskd_download(job_id: str, username: str, filename: str, artist: st
                 job_id,
                 status="completed",
                 completed_at=datetime.now(timezone.utc).isoformat(),
+                file_path=str(existing_file.relative_to(MUSIC_DIR)),
                 error=f"Already exists: {existing_file.name}"
             )
             _mark_watched_track_downloaded(job_id)
+            
+            # Send existing file to Telegram
+            from notifications import send_audio_to_telegram
+            send_audio_to_telegram(job_id)
             return
 
         # Create download directory (with or without artist subfolder)
@@ -809,6 +814,7 @@ def process_slskd_download(job_id: str, username: str, filename: str, artist: st
             error=None,
             audio_quality=audio_quality,
             metadata_source=metadata_source,
+            file_path=str(final_file.relative_to(MUSIC_DIR)),
             completed_at=datetime.now(timezone.utc).isoformat()
         )
         _mark_watched_track_downloaded(job_id)
@@ -820,9 +826,13 @@ def process_slskd_download(job_id: str, username: str, filename: str, artist: st
             notification_type="single",
             title=title,
             artist=artist,
-            source="soulseek",
+            source=source_label,
             status="completed"
         )
+
+        # Send audio file to Telegram
+        from notifications import send_audio_to_telegram
+        send_audio_to_telegram(job_id)
 
     except Exception as e:
         print(f"slskd download failed: {e}")
@@ -928,9 +938,11 @@ def _get_monochrome_track_info(track_id: str) -> dict | None:
         return None
 
 
-def _process_monochrome_download(job_id: str, track_id: str, convert_to_flac: bool = True):
+def _process_monochrome_download(job_id: str, track_id: str, convert_to_flac: bool = True) -> bool:
     """Download a track directly from Monochrome/Tidal — no yt-dlp needed.
 
+    Returns True if successful, False if failed (so fallback can be triggered).
+    
     The API gives us proper metadata (artist, album, ISRC) so we don't need
     to guess from dodgy YouTube titles. The audio is genuine lossless FLAC
     straight off the Tidal CDN.
@@ -964,9 +976,14 @@ def _process_monochrome_download(job_id: str, track_id: str, convert_to_flac: bo
                 job_id,
                 status="completed",
                 completed_at=datetime.now(timezone.utc).isoformat(),
+                file_path=str(existing_file.relative_to(MUSIC_DIR)),
                 error=f"Already exists: {existing_file.name}"
             )
             _mark_watched_track_downloaded(job_id)
+            
+            # Send existing file to Telegram
+            from notifications import send_audio_to_telegram
+            send_audio_to_telegram(job_id)
             return
 
         # Create download directory
@@ -1035,6 +1052,7 @@ def _process_monochrome_download(job_id: str, track_id: str, convert_to_flac: bo
             error=None,
             audio_quality=audio_quality,
             metadata_source=metadata_source,
+            file_path=str(output_path.relative_to(MUSIC_DIR)),
             completed_at=datetime.now(timezone.utc).isoformat()
         )
         _mark_watched_track_downloaded(job_id)
@@ -1049,18 +1067,28 @@ def _process_monochrome_download(job_id: str, track_id: str, convert_to_flac: bo
             status="completed"
         )
 
+        # Send audio file to Telegram
+        from notifications import send_audio_to_telegram
+        send_audio_to_telegram(job_id)
+        
+        return True
+
     except Exception as e:
         print(f"Monochrome download failed: {e}")
         _update_job(job_id, status="failed", error=str(e), completed_at=datetime.now(timezone.utc).isoformat())
 
         send_notification(
             notification_type="error",
-            title=title,
-            artist=artist,
+            title=title if title else "Unknown",
+            artist=artist if artist else "Unknown",
             source=source_label,
             status="failed",
             error=str(e)
         )
+        
+        return False
+    
+    return True
 
 
 def process_download(job_id: str, video_id: str, convert_to_flac: bool = True, source_url: str = None):
@@ -1076,8 +1104,40 @@ def process_download(job_id: str, video_id: str, convert_to_flac: bool = True, s
 
     # Monochrome gets its own dedicated download path — no yt-dlp needed
     if is_monochrome:
-        _process_monochrome_download(job_id, video_id, convert_to_flac)
-        return
+        success = _process_monochrome_download(job_id, video_id, convert_to_flac)
+        if success:
+            return
+        
+        # Monochrome failed, fallback to YouTube
+        print(f"Monochrome failed, falling back to YouTube")
+        
+        # Get artist/title from job to search on YouTube
+        with db_conn() as conn:
+            conn.row_factory = sqlite3.Row
+            job = conn.execute("SELECT artist, title FROM jobs WHERE id = ?", (job_id,)).fetchone()
+            artist = job["artist"] if job else None
+            title = job["title"] if job else None
+        
+        if artist and title:
+            # Search YouTube for the track
+            from youtube import search_youtube
+            youtube_results = search_youtube(f"{artist} {title}", limit=1)
+            if youtube_results:
+                video_id = youtube_results[0]["video_id"]
+                print(f"Found YouTube video: {youtube_results[0]['title']}")
+            else:
+                print(f"Monochrome failed, YouTube search also failed for {artist} - {title}")
+                return
+        else:
+            print(f"Monochrome failed, no artist/title found")
+            return
+        
+        is_monochrome = False
+        is_soundcloud = False
+        source_url = None  # Clear source_url so YouTube URL is used
+        source_label = "youtube"
+        target_url = f"https://www.youtube.com/watch?v={video_id}"
+        _update_job(job_id, status="queued", source="youtube")
 
     if is_soundcloud:
         source_label = "soundcloud"
@@ -1136,9 +1196,14 @@ def process_download(job_id: str, video_id: str, convert_to_flac: bool = True, s
                 job_id,
                 status="completed",
                 completed_at=datetime.now(timezone.utc).isoformat(),
+                file_path=str(existing_file.relative_to(MUSIC_DIR)),
                 error=f"Already exists: {existing_file.name}"
             )
             _mark_watched_track_downloaded(job_id)
+            
+            # Send existing file to Telegram
+            from notifications import send_audio_to_telegram
+            send_audio_to_telegram(job_id)
             return
 
         # Create download directory (with or without artist subfolder)
@@ -1241,6 +1306,7 @@ def process_download(job_id: str, video_id: str, convert_to_flac: bool = True, s
             error=None,
             audio_quality=audio_quality,
             metadata_source=metadata_source,
+            file_path=str(audio_file.relative_to(MUSIC_DIR)),
             completed_at=datetime.now(timezone.utc).isoformat()
         )
         _mark_watched_track_downloaded(job_id)
@@ -1253,6 +1319,10 @@ def process_download(job_id: str, video_id: str, convert_to_flac: bool = True, s
             source=source_label,
             status="completed"
         )
+
+        # Send audio file to Telegram
+        from notifications import send_audio_to_telegram
+        send_audio_to_telegram(job_id)
 
     except Exception as e:
         _update_job(job_id, status="failed", error=str(e), completed_at=datetime.now(timezone.utc).isoformat())

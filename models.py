@@ -25,6 +25,8 @@ class DownloadRequest(BaseModel):
     # Soulseek-specific fields
     slskd_username: Optional[str] = None
     slskd_filename: Optional[str] = None
+    # Telegram
+    telegram_chat_id: Optional[int] = None  # Chat ID for sending notifications
 
 class PlaylistFetchRequest(BaseModel):
     url: str  # Spotify, Amazon Music, etc. playlist URL
