@@ -740,8 +740,8 @@ async def handle_search_query(update: Update, context: ContextTypes.DEFAULT_TYPE
     chat_id = update.effective_chat.id
     query = update.message.text.strip()
 
-    if not get_user_context(chat_id, "awaiting_search"):
-        return  # Not in search mode
+ # Search directly on any text message - no need to click "Search" first
+ # (removed awaiting_search check)
 
     if not query:
         await update.message.reply_text("❌ Пустой запрос. Попробуйте ещё раз:")
