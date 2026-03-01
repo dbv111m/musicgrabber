@@ -513,11 +513,21 @@ def build_results_keyboard(results: list, page: int = 0, per_page: int = 5):
             "soulseek": "🟢",
         }.get(result.get("source", "youtube"), "⚪")
 
-        quality = result.get("quality", "N/A")
+        quality_raw = result.get("quality", "N/A")
+        # Map quality to user-friendly names
+        quality_map = {
+            "LOSSLESS": "",  # Hide LOSSLESS - all Monochrome tracks are lossless
+            "HI_RES": "Hi-Res",
+            "HIGH": "",
+            "NORMAL": "",
+            "LOW": "",
+        }
+        quality = quality_map.get(quality_raw, quality_raw) if quality_raw else ""
+        quality_str = f" [{quality}]" if quality else ""
         title = (result.get("title") or "Unknown")[:30]
         artist = (result.get("artist") or result.get("channel") or "Unknown")[:20]
 
-        label = f"{idx}. {source_emoji} {artist} - {title} [{quality}]"
+        label = f"{idx}. {source_emoji} {artist} - {title}{quality_str}"
         callback = f"download_{start + i}"
         keyboard.append([InlineKeyboardButton(label, callback_data=callback)])
 
