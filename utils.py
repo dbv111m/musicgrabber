@@ -153,8 +153,6 @@ def check_duplicate(artist: str, title: str) -> Optional[Path]:
         return None
     except Exception:
         return None
-    except Exception:
-        return None
 
 
 def set_file_permissions(file_path: Path):

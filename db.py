@@ -4,13 +4,20 @@ MusicGrabber - Database Layer
 SQLite connection management, schema creation, and job monitoring.
 """
 
+import logging
 import sqlite3
+from contextlib import contextmanager
+import queue
+import threading
+import time
 from contextlib import contextmanager
 import queue
 import threading
 import time
 from constants import DB_PATH, STALE_JOB_TIMEOUT, STALE_JOB_CHECK_INTERVAL, SEARCH_LOG_RETENTION_DAYS
 
+# Setup logger
+logger = logging.getLogger(__name__)
 
 def get_db() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH, timeout=10, check_same_thread=False)
@@ -303,7 +310,7 @@ def cleanup_stale_jobs():
             (str(-STALE_JOB_TIMEOUT),)
         )
         if cursor.rowcount > 0:
-            print(f"Cleaned up {cursor.rowcount} stale job(s)")
+            logger.info(f"Cleaned up {cursor.rowcount} stale job(s)")
         conn.commit()
 
 
@@ -315,7 +322,7 @@ def _stale_job_monitor():
             cleanup_stale_jobs()
             cleanup_old_search_logs(SEARCH_LOG_RETENTION_DAYS)
         except Exception as e:
-            print(f"Stale job monitor error: {e}")
+            logger.error(f"Stale job monitor error: {e}")
 
 
 def start_stale_job_monitor():

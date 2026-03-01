@@ -5,6 +5,13 @@ Searches YouTube, downloads best quality audio with optional conversion to FLAC,
 """
 
 import json
+import logging
+import os
+import re
+import sqlite3
+import subprocess
+import tempfile
+import uuid
 import os
 import re
 import sqlite3
@@ -83,6 +90,8 @@ _sync_cookies_file()
 # Register middleware
 app.add_middleware(AuthMiddleware)
 
+# Setup logger
+logger = logging.getLogger(__name__)
 
 # =============================================================================
 # Basic Routes
@@ -797,7 +806,7 @@ def get_preview_url(video_id: str, source: str = "youtube", url: str = None):
     except subprocess.TimeoutExpired:
         raise HTTPException(status_code=504, detail="Preview request timed out")
     except Exception as e:
-        print(f"preview error: {e}")
+        logger.error(f"preview error: {e}")
         raise HTTPException(status_code=500, detail="Failed to get preview URL")
 
 
@@ -843,7 +852,7 @@ def search(request: SearchRequest):
         try:
             search_token = _log_search(request.query, len(final_results), source=source)
         except Exception as log_error:
-            print(f"search log error: {log_error}")
+            logger.error(f"search log error: {log_error}")
 
         return {"results": final_results, "slskd_enabled": slskd_enabled(), "search_token": search_token}
 
@@ -852,7 +861,7 @@ def search(request: SearchRequest):
     except HTTPException:
         raise
     except Exception as e:
-        print(f"search error: {e}")
+        logger.error(f"search error: {e}")
         raise HTTPException(status_code=500, detail="Search failed")
 
 
@@ -863,9 +872,9 @@ def search_slskd_endpoint(request: SearchRequest):
         return {"results": [], "slskd_enabled": False}
 
     try:
-        print(f"Searching slskd for: {request.query}")
+        logger.info(f"Searching slskd for: {request.query}")
         slskd_results = search_slskd(request.query, timeout_secs=TIMEOUT_SLSKD_SEARCH)
-        print(f"slskd returned {len(slskd_results)} results")
+        logger.info(f"slskd returned {len(slskd_results)} results")
 
         final_results = []
         for r in slskd_results[:request.limit]:
@@ -888,7 +897,7 @@ def search_slskd_endpoint(request: SearchRequest):
         return {"results": final_results, "slskd_enabled": True}
 
     except Exception as e:
-        print(f"slskd search error: {e}")
+        logger.error(f"slskd search error: {e}")
         return {"results": [], "slskd_enabled": True, "error": str(e)}
 
 
@@ -1714,10 +1723,10 @@ def sync_file_system():
             conn.commit()
 
         if updated_count > 0:
-            print(f"File system sync: updated {updated_count} jobs")
+            logger.info(f"File system sync: updated {updated_count} jobs")
 
     except Exception as e:
-        print(f"File system sync error: {e}")
+        logger.error(f"File system sync error: {e}")
 
 
 def start_file_system_sync():
@@ -1730,13 +1739,13 @@ def start_file_system_sync():
             try:
                 sync_file_system()
             except Exception as e:
-                print(f"File system sync worker error: {e}")
+                logger.error(f"File system sync worker error: {e}")
             # Sync every hour
             time.sleep(3600)
 
     thread = threading.Thread(target=sync_worker, daemon=True)
     thread.start()
-    print("File system sync scheduler started (every hour)")
+    logger.info("File system sync scheduler started (every hour)")
 
 
 # Start file system sync
@@ -1751,13 +1760,13 @@ try:
     from telegram_bot import run_bot_process
     if os.getenv("TELEGRAM_BOT_TOKEN"):
         run_bot_process()
-        print("Telegram bot started in background process")
+        logger.info("Telegram bot started in background process")
     else:
-        print("Telegram bot disabled (set TELEGRAM_BOT_TOKEN to enable)")
+        logger.info("Telegram bot disabled (set TELEGRAM_BOT_TOKEN to enable)")
 except ImportError:
-    print("python-telegram-bot not installed, Telegram bot disabled")
+    logger.info("python-telegram-bot not installed, Telegram bot disabled")
 except Exception as e:
-    print(f"Failed to start Telegram bot: {e}")
+    logger.error(f"Failed to start Telegram bot: {e}")
 
 
 if __name__ == "__main__":

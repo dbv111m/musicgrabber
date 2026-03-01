@@ -9,10 +9,10 @@ registry entry.
 
 import json
 import hashlib
+import logging
 import re
 import subprocess
 from concurrent.futures import ThreadPoolExecutor, as_completed
-
 import base64
 
 import httpx
@@ -30,6 +30,8 @@ from youtube import search_youtube, score_search_result, parse_duration
 _BLACKLIST_UPLOADER_PENALTY = 500
 _MONOCHROME_URL_RE = re.compile(r"^https?://(?:www\.)?monochrome\.tf/", re.IGNORECASE)
 
+# Setup logger
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # SoundCloud search
@@ -102,7 +104,7 @@ def search_soundcloud(query: str, limit: int) -> list[dict]:
         return results[:limit]
 
     except Exception as e:
-        print(f"SoundCloud search error: {e}")
+        logger.error(f"SoundCloud search error: {e}")
         return []
 
 
@@ -168,7 +170,7 @@ def _search_monochrome_api(query: str, limit: int) -> list[dict]:
         data = resp.json().get("data") or {}
         items = data.get("items") or []
     except Exception as e:
-        print(f"Monochrome API search error: {e}")
+        logger.error(f"Monochrome API search error: {e}")
         return []
 
     results = []
@@ -263,7 +265,7 @@ def _resolve_monochrome_url(query: str, limit: int) -> list[dict]:
         results.sort(key=lambda x: x["quality_score"], reverse=True)
         return results[:limit]
     except Exception as e:
-        print(f"Monochrome URL resolve error: {e}")
+        logger.error(f"Monochrome URL resolve error: {e}")
         return []
 
 
@@ -327,7 +329,7 @@ def get_monochrome_track_info(track_id: str) -> dict | None:
         resp.raise_for_status()
         return resp.json().get("data")
     except Exception as e:
-        print(f"Monochrome track info error: {e}")
+        logger.error(f"Monochrome track info error: {e}")
         return None
 
 
@@ -408,7 +410,7 @@ def search_all(query: str, limit: int) -> list[dict]:
         try:
             all_results.extend(future.result(timeout=TIMEOUT_YTDLP_SEARCH + 5))
         except Exception as e:
-            print(f"search_all: {source_name} failed: {e}")
+            logger.error(f"search_all: {source_name} failed: {e}")
 
     all_results = _apply_blacklist_filter(all_results)
     all_results.sort(key=lambda x: x["quality_score"], reverse=True)

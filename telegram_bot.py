@@ -11,7 +11,7 @@ import sqlite3
 import json
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputFile
 from telegram.ext import (
@@ -30,6 +30,8 @@ from settings import get_setting, get_setting_bool, set_setting
 # Telegram settings
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_ALLOWED_USERS = os.getenv("TELEGRAM_ALLOWED_USERS", "")
+# API base URL - configurable for different deployments
+API_BASE_URL = os.getenv("MUSICGRABBER_API_URL", "http://localhost:8080")
 
 # User context storage (simple dict)
 user_contexts = {}
@@ -172,7 +174,7 @@ def is_user_allowed(chat_id: int) -> bool:
 # Context management
 # =============================================================================
 
-def set_user_context(chat_id: int, key: str, value: any):
+def set_user_context(chat_id: int, key: str, value: Any):
     """Set value in user context."""
     if chat_id not in user_contexts:
         user_contexts[chat_id] = {}
@@ -199,7 +201,7 @@ async def search_music(query: str, source: str, limit: int = 10) -> list:
     try:
         async with httpx.AsyncClient(timeout=30) as client:
             response = await client.post(
-                "http://localhost:8080/api/search",
+ f"{API_BASE_URL}/api/search",
                 json={"query": query, "source": source, "limit": limit}
             )
             response.raise_for_status()
@@ -224,7 +226,7 @@ async def download_track(video_id: str, title: str, artist: str, source: str,
     try:
         async with httpx.AsyncClient(timeout=30) as client:  # Increased timeout
             check_response = await client.get(
-                "http://localhost:8080/api/check-file",
+ f"{API_BASE_URL}/api/check-file",
                 params={"artist": artist, "title": title}
             )
             if check_response.status_code == 200:
@@ -404,7 +406,7 @@ async def download_track(video_id: str, title: str, artist: str, source: str,
                 payload["source_url"] = source_url
 
             response = await client.post(
-                "http://localhost:8080/api/download",
+ f"{API_BASE_URL}/api/download",
                 json=payload
             )
             response.raise_for_status()
@@ -423,7 +425,7 @@ async def get_job_status(job_id: str) -> Optional[dict]:
     """Get job status."""
     try:
         async with httpx.AsyncClient(timeout=10) as client:
-            response = await client.get(f"http://localhost:8080/api/jobs/{job_id}")
+            response = await client.get(f"{API_BASE_URL}/api/jobs/{job_id}")
             if response.status_code == 200:
                 return response.json()
     except Exception as e:
@@ -435,7 +437,7 @@ async def get_user_jobs(chat_id: int, limit: int = 10) -> list:
     """Get user's jobs."""
     try:
         async with httpx.AsyncClient(timeout=10) as client:
-            response = await client.get(f"http://localhost:8080/api/jobs?limit={limit}")
+            response = await client.get(f"{API_BASE_URL}/api/jobs?limit={limit}")
             if response.status_code == 200:
                 data = response.json()
                 # Filter by chat_id
@@ -450,7 +452,7 @@ async def get_stats() -> Optional[dict]:
     """Get global stats."""
     try:
         async with httpx.AsyncClient(timeout=10) as client:
-            response = await client.get("http://localhost:8080/api/stats")
+            response = await client.get(f"{API_BASE_URL}/api/stats")
             if response.status_code == 200:
                 return response.json()
     except Exception as e:

@@ -7,6 +7,7 @@ Library scan triggers and M3U playlist generation.
 
 import base64
 import json
+import logging
 import os
 import sqlite3
 import subprocess
@@ -46,6 +47,9 @@ from youtube import (
     _ytdlp_base_args, _is_ytdlp_403, _strip_cookies_args,
     _should_retry_without_cookies, _sleep_if_botted, _note_bot_block, _note_cookie_failure,
 )
+
+# Setup logger
+logger = logging.getLogger(__name__)
 
 
 def _default_metadata_source(source: str) -> str:
@@ -142,6 +146,11 @@ def probe_audio_quality(
     bitrate so the quality gate can reject lipstick-on-a-pig transcodes.
     """
     try:
+        # Check if ffprobe is available
+        import shutil
+        if not shutil.which("ffprobe"):
+            logger.warning("ffprobe not found in PATH, skipping audio quality probe")
+            return None, 0
         result = subprocess.run(
             ["ffprobe", "-v", "quiet", "-select_streams", "a:0",
              "-show_entries", "stream=codec_name,bit_rate,sample_rate,bits_per_raw_sample",
@@ -242,10 +251,21 @@ def _build_ytdlp_download_cmd(
 
 def _update_job(job_id: str, **fields) -> None:
     """Update job fields in the database."""
+    # Whitelist of allowed columns to prevent SQL injection
+    ALLOWED_COLUMNS = {
+        'status', 'error', 'title', 'artist', 'uploader', 'source',
+        'total_tracks', 'completed_tracks', 'failed_tracks', 'skipped_tracks',
+        'audio_quality', 'metadata_source', 'file_path', 'm3u_path',
+        'completed_at', 'file_deleted'
+    }
     if not fields:
         return
-    columns = ", ".join(f"{key} = ?" for key in fields)
-    values = list(fields.values())
+    # Filter to only allowed columns
+    filtered = {k: v for k, v in fields.items() if k in ALLOWED_COLUMNS}
+    if not filtered:
+        return
+    columns = ", ".join(f"{key} = ?" for key in filtered)
+    values = list(filtered.values())
     with db_conn() as conn:
         conn.execute(f"UPDATE jobs SET {columns} WHERE id = ?", (*values, job_id))
         conn.commit()
@@ -267,7 +287,7 @@ def _cleanup_temp_files(artist_dir: Path, sanitized_title: str) -> int:
         try:
             temp_file.unlink()
             removed += 1
-            print(f"Cleaned up temp file: {temp_file.name}")
+            logger.info(f"Cleaned up temp file: {temp_file.name}")
         except OSError:
             pass
     return removed
@@ -294,11 +314,11 @@ def _relocate_for_normalised_artist(audio_file: Path, old_artist: str, new_artis
 
     # Don't trample an existing file — paranoia beats regret
     if new_path.exists():
-        print(f"Artist normalisation: target already exists, skipping move: {new_path}")
+        logger.info(f"Artist normalisation: target already exists, skipping move: {new_path}")
         return audio_file
 
     audio_file.rename(new_path)
-    print(f"Artist normalised: {old_dir.name}/{audio_file.name} -> {new_dir.name}/{audio_file.name}")
+    logger.info(f"Artist normalised: {old_dir.name}/{audio_file.name} -> {new_dir.name}/{audio_file.name}")
     set_file_permissions(new_path)
 
     # Relocate any lyrics file that tagged along
@@ -312,7 +332,7 @@ def _relocate_for_normalised_artist(audio_file: Path, old_artist: str, new_artis
     try:
         if old_dir.exists() and not any(old_dir.iterdir()):
             old_dir.rmdir()
-            print(f"Removed empty artist directory: {old_dir.name}")
+            logger.debug(f"Removed empty artist directory: {old_dir.name}")
     except OSError:
         pass
 
@@ -350,7 +370,7 @@ def _run_ytdlp_with_retries(
             break
 
         if _is_ytdlp_403(download_result.stderr) and attempt < YTDLP_403_MAX_RETRIES:
-            print(f"YouTube 403 for {download_cmd[-1]}, retrying (attempt {attempt + 1})")
+            logger.warning(f"YouTube 403 for {download_cmd[-1]}, retrying (attempt {attempt + 1})")
             time.sleep(YTDLP_403_RETRY_DELAY * (attempt + 1))
         else:
             break
@@ -539,7 +559,7 @@ def process_playlist_download(job_id: str, playlist_id: str, playlist_name: str,
                     if not download_timed_out and download_result and _is_permission_error(stderr):
                         cleaned = _cleanup_temp_files(artist_dir, safe_title)
                         if cleaned:
-                            print(f"Retrying playlist track after cleaning {cleaned} temp file(s)")
+                            logger.info(f"Retrying playlist track after cleaning {cleaned} temp file(s)")
                             download_result, download_timed_out = _run_ytdlp_with_retries(
                                 download_cmd, TIMEOUT_YTDLP_DOWNLOAD, has_cookies
                             )
@@ -550,7 +570,7 @@ def process_playlist_download(job_id: str, playlist_id: str, playlist_name: str,
                 try:
                     audio_file = _find_downloaded_audio_or_raise(artist_dir, safe_title)
                 except Exception as e:
-                    print(f"Playlist track output lookup failed: {e}")
+                    logger.error(f"Playlist track output lookup failed: {e}")
                     failed_tracks += 1
                     continue
 
@@ -586,7 +606,7 @@ def process_playlist_download(job_id: str, playlist_id: str, playlist_name: str,
 
             except Exception as track_error:
                 # Track this individual failure and continue
-                print(f"Playlist track failed: {track_label} - {track_error}")
+                logger.error(f"Playlist track failed: {track_label} - {track_error}")
                 failed_tracks += 1
             finally:
                 _update_job(
@@ -710,7 +730,7 @@ def process_slskd_download(job_id: str, username: str, filename: str, artist: st
                 break
             except Exception as e:
                 last_error = str(e)
-                print(f"slskd download attempt failed: {last_error}")
+                logger.warning(f"slskd download attempt failed: {last_error}")
                 if attempts >= SLSKD_MAX_RETRIES or not should_retry_slskd_error(last_error):
                     break
                 attempts += 1
@@ -799,9 +819,9 @@ def process_slskd_download(job_id: str, username: str, filename: str, artist: st
         lyrics = fetch_lyrics(artist, title)
         if lyrics:
             save_lyrics_file(final_file, lyrics)
-            print(f"Saved lyrics for {artist} - {title}")
+            logger.info(f"Saved lyrics for {artist} - {title}")
         else:
-            print(f"No lyrics found for {artist} - {title}")
+            logger.debug(f"No lyrics found for {artist} - {title}")
 
         # Trigger library rescans if configured
         trigger_navidrome_scan()
@@ -819,7 +839,7 @@ def process_slskd_download(job_id: str, username: str, filename: str, artist: st
         )
         _mark_watched_track_downloaded(job_id)
 
-        print(f"slskd: Successfully downloaded {artist} - {title}")
+        logger.info(f"slskd: Successfully downloaded {artist} - {title}")
 
         # Send notification for Soulseek single
         send_notification(
@@ -835,7 +855,7 @@ def process_slskd_download(job_id: str, username: str, filename: str, artist: st
         send_audio_to_telegram(job_id)
 
     except Exception as e:
-        print(f"slskd download failed: {e}")
+        logger.error(f"slskd download failed: {e}")
         _update_job(job_id, status="failed", error=str(e), completed_at=datetime.now(timezone.utc).isoformat())
 
         # Send notification for Soulseek failure
@@ -874,7 +894,7 @@ def _download_monochrome_direct(track_id: str, output_path: Path) -> None:
             )
             if resp.status_code != 403:
                 break
-            print(f"Monochrome: {quality} quality returned 403 for track {track_id}, trying next tier...")
+            logger.warning(f"Monochrome: {quality} quality returned 403 for track {track_id}, trying next tier...")
     resp.raise_for_status()
     data = resp.json().get("data") or {}
     if not data.get("manifest"):
@@ -920,7 +940,7 @@ def _embed_monochrome_cover(audio_file: Path, cover_uuid: str) -> None:
         audio.save()
     except Exception as e:
         # Non-critical — the track still plays fine without cover art
-        print(f"Monochrome cover embed failed: {e}")
+        logger.warning(f"Monochrome cover embed failed: {e}")
 
 
 def _get_monochrome_track_info(track_id: str) -> dict | None:
@@ -934,7 +954,7 @@ def _get_monochrome_track_info(track_id: str) -> dict | None:
         resp.raise_for_status()
         return resp.json().get("data")
     except Exception as e:
-        print(f"Monochrome track info lookup failed: {e}")
+        logger.warning(f"Monochrome track info lookup failed: {e}")
         return None
 
 
@@ -1037,9 +1057,9 @@ def _process_monochrome_download(job_id: str, track_id: str, convert_to_flac: bo
         lyrics = fetch_lyrics(artist, title)
         if lyrics:
             save_lyrics_file(output_path, lyrics)
-            print(f"Saved lyrics for {artist} - {title}")
+            logger.info(f"Saved lyrics for {artist} - {title}")
         else:
-            print(f"No lyrics found for {artist} - {title}")
+            logger.debug(f"No lyrics found for {artist} - {title}")
 
         # Library scans
         trigger_navidrome_scan()
@@ -1057,7 +1077,7 @@ def _process_monochrome_download(job_id: str, track_id: str, convert_to_flac: bo
         )
         _mark_watched_track_downloaded(job_id)
 
-        print(f"Monochrome: Downloaded {artist} - {title} (lossless FLAC)")
+        logger.info(f"Monochrome: Downloaded {artist} - {title} (lossless FLAC)")
 
         send_notification(
             notification_type="single",
@@ -1074,7 +1094,7 @@ def _process_monochrome_download(job_id: str, track_id: str, convert_to_flac: bo
         return True
 
     except Exception as e:
-        print(f"Monochrome download failed: {e}")
+        logger.error(f"Monochrome download failed: {e}")
         _update_job(job_id, status="failed", error=str(e), completed_at=datetime.now(timezone.utc).isoformat())
 
         send_notification(
@@ -1109,7 +1129,7 @@ def process_download(job_id: str, video_id: str, convert_to_flac: bool = True, s
             return
         
         # Monochrome failed, fallback to YouTube
-        print(f"Monochrome failed, falling back to YouTube")
+        logger.info(f"Monochrome failed, falling back to YouTube")
         
         # Get artist/title from job to search on YouTube
         with db_conn() as conn:
@@ -1124,12 +1144,12 @@ def process_download(job_id: str, video_id: str, convert_to_flac: bool = True, s
             youtube_results = search_youtube(f"{artist} {title}", limit=1)
             if youtube_results:
                 video_id = youtube_results[0]["video_id"]
-                print(f"Found YouTube video: {youtube_results[0]['title']}")
+                logger.info(f"Found YouTube video: {youtube_results[0]['title']}")
             else:
-                print(f"Monochrome failed, YouTube search also failed for {artist} - {title}")
+                logger.warning(f"Monochrome failed, YouTube search also failed for {artist} - {title}")
                 return
         else:
-            print(f"Monochrome failed, no artist/title found")
+            logger.warning(f"Monochrome failed, no artist/title found")
             return
         
         is_monochrome = False
@@ -1237,7 +1257,7 @@ def process_download(job_id: str, video_id: str, convert_to_flac: bool = True, s
             if download_result and _is_permission_error(stderr):
                 cleaned = _cleanup_temp_files(artist_dir, safe_title)
                 if cleaned:
-                    print(f"Retrying download after cleaning {cleaned} temp file(s)")
+                    logger.info(f"Retrying download after cleaning {cleaned} temp file(s)")
                     download_result, download_timed_out = _run_ytdlp_with_retries(
                         download_cmd, TIMEOUT_YTDLP_DOWNLOAD, has_cookies
                     )
@@ -1291,9 +1311,9 @@ def process_download(job_id: str, video_id: str, convert_to_flac: bool = True, s
         lyrics = fetch_lyrics(artist, title)
         if lyrics:
             save_lyrics_file(audio_file, lyrics)
-            print(f"Saved lyrics for {artist} - {title}")
+            logger.info(f"Saved lyrics for {artist} - {title}")
         else:
-            print(f"No lyrics found for {artist} - {title}")
+            logger.debug(f"No lyrics found for {artist} - {title}")
 
         # Trigger library rescans if configured
         trigger_navidrome_scan()

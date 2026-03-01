@@ -259,6 +259,7 @@ def send_audio_to_telegram(job_id: str):
                 file_path = MUSIC_DIR / file_path
 
             audio_file = Path(file_path)
+            print(f"Notifications: send_audio_to_telegram called: job_id={job_id}, chat_id={chat_id}, file={file_path}")
             if not audio_file.exists():
                 print(f"Notifications: File not found: {audio_file}")
                 return
@@ -278,10 +279,10 @@ def send_audio_to_telegram(job_id: str):
             is_m4a = audio_file.suffix.lower() == '.m4a'
             temp_mp3 = None
             filename = audio_file.name
-            
+
             # Default to True for Telegram - always convert to MP3
             convert_to_mp3 = get_setting_bool("telegram_convert_to_mp3", True)
-            
+
             if convert_to_mp3 and (is_flac or is_opus or is_m4a):
                 temp_mp3 = tempfile.NamedTemporaryFile(suffix='.mp3', delete=False)
                 temp_mp3.close()
@@ -308,14 +309,15 @@ def send_audio_to_telegram(job_id: str):
             bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
             if not bot_token:
                 return
-            
+
             # Use curl for better compatibility with longer timeout
             caption = f"🎵 {title}\n🎤 {artist}\n\n✅ Скачано MusicGrabber"
-            
+
             # Use 30 minute timeout for large files (slow upload speeds)
             # Specify filename to ensure Telegram recognizes it as audio
             try:
-                result = subprocess.run([
+                # Build curl command with optional proxy
+                curl_cmd = [
                     'curl', '-s', '-X', 'POST',
                     f'https://api.telegram.org/bot{bot_token}/sendAudio',
                     '-F', f'chat_id={chat_id}',
@@ -323,12 +325,20 @@ def send_audio_to_telegram(job_id: str):
                     '-F', f'performer={artist}',
                     '-F', f'caption={caption}',
                     '-F', f'audio=@{audio_path};type=audio/mpeg'
-                ], capture_output=True, text=True, timeout=1800)
-                
+                ]
+
+                # Add proxy if configured
+                https_proxy = os.getenv('HTTPS_PROXY') or os.getenv('https_proxy')
+                if https_proxy:
+                    curl_cmd.extend(['--proxy', https_proxy])
+                    print(f"Notifications: Using proxy: {https_proxy}")
+
+                result = subprocess.run(curl_cmd, capture_output=True, text=True, timeout=1800)
+
                 if '"ok":true' in result.stdout:
                     print(f"Notifications: Sent audio to {chat_id}: {artist} - {title}")
                 else:
-                    print(f"Notifications: Failed to send audio: {result.stdout[:200]}")
+                    print(f"Notifications: Failed to send audio: stdout={result.stdout[:500] if result.stdout else 'empty'}, stderr={result.stderr[:200] if result.stderr else 'empty'}, returncode={result.returncode}")
             except subprocess.TimeoutExpired:
                 print(f"Notifications: Timeout sending audio to {chat_id}")
             except Exception as e:
@@ -340,4 +350,3 @@ def send_audio_to_telegram(job_id: str):
 
     except Exception as e:
         print(f"Notifications: Error sending audio: {e}")
-
