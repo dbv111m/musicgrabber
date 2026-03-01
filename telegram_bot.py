@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputFile
+from telegram.constants import ChatAction
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -750,6 +751,9 @@ async def handle_search_query(update: Update, context: ContextTypes.DEFAULT_TYPE
     clear_user_context(chat_id)
     set_user_context(chat_id, "search_query", query)
 
+    # Send typing action while searching
+    await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
+
     # Send searching message
     status_msg = await update.message.reply_text(f"🔍 Ищу: <b>{query}</b>...", parse_mode="HTML")
 
@@ -939,6 +943,9 @@ async def callback_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Get settings
     settings = get_user_settings(chat_id)
+
+    # Send upload_document action while downloading
+    await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.UPLOAD_DOCUMENT)
 
     # Download
     download_result = await download_track(
