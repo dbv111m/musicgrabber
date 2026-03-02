@@ -1,10 +1,22 @@
 # Changelog
 
+## v2.0.5 (2026-03-01)
+
+### Fixed
+- **Code review fixes**: Removed duplicate except block in utils.py, replaced print() with logging throughout codebase, added SQL injection protection with column whitelist in downloads.py, fixed type annotations, added ffprobe existence check
+- **Proxy support for Docker**: Added HTTP_PROXY/HTTPS_PROXY support for Telegram file uploads. Containers behind proxy can now send audio files to Telegram users
+- **NO_PROXY for localhost**: Added NO_PROXY environment variable to exclude localhost requests from proxy, fixing 503 errors on local API calls
+
+### Changed
+- **Telegram direct search**: Any text message now triggers search directly without needing to click "Search music" button first
+- **Chat actions in Telegram**: Added "typing" indicator during search and "upload_document" indicator during download for better UX
+- **Cleaner quality labels**: Removed "LOSSLESS" from search result titles (all Monochrome tracks are lossless), show "Hi-Res" only for actual hi-res tracks
+- **Configurable API URL**: Added MUSICGRABBER_API_URL environment variable for custom deployments
+
 ## v2.0.4 (2026-02-19)
 
 ### Fixed
 - **Monochrome quality fallback**: Some tracks return 403 at the LOSSLESS tier (Tidal restricts certain catalogue items). Now falls back to HIGH quality automatically rather than failing the download outright
-
 ## v2.0.3 (2026-02-19)
 
 ### Changed
