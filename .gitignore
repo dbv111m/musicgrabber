@@ -41,4 +41,6 @@ Thumbs.db
 .claude/
 
 # Working docs (AI-managed project notes, plans, reviews)
-docs/
+docs/test_bot.py
+test_coverage.py
+tests/
