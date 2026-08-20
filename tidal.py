@@ -24,6 +24,46 @@ _HEADERS = {
     "Accept-Language": "en-GB,en;q=0.9",
 }
 _EMBED_URL = "https://embed.tidal.com/playlists/{uuid}"
+_ALBUM_EMBED_URL = "https://embed.tidal.com/albums/{album_id}"
+
+
+def fetch_tidal_album_info(album_id: str) -> dict:
+    """Fetch just the artist and album title for a Tidal album, via the embed player.
+
+    Only the two names, deliberately: this feeds the album-URL resolver, which
+    hands them to MusicBrainz and takes the real tracklist from there. The album
+    embed does render its tracks, but with empty artist slots (every track on an
+    album shares the credit shown once at the top), so scraping them would give
+    us a list of titles with nobody attached to them. Not worth the bother when
+    MusicBrainz is about to supply a better tracklist anyway.
+
+    Returns {"artist": str|None, "album": str|None}.
+    """
+    url = _ALBUM_EMBED_URL.format(album_id=album_id)
+    print(f"[Tidal] Fetching album embed: {url}")
+    html = _fetch_html(url)
+    return {"artist": _extract_album_artist(html), "album": _extract_album_title(html)}
+
+
+def _extract_album_title(html: str) -> str | None:
+    # <h1 ...><a href="https://tidal.com/album/77640617" ...>Achtung Baby</a></h1>
+    match = re.search(r'<h1[^>]*>\s*<a[^>]*>([^<]+)</a>', html)
+    if match:
+        return match.group(1).strip() or None
+
+    # Older/alternative shape: <h1 class="media-album" title="Album: Achtung Baby">
+    match = re.search(r'<h1[^>]+class="media-album"[^>]+title="Album:\s*([^"]+)"', html)
+    return match.group(1).strip() if match else None
+
+
+def _extract_album_artist(html: str) -> str | None:
+    # <span class="media-artist" title="Artist: U2"><a ...>U2</a></span>
+    match = re.search(r'class="media-artist"[^>]*title="Artist:\s*([^"]+)"', html)
+    if match:
+        return match.group(1).strip() or None
+
+    match = re.search(r'class="media-artist"[^>]*>\s*(?:<a[^>]*>)?([^<]+)<', html)
+    return match.group(1).strip() if match else None
 
 
 def fetch_tidal_playlist(uuid: str) -> dict:

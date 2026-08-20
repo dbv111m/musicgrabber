@@ -595,6 +595,7 @@
                 <h2 class="queue-section-heading">Watched Upgrades</h2>
                 <div class="upgrade-header-actions">
                     <button class="btn btn-ghost" id="upgradeAllBtn" onclick="upgradeAll()" title="Best-effort: download and swap in every proposed upgrade">Upgrade All</button>
+                    <button class="btn btn-ghost" id="quarantineToggleBtn" title="Files an upgrade swapped out: restore or delete them">Quarantine</button>
                     <button class="btn accent-btn" id="rescanUpgradesBtn">Rescan Library</button>
                 </div>
             </div>
@@ -611,6 +612,14 @@
                 <button class="btn btn-ghost" id="upgradesPrevBtn">&#8592; Prev</button>
                 <span id="upgradesPageInfo" class="upgrades-page-info"></span>
                 <button class="btn btn-ghost" id="upgradesNextBtn">Next &#8594;</button>
+            </div>
+
+            <!-- Quarantine: files an upgrade swap displaced. Collapsed until asked for. -->
+            <div id="quarantinePanel" class="watched-add-panel section-with-top-margin" style="display:none;">
+                <p class="watched-panel-text">
+                    Files a Track Upgrade swapped out. Restore puts one back where it lived and quarantines whatever replaced it instead of deleting it, so that's undoable too. Delete is final.
+                </p>
+                <div id="quarantineList" class="results"><p class="watched-empty-text">Loading&hellip;</p></div>
             </div>
 
             <!-- Read-only Audio Provenance Audit -->
@@ -1128,6 +1137,26 @@
                     <button type="button" class="btn test-btn" id="testJellyfinBtn">Test Connection</button>
                     <div id="jellyfinTestResult" class="test-result"></div>
                     <span class="settings-hint">When configured, MusicGrabber triggers a Jellyfin library scan after each download so new tracks appear immediately. Only the music library is refreshed.</span>
+                </div>
+            </div>
+
+            <div class="settings-section">
+                <h3 class="settings-section-title">Plex</h3>
+                <div class="settings-form">
+                    <div class="settings-row">
+                        <label for="settingPlexUrl">URL</label>
+                        <input type="text" id="settingPlexUrl" placeholder="http://plex:32400">
+                    </div>
+                    <div class="settings-row">
+                        <label for="settingPlexToken">Token</label>
+                        <div class="password-field">
+                            <input type="password" id="settingPlexToken" placeholder="token">
+                            <button type="button" class="password-toggle" data-target="settingPlexToken">Show</button>
+                        </div>
+                    </div>
+                    <button type="button" class="btn test-btn" id="testPlexBtn">Test Connection</button>
+                    <div id="plexTestResult" class="test-result"></div>
+                    <span class="settings-hint">When configured, MusicGrabber triggers a Plex library scan after each download so new tracks appear immediately. Every music library in Plex is refreshed. Find your token via Plex's own "Finding an authentication token" support article.</span>
                 </div>
             </div>
 

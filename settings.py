@@ -143,7 +143,7 @@ def get_all_settings(user_id: str | None = None) -> dict:
 
 # Define which settings are sensitive (should be masked in GET response)
 SENSITIVE_SETTINGS = {
-    "slskd_pass", "navidrome_pass", "jellyfin_api_key", "lidarr_api_key",
+    "slskd_pass", "navidrome_pass", "jellyfin_api_key", "plex_token", "lidarr_api_key",
     "smtp_pass", "telegram_webhook_url", "api_key", "youtube_cookies",
     "spotify_cookies", "apple_music_user_token",
 }
@@ -155,6 +155,7 @@ USER_SETTINGS_KEYS = {
     "enable_replaygain", "replaygain_replace_existing",
     "navidrome_url", "navidrome_user", "navidrome_pass", "navidrome_dupe_check",
     "jellyfin_url", "jellyfin_api_key",
+    "plex_url", "plex_token",
     "lidarr_url", "lidarr_api_key",
     "notify_on", "telegram_webhook_url", "apprise_url",
     "smtp_host", "smtp_port", "smtp_user", "smtp_pass", "smtp_from", "smtp_to", "smtp_tls",
@@ -166,7 +167,7 @@ USER_SETTINGS_KEYS = {
 
 # These user-scoped keys are personal credentials; a new user with no explicit value
 # should get a blank default rather than inheriting whatever the global setting says.
-# (Navidrome/Jellyfin are NOT in this set: shared server, shared library.)
+# (Navidrome/Jellyfin/Plex are NOT in this set: shared server, shared library.)
 USER_PRIVATE_KEYS = {
     "notify_on", "telegram_webhook_url", "apprise_url",
     "smtp_host", "smtp_port", "smtp_user", "smtp_pass", "smtp_from", "smtp_to", "smtp_tls",
@@ -238,6 +239,9 @@ SETTINGS_SCHEMA = {
     # Jellyfin
     "jellyfin_url": {"type": "str", "default": "", "env": "JELLYFIN_URL"},
     "jellyfin_api_key": {"type": "str", "default": "", "env": "JELLYFIN_API_KEY", "sensitive": True},
+    # Plex
+    "plex_url": {"type": "str", "default": "", "env": "PLEX_URL"},
+    "plex_token": {"type": "str", "default": "", "env": "PLEX_TOKEN", "sensitive": True},
     # Lidarr
     "lidarr_url": {"type": "str", "default": "", "env": "LIDARR_URL"},
     "lidarr_api_key": {"type": "str", "default": "", "env": "LIDARR_API_KEY", "sensitive": True},

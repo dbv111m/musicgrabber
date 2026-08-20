@@ -263,7 +263,7 @@ def process_longform_split(split_id: str) -> None:
     from downloads import (
         _make_staging_dir, _clear_staging_dir, _validate_audio_integrity,
         probe_audio_quality, _extract_source_format_from_info,
-        trigger_navidrome_scan, trigger_jellyfin_scan,
+        trigger_navidrome_scan, trigger_jellyfin_scan, trigger_plex_scan,
     )
 
     with db_conn() as conn:
@@ -411,6 +411,7 @@ def process_longform_split(split_id: str) -> None:
 
         trigger_navidrome_scan(user_id=user_id)
         trigger_jellyfin_scan(user_id=user_id)
+        trigger_plex_scan(user_id=user_id)
 
     except Exception as e:
         with db_conn() as conn:

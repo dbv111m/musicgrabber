@@ -642,6 +642,29 @@ def init_db():
             "ON upgrade_candidates(user_id, file_id)"
         )
 
+        # One row per file a Track Upgrade swap displaced. quarantine_path is where it
+        # physically sits now; original_path is where a restore puts it back;
+        # replaced_by_path is where the upgrade that displaced it currently lives (usually
+        # the same as original_path, but a format-changing upgrade, e.g. mp3 -> flac, gives
+        # it a different filename, so both need tracking to undo the swap cleanly).
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS upgrade_quarantine (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL DEFAULT '',
+            quarantine_path TEXT NOT NULL,
+            original_path TEXT NOT NULL,
+            replaced_by_path TEXT NOT NULL,
+            artist TEXT,
+            title TEXT,
+            file_size INTEGER,
+            quarantined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_upgrade_quarantine_user "
+            "ON upgrade_quarantine(user_id, quarantined_at)"
+        )
+
         # Audio Provenance Audit. Runs are immutable snapshots while they are being
         # built; is_current is flipped only after the last file has been inspected.
         # This keeps a half-scanned library from masquerading as a finished report.

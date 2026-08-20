@@ -9,8 +9,11 @@ SOURCE/SOURCE_QUALITY markers survive apply_metadata_to_file -> probe_file.
 
 import os
 import shutil
+import sqlite3
 import subprocess
 import sys
+from contextlib import contextmanager
+from pathlib import Path
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -27,6 +30,10 @@ from upgrades import (
     _estimate_result_tier,
     effective_tier,
     content_sha256,
+    list_quarantine,
+    restore_from_quarantine,
+    delete_quarantine_entry,
+    delete_orphaned_quarantine_file,
     TIER_LOSSLESS,
     TIER_LOSSY_320,
     TIER_LOSSY_256,
@@ -331,3 +338,189 @@ def test_content_hash_detects_same_path_replacement(tmp_path):
     before = content_sha256(p)
     _gen(p, ["-c:a", "flac", "-af", "volume=0.5"])
     assert content_sha256(p) != before
+
+
+# --- Quarantine management (restore / delete) ---------------------------------
+
+def _setup_quarantine_db(monkeypatch):
+    """In-memory sqlite with just the upgrade_quarantine table, wired to upgrades.db_conn."""
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.executescript("""
+        CREATE TABLE upgrade_quarantine (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id TEXT NOT NULL DEFAULT '',
+            quarantine_path TEXT NOT NULL,
+            original_path TEXT NOT NULL,
+            replaced_by_path TEXT NOT NULL,
+            artist TEXT,
+            title TEXT,
+            file_size INTEGER,
+            quarantined_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        );
+    """)
+
+    @contextmanager
+    def fake_db_conn():
+        yield conn
+
+    monkeypatch.setattr(upgrades, "db_conn", fake_db_conn)
+    monkeypatch.setattr(upgrades, "scan_user_library", lambda user_id=None: None)
+    return conn
+
+
+def test_list_quarantine_scopes_to_the_requesting_user(monkeypatch):
+    conn = _setup_quarantine_db(monkeypatch)
+    conn.execute(
+        "INSERT INTO upgrade_quarantine (user_id, quarantine_path, original_path, replaced_by_path, artist, title) "
+        "VALUES (?,?,?,?,?,?)",
+        ("alice", "/data/.upgrade_quarantine/1__a.mp3", "/music/a.mp3", "/music/a.flac", "A", "A Song"),
+    )
+    conn.execute(
+        "INSERT INTO upgrade_quarantine (user_id, quarantine_path, original_path, replaced_by_path, artist, title) "
+        "VALUES (?,?,?,?,?,?)",
+        ("bob", "/data/.upgrade_quarantine/2__b.mp3", "/music/b.mp3", "/music/b.flac", "B", "B Song"),
+    )
+    conn.commit()
+
+    alice_items = list_quarantine("alice")
+    assert len(alice_items) == 1
+    assert alice_items[0]["artist"] == "A"
+
+    admin_items = list_quarantine("alice", is_admin=True)
+    assert {i["artist"] for i in admin_items} == {"A", "B"}
+
+
+def test_list_quarantine_admin_surfaces_untracked_files_as_delete_only(monkeypatch, tmp_path):
+    qdir = tmp_path / ".upgrade_quarantine"
+    qdir.mkdir()
+    monkeypatch.setattr(upgrades, "_quarantine_dir", lambda: qdir)
+    (qdir / "20260101000000__Orphan Track.mp3").write_bytes(b"data")
+    _setup_quarantine_db(monkeypatch)
+
+    assert list_quarantine("alice") == []
+
+    admin_items = list_quarantine("alice", is_admin=True)
+    assert len(admin_items) == 1
+    assert admin_items[0]["restorable"] is False
+    assert admin_items[0]["title"] == "Orphan Track.mp3"
+
+
+def test_restore_from_quarantine_swaps_files_and_bumps_the_replacement(monkeypatch, tmp_path):
+    qdir = tmp_path / ".upgrade_quarantine"
+    qdir.mkdir()
+    monkeypatch.setattr(upgrades, "_quarantine_dir", lambda: qdir)
+    conn = _setup_quarantine_db(monkeypatch)
+
+    original = tmp_path / "music" / "Artist" / "Song.mp3"
+    original.parent.mkdir(parents=True)
+    replaced_by = tmp_path / "music" / "Artist" / "Song.flac"
+    quarantined = qdir / "20260101000000__Song.mp3"
+    quarantined.write_bytes(b"old mp3 bytes")
+    replaced_by.write_bytes(b"new flac bytes")
+
+    conn.execute(
+        "INSERT INTO upgrade_quarantine (user_id, quarantine_path, original_path, replaced_by_path, artist, title) "
+        "VALUES (?,?,?,?,?,?)",
+        ("alice", str(quarantined), str(original), str(replaced_by), "Artist", "Song"),
+    )
+    conn.commit()
+    entry_id = conn.execute("SELECT id FROM upgrade_quarantine").fetchone()["id"]
+
+    result = restore_from_quarantine("alice", entry_id)
+
+    assert result["status"] == "restored"
+    assert original.exists() and original.read_bytes() == b"old mp3 bytes"
+    assert not replaced_by.exists()
+    assert not quarantined.exists()
+
+    rows = conn.execute("SELECT * FROM upgrade_quarantine").fetchall()
+    assert len(rows) == 1, "the restored row should be gone, replaced by one for the bumped file"
+    bumped = rows[0]
+    assert bumped["original_path"] == str(replaced_by)
+    assert Path(bumped["quarantine_path"]).read_bytes() == b"new flac bytes"
+
+
+def test_restore_from_quarantine_rejects_other_users_entry(monkeypatch, tmp_path):
+    qdir = tmp_path / ".upgrade_quarantine"
+    qdir.mkdir()
+    monkeypatch.setattr(upgrades, "_quarantine_dir", lambda: qdir)
+    conn = _setup_quarantine_db(monkeypatch)
+    conn.execute(
+        "INSERT INTO upgrade_quarantine (user_id, quarantine_path, original_path, replaced_by_path) "
+        "VALUES (?,?,?,?)",
+        ("alice", str(qdir / "x.mp3"), str(tmp_path / "x.mp3"), str(tmp_path / "x.flac")),
+    )
+    conn.commit()
+    entry_id = conn.execute("SELECT id FROM upgrade_quarantine").fetchone()["id"]
+
+    result = restore_from_quarantine("bob", entry_id)
+    assert result["status"] == "error"
+    assert result["reason"] == "Quarantine entry not found"
+
+
+def test_restore_from_quarantine_cleans_up_row_when_file_already_gone(monkeypatch, tmp_path):
+    qdir = tmp_path / ".upgrade_quarantine"
+    qdir.mkdir()
+    monkeypatch.setattr(upgrades, "_quarantine_dir", lambda: qdir)
+    conn = _setup_quarantine_db(monkeypatch)
+    conn.execute(
+        "INSERT INTO upgrade_quarantine (user_id, quarantine_path, original_path, replaced_by_path) "
+        "VALUES (?,?,?,?)",
+        ("alice", str(qdir / "gone.mp3"), str(tmp_path / "x.mp3"), str(tmp_path / "x.flac")),
+    )
+    conn.commit()
+    entry_id = conn.execute("SELECT id FROM upgrade_quarantine").fetchone()["id"]
+
+    result = restore_from_quarantine("alice", entry_id)
+
+    assert result["status"] == "error"
+    assert conn.execute("SELECT * FROM upgrade_quarantine").fetchall() == []
+
+
+def test_delete_quarantine_entry_removes_file_and_row(monkeypatch, tmp_path):
+    qdir = tmp_path / ".upgrade_quarantine"
+    qdir.mkdir()
+    monkeypatch.setattr(upgrades, "_quarantine_dir", lambda: qdir)
+    conn = _setup_quarantine_db(monkeypatch)
+    f = qdir / "delete_me.mp3"
+    f.write_bytes(b"junk")
+    conn.execute(
+        "INSERT INTO upgrade_quarantine (user_id, quarantine_path, original_path, replaced_by_path) "
+        "VALUES (?,?,?,?)",
+        ("alice", str(f), str(tmp_path / "x.mp3"), str(tmp_path / "x.flac")),
+    )
+    conn.commit()
+    entry_id = conn.execute("SELECT id FROM upgrade_quarantine").fetchone()["id"]
+
+    result = delete_quarantine_entry("alice", entry_id)
+
+    assert result["status"] == "deleted"
+    assert not f.exists()
+    assert conn.execute("SELECT * FROM upgrade_quarantine").fetchall() == []
+
+
+def test_delete_orphaned_quarantine_file_refuses_path_traversal(tmp_path, monkeypatch):
+    qdir = tmp_path / ".upgrade_quarantine"
+    qdir.mkdir()
+    monkeypatch.setattr(upgrades, "_quarantine_dir", lambda: qdir)
+    secret = tmp_path / "secret.txt"
+    secret.write_text("do not delete me")
+
+    result = delete_orphaned_quarantine_file("../secret.txt")
+
+    assert result["status"] == "error"
+    assert secret.exists()
+
+
+def test_delete_orphaned_quarantine_file_deletes_a_real_orphan(tmp_path, monkeypatch):
+    qdir = tmp_path / ".upgrade_quarantine"
+    qdir.mkdir()
+    monkeypatch.setattr(upgrades, "_quarantine_dir", lambda: qdir)
+    f = qdir / "Breakin' Outta Hell.opus"
+    f.write_bytes(b"junk")
+
+    result = delete_orphaned_quarantine_file(f.name)
+
+    assert result["status"] == "deleted"
+    assert not f.exists()

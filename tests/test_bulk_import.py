@@ -23,6 +23,13 @@ _TEST_TRACKS = "\n".join([
 ])
 
 
+def test_single_import_download_capacity_is_two():
+    """One playlist run may keep two download workers occupied."""
+    import bulk_import
+
+    assert bulk_import.TRACKS_PER_IMPORT == 2
+
+
 def test_bulk_imports_list(api, base_url):
     r = api.get(f"{base_url}/api/bulk-imports", timeout=10)
     assert r.status_code == 200
@@ -106,9 +113,8 @@ def test_bulk_import_status_404_unknown_id(api, base_url):
 @pytest.mark.slow
 def test_bulk_import_tracks_get_searched(api, base_url):
     """
-    Submit 3 well-known tracks and verify the serial import lifecycle accounts
-    for every one. Imports intentionally allow only one active download at a
-    time, so later searches wait for the current file to finish. Repeat runs may
+    Submit 3 well-known tracks and verify the import lifecycle accounts for
+    every one. A run may download two tracks concurrently. Repeat runs may
     correctly skip tracks already left in the persistent test library.
     """
     r = api.post(
@@ -119,8 +125,8 @@ def test_bulk_import_tracks_get_searched(api, base_url):
     assert r.status_code == 200
     import_id = r.json()["import_id"]
 
-    # Poll until the import is done. Live providers and serial downloads can
-    # each take a while, especially when an acquisition falls through sources.
+    # Poll until the import is done. Live providers can still take a while,
+    # especially when an acquisition falls through sources.
     deadline = time.time() + 180
     status = {}
     while time.time() < deadline:

@@ -243,6 +243,9 @@ class SettingsUpdate(BaseModel):
     # Jellyfin
     jellyfin_url: Optional[str] = None
     jellyfin_api_key: Optional[str] = None
+    # Plex
+    plex_url: Optional[str] = None
+    plex_token: Optional[str] = None
     # Lidarr
     lidarr_url: Optional[str] = None
     lidarr_api_key: Optional[str] = None
@@ -320,6 +323,10 @@ class TestNavidromeRequest(BaseModel):
 class TestJellyfinRequest(BaseModel):
     url: Optional[str] = None
     api_key: Optional[str] = None
+
+class TestPlexRequest(BaseModel):
+    url: Optional[str] = None
+    token: Optional[str] = None
 
 class TestLidarrRequest(BaseModel):
     url: Optional[str] = None

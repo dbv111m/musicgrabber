@@ -50,15 +50,15 @@ def test_trailing_slashes_do_not_smuggle_a_path_through():
 # ---------------------------------------------------------------------------
 
 @pytest.fixture(scope="module")
-def session_auth(config):
+def session_auth(is_single_user):
     """Is session auth actually in play on this instance?
 
-    Deliberately not the shared `is_single_user` fixture, which reads
-    `auth_required` (that flag means "an API key is set", nothing to do with
-    logins). Sessions kick in on `users_exist`, same signal the `api` fixture
-    uses to decide whether to log in. Noted in the backlog.
+    This used to read `users_exist` itself, because the shared `is_single_user`
+    fixture was reading `auth_required` ("an API key is set", nothing to do with
+    logins) and therefore lying. That's since been fixed at the source, so this
+    is just the inverse of it again.
     """
-    return bool(config.get("users_exist"))
+    return not is_single_user
 
 
 @pytest.fixture(scope="module")

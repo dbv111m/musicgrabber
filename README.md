@@ -34,7 +34,7 @@ MusicGrabber is intentionally narrow. It is **not**:
 - **Bulk Import takes almost anything:** playlist URLs, pasted `Artist - Title` lists, MusicBrainz release links, Spotify and Apple Music album URLs, or simply an album name typed in. Anything recognised as an album is routed through the album pipeline rather than flattened into loose singles. Album search does not need an artist first, so soundtracks and various-artists compilations work; uncertain matches ask which release you meant instead of guessing. YouTube, Amazon, Beatport, and Monochrome album URLs are not supported yet
 - **Split long DJ mixes and compilation uploads into proper tracks:** paste a single YouTube video into the Bulk Import Fetch box and, if it runs over 12 minutes, MusicGrabber offers to cut it up rather than download it as one blob. It never guesses a boundary: it prefers YouTube's own chapters, then a cue sheet hunted out of the description or comments, and otherwise hands you an empty table (or a box to paste your own cue sheet into) to fill in by hand. Either way you get an editable start/end/title/artist preview before a single byte downloads; confirming it downloads the audio once, cuts each segment with ffmpeg, runs the usual integrity check, and tags directly from the table, landing the lot in `Albums/Album Artist/Video Title/` with cover art from the video thumbnail
 - **Auto-album routing for singles:** optional setting to file single-track downloads into artist/album folders when MusicBrainz resolves an album, either under Singles or the Albums directory
-- **Bulk import:** paste or upload a text file of "Artist - Title" lines; searches enabled sources in parallel, rejects weak recording matches, then walks confident candidates from lossless towards progressively worse lossy formats. A preferred source breaks ties inside the same quality tier; an allowed lossless result still comes first. It can also create a playlist and route files into the Playlists directory or a custom watched-playlist folder. Cancel stops untouched work, lets the one active file finish, and keeps completed files and Queue history
+- **Bulk import:** paste or upload a text file of "Artist - Title" lines; searches enabled sources in parallel, rejects weak recording matches, then walks confident candidates from lossless towards progressively worse lossy formats. A preferred source breaks ties inside the same quality tier; an allowed lossless result still comes first. It can also create a playlist and route files into the Playlists directory or a custom watched-playlist folder. Each run downloads up to two tracks concurrently (inside the global worker limit). Cancel stops untouched work, lets the two active files finish, and keeps completed files and Queue history
 - **Similar artist discovery:** hover any result and click Similar to explore related artists via MusicBrainz and ListenBrainz Labs. Download the lot in one go with "Download All", optionally saved as a playlist
 - **Apprise notifications:** one URL covers Gotify, ntfy, Discord, Pushover, Slack, and about 50 others. Also supports Telegram webhook and SMTP email
 - **Navidrome/Lidarr duplicate heads-up:** searches warn when a track is already known to either library, including when a playlist says `Primary Artist, Guest` but the library quite reasonably files it under `Primary Artist`; Navidrome can also prevent the duplicate download and reuse the existing path for playlist routing
@@ -193,6 +193,9 @@ bridge stays out until the report has earned trust with real libraries.
          # Optional: Jellyfin auto-rescan
          # - JELLYFIN_URL=http://jellyfin:8096
          # - JELLYFIN_API_KEY=your-jellyfin-api-key
+         # Optional: Plex auto-rescan
+         # - PLEX_URL=http://plex:32400
+         # - PLEX_TOKEN=your-plex-token
          # Optional: Notifications
          # - NOTIFY_ON=playlists,bulk,errors
          # - TELEGRAM_WEBHOOK_URL=https://api.telegram.org/bot{token}/sendMessage?chat_id={chat_id}
@@ -371,6 +374,8 @@ Settings are stored in the database and persist across container restarts.
 | `NAVIDROME_PASS` | - | Navidrome password for API |
 | `JELLYFIN_URL` | - | Jellyfin server URL (e.g., `http://jellyfin:8096`) |
 | `JELLYFIN_API_KEY` | - | Jellyfin API key for library refresh |
+| `PLEX_URL` | - | Plex server URL (e.g., `http://plex:32400`) |
+| `PLEX_TOKEN` | - | Plex authentication token for library refresh |
 | `LIDARR_URL` | - | Lidarr server URL |
 | `LIDARR_API_KEY` | - | Lidarr API key for library refresh |
 | `SOURCE_YOUTUBE_ENABLED` | `true` | Enable YouTube search results |
@@ -468,6 +473,18 @@ environment:
 ```
 
 Get your API key from Jellyfin: Dashboard, API Keys, Add.
+
+### Plex Auto-Rescan
+
+To automatically trigger a Plex library scan after downloads:
+
+```yaml
+environment:
+  - PLEX_URL=http://plex:32400
+  - PLEX_TOKEN=your-plex-token-here
+```
+
+Get your token via Plex's own "Finding an authentication token" support article. Plex scopes rescans to a library section rather than the whole server, so MusicGrabber asks Plex which sections exist and refreshes every one it finds tagged as a music library; no separate section ID setting is needed.
 
 ### Lidarr Auto-Rescan
 
@@ -573,7 +590,7 @@ environment:
 
 ### Soulseek Integration (Optional)
 
-MusicGrabber can search [slskd](https://github.com/slskd/slskd) (a Soulseek daemon) for higher quality sources. When enabled, search results from YouTube and Soulseek are shown together, ranked by relevance. Soulseek's declared codec and bitrate contribute to that rank and also feed the separate minimum-quality filter, so a good FLAC match still receives its due without pretending audio quality and title relevance are the same measurement. The peer's `queueLength` is shown on the card and applies a small capped rank penalty; it is never an exclusion rule, so a busy peer holding the only good copy remains available. The peer remains visible as the source of the download but is kept separate from the artist. Filename format decorations such as `[FLAC]`, `[1733 kbps]`, and `[16-44]` are removed from displayed titles, full release dates are parsed as one value, and bracketed artist shelf labels are matched against the artist that was searched. A search result may initially infer an artist from the remote path; after download, MusicGrabber validates the file in private staging and prefers its embedded `ARTIST` tag before metadata lookup, tagging, duplicate detection, or choosing the library folder. Untagged files fall back to the path guess, since even a folder called `Music (FLAC)` is occasionally all the evidence the internet has volunteered.
+MusicGrabber can search [slskd](https://github.com/slskd/slskd) (a Soulseek daemon) for higher quality sources. When enabled, search results from YouTube and Soulseek are shown together, ranked by relevance. Soulseek's declared codec and bitrate contribute to that rank and also feed the separate minimum-quality filter, so a good FLAC match still receives its due without pretending audio quality and title relevance are the same measurement. The peer's `queueLength` is shown on the card and applies a small capped rank penalty; it is never an exclusion rule, so a busy peer holding the only good copy remains available. The peer remains visible as the source of the download but is kept separate from the artist. Filename format decorations such as `[FLAC]`, `[1733 kbps]`, and `[16-44]` are removed from displayed titles, full release dates are parsed as one value, and bracketed artist shelf labels are matched against the artist that was searched. Bulk and watched-playlist jobs check their known artist/title against the local library, Navidrome, and Lidarr before asking a Soulseek peer for any bytes. A search result may still initially infer an artist from the remote path; after download, MusicGrabber validates the file in private staging and prefers its embedded `ARTIST` tag before metadata lookup, tagging, a second safety-net duplicate check, or choosing the library folder. Untagged files fall back to the path guess, since even a folder called `Music (FLAC)` is occasionally all the evidence the internet has volunteered.
 
 Soulseek is disabled by default. Turn it on in Settings under Search Sources, or set `SOURCE_SOULSEEK_ENABLED=true`. Entering credentials alone does not enable it.
 
@@ -812,8 +829,9 @@ The app will:
 - Search enabled sources for each song automatically
 - Reject uncertain recording matches, then queue candidates from the best known quality downwards
 - Keep the selected preferred source as a same-tier tie-breaker rather than treating it as a hidden one-source allowlist
+- Download up to two tracks from one import concurrently, subject to the global `MAX_CONCURRENT_DOWNLOADS` worker limit
 - Show success/failure summary
-- Offer **Cancel**, which lets the active file finish and cancels everything untouched without deleting Queue rows
+- Offer **Cancel**, which lets up to two active files finish and cancels everything untouched without deleting Queue rows
 - Optionally create a playlist and route files into Playlists or a custom watched-playlist folder
 
 Supports various dash formats: `-`, `–`, `--`
@@ -1078,7 +1096,7 @@ music.yourdomain.com {
 |--------|----------|-------------|
 | `POST` | `/api/bulk-import-async` | Bulk import songs (async, returns immediately) |
 | `GET` | `/api/bulk-import/{id}/status` | Get async bulk import progress |
-| `POST` | `/api/bulk-import/{id}/cancel` | Cancel untouched work; one active file may finish and completed files/Queue rows are retained |
+| `POST` | `/api/bulk-import/{id}/cancel` | Cancel untouched work; up to two active files may finish and completed files/Queue rows are retained |
 | `GET` | `/api/bulk-imports` | List recent bulk imports |
 
 ### Playlist Fetching
@@ -1121,7 +1139,7 @@ music.yourdomain.com {
 | `POST` | `/api/watched-playlists/orphans/move` | Move selected orphaned files into the normal Singles layout |
 | `GET` | `/api/watched-playlists/{id}` | Get watched playlist details |
 | `PUT` | `/api/watched-playlists/{id}` | Update watched playlist settings |
-| `DELETE` | `/api/watched-playlists/{id}` | Remove a watched playlist and atomically cancel its active refresh/import; the current file may finish, untouched jobs are cancelled, and Queue history remains |
+| `DELETE` | `/api/watched-playlists/{id}` | Remove a watched playlist and atomically cancel its active refresh/import; up to two active files may finish, untouched jobs are cancelled, and Queue history remains |
 | `POST` | `/api/watched-playlists/{id}/refresh` | Check playlist for new tracks |
 | `GET` | `/api/watched-playlists/{id}/missing` | List tracks with no successful download |
 | `GET` | `/api/watched-playlists/{id}/tracks` | List all tracks with per-track status |

@@ -86,4 +86,12 @@ def config(api, base_url):
 
 @pytest.fixture(scope="session")
 def is_single_user(config):
-    return not config.get("auth_required", False)
+    """True when no login is required, i.e. the instance has fewer than 2 accounts.
+
+    Reads `users_exist` (which app.py sets from `user_count >= 2`), the same
+    signal the `api` fixture uses to decide whether to log in. It used to read
+    `auth_required`, but that flag means "an API key is set" and has nothing to
+    do with logins, so on any instance with accounts but no API key the two
+    disagreed and every multi-user path quietly skipped itself.
+    """
+    return not config.get("users_exist", False)

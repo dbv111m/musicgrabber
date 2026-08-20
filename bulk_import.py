@@ -36,6 +36,7 @@ from utils import hash_track, spawn_daemon_thread
 # YouTube with simultaneous requests and starving the DB connection pool.
 _download_pool = None
 _download_pool_size = 0
+TRACKS_PER_IMPORT = 2
 
 
 def _get_download_pool() -> ThreadPoolExecutor:
@@ -76,7 +77,7 @@ def _cancel_imports_with_conn(
         f"""UPDATE bulk_imports
             SET cancel_requested = 1,
                 status = 'cancelling',
-                error = 'Cancellation requested; active download may finish',
+                error = 'Cancellation requested; active downloads may finish',
                 progress_at = datetime('now')
             WHERE id IN ({placeholders})""",
         import_ids,
@@ -163,7 +164,7 @@ def request_bulk_import_cancellation(
     watch_playlist_id: str | None = None,
     conn: sqlite3.Connection | None = None,
 ) -> dict:
-    """Cancel untouched import work while allowing the active file to finish."""
+    """Cancel untouched import work while allowing active files to finish."""
     if conn is not None:
         return _cancel_imports_with_conn(
             conn, import_id=import_id, watch_playlist_id=watch_playlist_id
@@ -444,7 +445,7 @@ def _resolve_album_up_front(
 
 
 def process_bulk_import_worker(import_id: str):
-    """Background worker to process bulk import tracks one by one
+    """Background worker processing up to two import tracks concurrently.
 
     Searches all available sources in parallel
     via search_all() and picks the best result by relevance score.
@@ -518,8 +519,77 @@ def process_bulk_import_worker(import_id: str):
             import_id, override_dir, preferred_sources_list
         )
 
+    active_downloads = {}
+
+    def reap_downloads(wait_for_one: bool) -> None:
+        """Persist completed futures, optionally waiting for one to finish."""
+        completed = []
+        while active_downloads:
+            completed = [future for future in active_downloads if future.done()]
+            if completed:
+                break
+            if not wait_for_one:
+                return
+            with db_conn() as heartbeat_conn:
+                heartbeat_conn.execute(
+                    "UPDATE bulk_imports SET progress_at = datetime('now') WHERE id = ?",
+                    (import_id,),
+                )
+                heartbeat_conn.commit()
+            time.sleep(0.5)
+
+        for future in completed:
+            context = active_downloads.pop(future)
+            track_id = context["track_id"]
+            job_id = context["job_id"]
+            target_id = context["target_id"]
+            try:
+                future.result()
+            except Exception as exc:
+                # Keep one broken worker leg from abandoning the other active
+                # track or the untouched remainder of the import.
+                with db_conn() as conn:
+                    conn.execute(
+                        "UPDATE jobs SET status = 'failed', error = ?, completed_at = datetime('now') WHERE id = ?",
+                        (str(exc)[:500], job_id),
+                    )
+                    conn.commit()
+                try:
+                    finish_acquisition_cycle(target_id, "failed", str(exc))
+                except Exception as ledger_error:
+                    print(
+                        f"Bulk import {import_id}: failed to close acquisition target "
+                        f"{target_id}: {ledger_error}"
+                    )
+
+            with db_conn() as conn:
+                job_state = conn.execute(
+                    "SELECT status, error FROM jobs WHERE id = ?", (job_id,)
+                ).fetchone()
+                state = job_state[0] if job_state else "failed"
+                error = job_state[1] if job_state else "Download job disappeared"
+                track_state = (
+                    "completed"
+                    if state in ("completed", "completed_with_errors")
+                    else "cancelled" if state == "cancelled" else "failed"
+                )
+                conn.execute(
+                    "UPDATE bulk_import_tracks SET status = ?, error = ? WHERE id = ?",
+                    (track_state, error, track_id),
+                )
+                conn.execute(
+                    "UPDATE bulk_imports SET progress_at = datetime('now') WHERE id = ?",
+                    (import_id,),
+                )
+                conn.commit()
+
     try:
         while True:
+            reap_downloads(wait_for_one=False)
+            if len(active_downloads) >= TRACKS_PER_IMPORT:
+                reap_downloads(wait_for_one=True)
+                continue
+
             # Get next pending track
             with db_conn() as conn:
                 conn.row_factory = sqlite3.Row
@@ -541,6 +611,9 @@ def process_bulk_import_worker(import_id: str):
                 track = dict(track) if track else None
 
             if not track:
+                if active_downloads:
+                    reap_downloads(wait_for_one=True)
+                    continue
                 break
 
             track_id = track["id"]
@@ -775,6 +848,8 @@ def process_bulk_import_worker(import_id: str):
                         finish_acquisition_cycle(
                             target_id, "cancelled", "Cancelled before download started"
                         )
+                        while active_downloads:
+                            reap_downloads(wait_for_one=True)
                         break
 
                 video_id = best_match["video_id"]
@@ -903,41 +978,11 @@ def process_bulk_import_worker(import_id: str):
                     custom_subdir=custom_subdir,
                     original_youtube_video_id=track.get("original_youtube_video_id"),
                 )
-
-                # One import owns at most one active file. This gives cancellation
-                # a precise contract: the current future may finish; nothing after
-                # it is searched or queued. Other imports and manual jobs can still
-                # use the remaining internal download-pool workers.
-                while not download_future.done():
-                    with db_conn() as conn:
-                        conn.execute(
-                            "UPDATE bulk_imports SET progress_at = datetime('now') WHERE id = ?",
-                            (import_id,),
-                        )
-                        conn.commit()
-                    time.sleep(0.5)
-                download_future.result()
-
-                with db_conn() as conn:
-                    job_state = conn.execute(
-                        "SELECT status, error FROM jobs WHERE id = ?", (job_id,)
-                    ).fetchone()
-                    state = job_state[0] if job_state else "failed"
-                    error = job_state[1] if job_state else "Download job disappeared"
-                    track_state = (
-                        "completed"
-                        if state in ("completed", "completed_with_errors")
-                        else "cancelled" if state == "cancelled" else "failed"
-                    )
-                    conn.execute(
-                        "UPDATE bulk_import_tracks SET status = ?, error = ? WHERE id = ?",
-                        (track_state, error, track_id),
-                    )
-                    conn.execute(
-                        "UPDATE bulk_imports SET progress_at = datetime('now') WHERE id = ?",
-                        (import_id,),
-                    )
-                    conn.commit()
+                active_downloads[download_future] = {
+                    "track_id": track_id,
+                    "job_id": job_id,
+                    "target_id": target_id,
+                }
 
             except Exception as e:
                 # Recording the failure must never become the failure. If this

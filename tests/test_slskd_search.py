@@ -334,14 +334,14 @@ def test_real_flac_artist_tag_is_read_before_path_fallback(tmp_path):
 
 
 def test_slskd_stages_file_then_routes_with_embedded_artist(monkeypatch, tmp_path):
-    """Exercise the ordering: acquire, validate/read tags, then choose a folder."""
+    """A weak preflight miss is retried after embedded tags identify the artist."""
     import downloads
 
     staging = tmp_path / "staging"
     staging.mkdir()
     raw_file = staging / "2. Ignorance.flac"
     raw_file.write_bytes(b"audio-shaped test fixture")
-    seen = {"job_updates": []}
+    seen = {"job_updates": [], "duplicate_artists": []}
 
     monkeypatch.setattr(downloads, "_job_was_cancelled", lambda _j: False)
     monkeypatch.setattr(downloads, "_get_job_album_context", lambda _j: {})
@@ -350,12 +350,13 @@ def test_slskd_stages_file_then_routes_with_embedded_artist(monkeypatch, tmp_pat
     monkeypatch.setattr(downloads, "get_album_art_context", lambda *a, **k: (None, None))
 
     def _check_duplicate(artist, _title, **_kwargs):
-        seen["duplicate_artist"] = artist
+        seen["duplicate_artists"].append(artist)
         return None
 
     monkeypatch.setattr(downloads, "check_duplicate", _check_duplicate)
     monkeypatch.setattr(downloads, "check_navidrome_duplicate", lambda *a, **k: None)
     monkeypatch.setattr(downloads, "check_lidarr_duplicate", lambda *a, **k: None)
+    monkeypatch.setattr(downloads, "get_setting_bool", lambda *a, **k: True)
     monkeypatch.setattr(downloads, "_playlist_album_tags", lambda *a, **k: (None, None, False))
     monkeypatch.setattr(downloads, "_make_staging_dir", lambda *a, **k: staging)
     monkeypatch.setattr(downloads, "_clear_staging_dir", lambda path: seen.update(cleaned=path))
@@ -389,10 +390,63 @@ def test_slskd_stages_file_then_routes_with_embedded_artist(monkeypatch, tmp_pat
     )
 
     assert seen["download_dest"] == staging
-    assert seen["duplicate_artist"] == "Paramore"
+    assert seen["duplicate_artists"] == ["Music (FLAC)", "Paramore"]
     assert seen["routed_artist"] == "Paramore"
     assert seen["cleaned"] == staging
     assert any(update.get("artist") == "Paramore" for update in seen["job_updates"])
+
+
+def test_slskd_known_duplicate_is_skipped_before_transfer(monkeypatch, tmp_path):
+    """Known playlist metadata must stop Soulseek before any peer transfer."""
+    import downloads
+
+    existing = tmp_path / "PinkPantheress - Stateside.opus"
+    existing.write_bytes(b"already here")
+    updates = []
+
+    monkeypatch.setattr(downloads, "_job_was_cancelled", lambda _j: False)
+    monkeypatch.setattr(downloads, "_get_job_album_context", lambda _j: {})
+    monkeypatch.setattr(downloads, "_get_album_track_tag_context", lambda _j: (None, None))
+    monkeypatch.setattr(downloads, "get_album_art_context", lambda *_a, **_k: (None, None))
+    monkeypatch.setattr(downloads, "ensure_album_cover_files", lambda *_a, **_k: None)
+    monkeypatch.setattr(downloads, "_complete_if_existing_album_track", lambda *_a, **_k: False)
+    monkeypatch.setattr(downloads, "get_setting_bool", lambda *a, **k: True)
+    monkeypatch.setattr(downloads, "check_duplicate", lambda *a, **k: existing)
+    monkeypatch.setattr(
+        downloads,
+        "check_navidrome_duplicate",
+        lambda *_a, **_k: (_ for _ in ()).throw(
+            AssertionError("Navidrome should not run after a local hit")
+        ),
+    )
+    monkeypatch.setattr(
+        downloads,
+        "check_lidarr_duplicate",
+        lambda *_a, **_k: (_ for _ in ()).throw(
+            AssertionError("Lidarr should not run after a local hit")
+        ),
+    )
+    monkeypatch.setattr(downloads, "_mark_watched_track_downloaded", lambda *a, **k: True)
+    monkeypatch.setattr(downloads, "_update_job", lambda _job, **fields: updates.append(fields))
+    monkeypatch.setattr(
+        downloads,
+        "download_from_slskd",
+        lambda *_a, **_k: (_ for _ in ()).throw(
+            AssertionError("duplicate track reached Soulseek transfer")
+        ),
+    )
+
+    downloads.process_slskd_download(
+        "job-1",
+        "peer",
+        "PinkPantheress/Stateside.flac",
+        "PinkPantheress",
+        "Stateside",
+        slskd_size=123,
+    )
+
+    assert updates[-1]["status"] == "completed"
+    assert updates[-1]["error"].startswith("Already exists:")
 
 
 def test_album_mode_bypasses_soulseek_duplicate_checks(monkeypatch, tmp_path):

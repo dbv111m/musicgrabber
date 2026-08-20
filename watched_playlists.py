@@ -461,10 +461,11 @@ def move_orphans_to_singles(files: list[str], playlists: list[dict]) -> dict:
             errors.append({"file": raw, "reason": str(e)})
 
     if moved:
-        from downloads import trigger_navidrome_scan, trigger_jellyfin_scan
+        from downloads import trigger_navidrome_scan, trigger_jellyfin_scan, trigger_plex_scan
         for uid in touched_users:
             trigger_navidrome_scan(user_id=uid)
             trigger_jellyfin_scan(user_id=uid)
+            trigger_plex_scan(user_id=uid)
 
     return {"moved": moved, "skipped": skipped, "errors": errors}
 

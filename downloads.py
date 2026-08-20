@@ -278,13 +278,19 @@ def _get_job_album_context(job_id: str) -> dict:
             row = conn.execute(
                 """
                 SELECT override_dir, album_release_mbid, album_name, album_track_title,
-                       album_track_number, album_track_total
+                       album_track_number, album_track_total, download_type
                 FROM jobs
                 WHERE id = ?
                 LIMIT 1
                 """,
                 (job_id,),
             ).fetchone()
+        if row and row["download_type"] == "upgrade":
+            # Track Upgrades points override_dir at a scratch staging folder, not a
+            # real Artist/Album path, so deriving names from it would be a shot in
+            # the dark. perform_upgrade() reapplies the original artist/title itself
+            # once the file lands, so there's nothing useful for us to add here.
+            return {}
         if not row:
             with db_conn() as conn:
                 conn.row_factory = sqlite3.Row
@@ -1420,6 +1426,31 @@ def trigger_jellyfin_scan(user_id: str | None = None):
                 f"{jellyfin_url}/Library/Refresh",
                 headers={"X-Emby-Token": jellyfin_api_key}
             )
+    except Exception:
+        pass  # Non-critical, scan will happen on schedule anyway
+
+
+def trigger_plex_scan(user_id: str | None = None):
+    """Trigger a Plex library scan via API.
+
+    Unlike Navidrome/Jellyfin, Plex refreshes are scoped to a library section
+    rather than the whole server, so we ask it which sections exist and
+    refresh every one tagged "artist" (i.e. a music library).
+    """
+    plex_url = get_setting("plex_url", user_id=user_id)
+    plex_token = get_setting("plex_token", user_id=user_id)
+
+    if not (plex_url and plex_token):
+        return
+
+    try:
+        headers = {"X-Plex-Token": plex_token, "Accept": "application/json"}
+        with httpx.Client(timeout=TIMEOUT_HTTP_REQUEST) as client:
+            sections_resp = client.get(f"{plex_url}/library/sections", headers=headers)
+            sections = sections_resp.json().get("MediaContainer", {}).get("Directory", [])
+            for section in sections:
+                if section.get("type") == "artist":
+                    client.get(f"{plex_url}/library/sections/{section['key']}/refresh", headers=headers)
     except Exception:
         pass  # Non-critical, scan will happen on schedule anyway
 
@@ -4014,6 +4045,7 @@ def process_playlist_download(job_id: str, playlist_id: str, playlist_name: str,
         # Trigger library rescans if configured
         trigger_navidrome_scan(user_id=user_id)
         trigger_jellyfin_scan(user_id=user_id)
+        trigger_plex_scan(user_id=user_id)
 
         # Update job status based on results
         final_status = "completed"
@@ -4085,6 +4117,75 @@ def process_slskd_download(job_id: str, username: str, filename: str, artist: st
         job_id, album_ctx, user_id=user_id
     ):
         return
+
+    def _complete_if_library_duplicate(check_artist: str, check_title: str) -> bool:
+        """Finish this job when the requested recording is already available.
+
+        Soulseek still calls this again after reading the staged file's embedded
+        artist. The first call avoids transferring known playlist tracks; the
+        second protects older jobs whose path-derived artist was only a folder
+        name or peer username.
+        """
+        if skip_dupe_check or not get_setting_bool("skip_dupes", True, user_id=user_id):
+            return False
+
+        existing_file = check_duplicate(check_artist, check_title, user_id=user_id)
+        if not existing_file:
+            existing_file = check_navidrome_duplicate(
+                check_artist, check_title, user_id=user_id
+            )
+        if not existing_file:
+            existing_file = check_lidarr_duplicate(
+                check_artist, check_title, user_id=user_id
+            )
+
+        # Sentinel Navidrome paths prove existence but cannot be written into an
+        # M3U. Keep downloading when playlist routing needs a usable path.
+        if playlist_name and existing_file and not (
+            existing_file.is_absolute() or existing_file.exists()
+        ):
+            existing_file = None
+        if not existing_file:
+            return False
+
+        if playlist_name:
+            source_label = "library" if existing_file.exists() else "Navidrome"
+            error = (
+                f"Already exists in {source_label}: {_display_path(existing_file)} "
+                "(added to playlist)"
+            )
+        else:
+            error = f"Already exists: {_display_path(existing_file)}"
+
+        _update_job(
+            job_id,
+            status="completed",
+            completed_at=datetime.now(timezone.utc).isoformat(),
+            final_path=_local_final_path(existing_file),
+            error=error,
+        )
+        real_existing = (
+            existing_file
+            if existing_file.is_absolute() and existing_file.exists()
+            else None
+        )
+        marked = _mark_watched_track_downloaded(
+            job_id, resolved_path=real_existing, skip_mismatch=True
+        )
+        if (
+            playlist_name
+            and marked
+            and (existing_file.is_absolute() or existing_file.exists())
+        ):
+            _append_to_physical_m3u(
+                existing_file,
+                playlist_name,
+                use_playlists_dir,
+                user_id=user_id,
+                custom_subdir=custom_subdir,
+            )
+        return True
+
     try:
         _update_job(job_id, status="downloading", progress_stage="Fetching info")
 
@@ -4106,6 +4207,12 @@ def process_slskd_download(job_id: str, username: str, filename: str, artist: st
 
         # Update job with extracted info (store slskd peer as uploader for blacklist)
         _update_job(job_id, title=title, artist=artist, uploader=username)
+
+        # Watched playlists and bulk imports already know the intended artist and
+        # title. Check them before asking a Soulseek peer for any bytes.
+        _update_job(job_id, progress_stage="Checking for duplicates")
+        if _complete_if_library_duplicate(artist, title):
+            return
 
         # Create download directory: custom playlist dir, Playlists/Name/, album override,
         # or standard Singles layout.
@@ -4223,49 +4330,11 @@ def process_slskd_download(job_id: str, username: str, filename: str, artist: st
             )
             _update_job(job_id, artist=artist)
 
-        # Only now do we know which artist to ask the library about. Checking
-        # duplicates against a path root such as "Music (FLAC)" can both miss a
-        # real Paramore duplicate and, worse, skip the job for an unrelated file
-        # under that container folder. The staged acquisition is discarded by
-        # the finally block if a corrected duplicate already exists.
+        # Check again with the embedded artist. This catches old/retried jobs whose
+        # provisional artist was only a path root such as "Music (FLAC)"; the
+        # staged acquisition is discarded by the finally block on a match.
         _update_job(job_id, progress_stage="Checking for duplicates")
-        existing_file = None
-        if not skip_dupe_check:
-            existing_file = check_duplicate(artist, title, user_id=user_id)
-            if not existing_file:
-                existing_file = check_navidrome_duplicate(artist, title, user_id=user_id)
-            if not existing_file:
-                existing_file = check_lidarr_duplicate(artist, title, user_id=user_id)
-        # Sentinel Navidrome paths are unusable for playlist M3U entries.
-        if playlist_name and existing_file and not (existing_file.is_absolute() or existing_file.exists()):
-            existing_file = None
-        if existing_file and playlist_name and get_setting_bool("skip_dupes", True, user_id=user_id):
-            source_label = "library" if existing_file.exists() else "Navidrome"
-            _update_job(
-                job_id,
-                status="completed",
-                completed_at=datetime.now(timezone.utc).isoformat(),
-                final_path=_local_final_path(existing_file),
-                error=f"Already exists in {source_label}: {_display_path(existing_file)} (added to playlist)"
-            )
-            real_existing = existing_file if (existing_file.is_absolute() and existing_file.exists()) else None
-            marked = _mark_watched_track_downloaded(job_id, resolved_path=real_existing, skip_mismatch=True)
-            if marked and (existing_file.is_absolute() or existing_file.exists()):
-                _append_to_physical_m3u(existing_file, playlist_name, use_playlists_dir, user_id=user_id, custom_subdir=custom_subdir)
-            return
-        elif existing_file and get_setting_bool("skip_dupes", True, user_id=user_id):
-            _update_job(
-                job_id,
-                status="completed",
-                completed_at=datetime.now(timezone.utc).isoformat(),
-                final_path=_local_final_path(existing_file),
-                error=f"Already exists: {_display_path(existing_file)}"
-            )
-            _mark_watched_track_downloaded(
-                job_id,
-                resolved_path=existing_file if existing_file.is_absolute() and existing_file.exists() else None,
-                skip_mismatch=True,
-            )
+        if _complete_if_library_duplicate(artist, title):
             return
 
         if artist_dir is None:
@@ -4461,6 +4530,7 @@ def process_slskd_download(job_id: str, username: str, filename: str, artist: st
         _update_job(job_id, progress_stage="Scanning library")
         trigger_navidrome_scan(user_id=user_id)
         trigger_jellyfin_scan(user_id=user_id)
+        trigger_plex_scan(user_id=user_id)
 
         # Layer 3 backstop: a confident AcoustID fingerprint says this is a live take
         # the user did not ask for. Bin it, blacklist the peer, fail the job for retry.
@@ -4942,6 +5012,7 @@ def _process_direct_mp3_download(job_id: str, download_url: str, artist_hint: st
         _update_job(job_id, progress_stage="Scanning library")
         trigger_navidrome_scan(user_id=user_id)
         trigger_jellyfin_scan(user_id=user_id)
+        trigger_plex_scan(user_id=user_id)
 
         _update_job(
             job_id,
@@ -5643,6 +5714,7 @@ def process_download(job_id: str, video_id: str, convert_audio: bool = True, sou
         _update_job(job_id, progress_stage="Scanning library")
         trigger_navidrome_scan(user_id=user_id)
         trigger_jellyfin_scan(user_id=user_id)
+        trigger_plex_scan(user_id=user_id)
 
         # Layer 3 backstop: a confident AcoustID fingerprint says this is a live take
         # the user did not ask for. Bin it, blacklist it, fail the job so retry avoids it.

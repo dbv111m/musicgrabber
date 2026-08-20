@@ -52,7 +52,7 @@ from models import (
     AsyncBulkImportRequest, WatchedPlaylistRequest, WatchedPlaylistUpdate,
     WatchedArtistRequest, WatchedArtistUpdate,
     SettingsUpdate, SearchResult, BlacklistRequest,
-    TestSlskdRequest, TestNavidromeRequest, TestJellyfinRequest, TestLidarrRequest, TestYouTubeCookiesRequest,
+    TestSlskdRequest, TestNavidromeRequest, TestJellyfinRequest, TestPlexRequest, TestLidarrRequest, TestYouTubeCookiesRequest,
     TestAppriseRequest, TestEmailRequest, TestSpotifyCookiesRequest, RetryMissingTrackRequest, QueueMissingTrackCandidateRequest,
     QueueRescueCandidateRequest,
     OrphanMoveRequest, MaintenanceRequest,
@@ -86,7 +86,7 @@ from downloads import (
     process_acquisition_cycle, process_download, process_playlist_download,
     process_slskd_download,
     rebuild_watched_playlist_m3u,
-    trigger_navidrome_scan, trigger_jellyfin_scan,
+    trigger_navidrome_scan, trigger_jellyfin_scan, trigger_plex_scan,
     check_navidrome_duplicate, check_lidarr_duplicate,
     get_job_source_allowlist,
 )
@@ -114,7 +114,10 @@ from watched_artists import refresh_watched_artist, start_artist_scheduler, wake
 from upgrades import (
     start_upgrade_scheduler, run_scan_all,
     get_candidates_page, search_candidate, dismiss_candidate,
-    perform_upgrade, perform_upgrade_all,
+    perform_upgrade, perform_upgrade_all, get_upgrade_all_progress,
+    mark_upgrade_all_starting,
+    list_quarantine, restore_from_quarantine, delete_quarantine_entry,
+    delete_orphaned_quarantine_file,
 )
 from audio_provenance import (
     get_audit_export,
@@ -1174,6 +1177,51 @@ def test_jellyfin_connection(http_request: Request, body: TestJellyfinRequest = 
         return {"success": False, "message": "Connection timed out"}
     except Exception as e:
         print(f"Jellyfin connection test error: {type(e).__name__}: {e}")
+        return {"success": False, "message": "Connection failed  -  check server logs for details"}
+
+
+@app.post("/api/settings/test/plex")
+def test_plex_connection(http_request: Request, body: TestPlexRequest = None):
+    """Test connection to Plex server. Uses form values if provided, otherwise saved settings."""
+    user_id = http_request.state.user_id
+    is_admin = http_request.state.is_admin
+    # Non-admins can only test their saved settings, not probe arbitrary URLs
+    url = (body.url if body and body.url and is_admin else None) or _get_typed_setting("plex_url", user_id=user_id)
+    token = (body.token if body and body.token and is_admin else None) or _get_typed_setting("plex_token", user_id=user_id)
+
+    if not url:
+        return {"success": False, "message": "Plex URL not configured"}
+    if not token:
+        return {"success": False, "message": "Plex token not configured"}
+
+    try:
+        with httpx.Client(timeout=10) as client:
+            response = client.get(
+                f"{url.rstrip('/')}/library/sections",
+                headers={"X-Plex-Token": token, "Accept": "application/json"}
+            )
+            if response.status_code == 200:
+                sections = response.json().get("MediaContainer", {}).get("Directory", [])
+                music_sections = [s.get("title", "Music") for s in sections if s.get("type") == "artist"]
+                if music_sections:
+                    plural = "y" if len(music_sections) == 1 else "ies"
+                    return {
+                        "success": True,
+                        "message": f"Connected to Plex  -  found {len(music_sections)} music librar{plural}: {', '.join(music_sections)}"
+                    }
+                return {
+                    "success": True,
+                    "message": "Connected to Plex, but no music library was found. Rescans will have nothing to refresh until one exists.",
+                    "warning": True,
+                }
+            elif response.status_code == 401:
+                return {"success": False, "message": "Invalid Plex token"}
+            else:
+                return {"success": False, "message": f"Connection failed: {response.status_code}"}
+    except httpx.TimeoutException:
+        return {"success": False, "message": "Connection timed out"}
+    except Exception as e:
+        print(f"Plex connection test error: {type(e).__name__}: {e}")
         return {"success": False, "message": "Connection failed  -  check server logs for details"}
 
 
@@ -3554,6 +3602,7 @@ def patch_job_tags(job_id: str, body: PatchTagsRequest, http_request: Request):
     # Fire-and-forget rescan so library managers pick up the rename/retag
     spawn_daemon_thread(trigger_navidrome_scan, user_id=user_id)
     spawn_daemon_thread(trigger_jellyfin_scan, user_id=user_id)
+    spawn_daemon_thread(trigger_plex_scan, user_id=user_id)
 
     return {
         "success": True,
@@ -3798,10 +3847,10 @@ def empty_trash(http_request: Request):
     """Permanently delete everything in your own trash bin. No coming back from this one.
 
     Bins are per-account now, so this empties the caller's, not the whole house's.
+    No admin gate: that made sense when the bin was one shared heap, but a bin
+    you cannot empty is a bin with a lock on the lid. Same trust model as
+    /api/trash/file, which has always let you bin your own one at a time.
     """
-    if not http_request.state.is_admin:
-        raise HTTPException(status_code=403, detail="Admin access required")
-
     from settings import get_trash_dir
     import shutil
     user_id = http_request.state.user_id
@@ -4687,7 +4736,7 @@ def delete_watched_playlist(playlist_id: str, http_request: Request):
 
         # Cancellation and deletion share this transaction. The worker can see
         # the cancellation flag before the playlist row disappears, so it may
-        # finish its one active file but cannot schedule the untouched tail.
+        # finish its active files but cannot schedule the untouched tail.
         cancelled = request_bulk_import_cancellation(
             watch_playlist_id=playlist_id,
             conn=conn,
@@ -5322,8 +5371,20 @@ def upgrade_all(http_request: Request):
     if not get_setting_bool("enable_track_upgrades", False):
         raise HTTPException(status_code=400, detail="Track upgrades are disabled")
     user_id = http_request.state.user_id
+    # Mark it live here, not in the thread, so the UI's first poll can't slip
+    # into the gap and conclude the run already finished.
+    mark_upgrade_all_starting(user_id)
     spawn_daemon_thread(perform_upgrade_all, user_id)
     return {"status": "started"}
+
+
+@app.get("/api/upgrades/upgrade-all/status")
+def upgrade_all_status(http_request: Request):
+    """Progress of this user's background Upgrade All run, so the UI can poll it
+    and refresh the list itself instead of asking the user to hit reload."""
+    if _is_peon(http_request):
+        raise HTTPException(status_code=403, detail="Not available for this account")
+    return get_upgrade_all_progress(http_request.state.user_id)
 
 
 @app.post("/api/upgrades/rescan")
@@ -5334,6 +5395,66 @@ def rescan_upgrades(http_request: Request):
     if not get_setting_bool("enable_track_upgrades", False):
         raise HTTPException(status_code=400, detail="Track upgrades are disabled")
     return {"status": "ok", "totals": run_scan_all()}
+
+
+@app.get("/api/upgrades/quarantine")
+def get_quarantine(http_request: Request):
+    """List files a Track Upgrade swap displaced. Admins also see files sitting
+    in the quarantine folder with no tracking row (predates this feature, or
+    dropped in by hand); those are delete-only since their original library
+    location was never recorded.
+    """
+    if _is_peon(http_request):
+        raise HTTPException(status_code=403, detail="Not available for this account")
+    items = list_quarantine(http_request.state.user_id, is_admin=http_request.state.is_admin)
+    return {"items": items}
+
+
+@app.delete("/api/upgrades/quarantine/orphaned")
+def delete_orphaned_quarantine_entry(filename: str, http_request: Request):
+    """Delete a quarantine-folder file with no tracking row (admin only).
+
+    Registered before the /{entry_id} routes below: Starlette matches path
+    routes in registration order, and "orphaned" is a syntactically valid
+    (if not a numeric) value for {entry_id}, so this has to come first or it's
+    unreachable, shadowed by the generic route.
+    """
+    if not http_request.state.is_admin:
+        raise HTTPException(status_code=403, detail="Admin only")
+    result = delete_orphaned_quarantine_file(filename)
+    if result.get("status") == "error":
+        raise HTTPException(status_code=404, detail=result.get("reason") or "File not found")
+    return result
+
+
+@app.post("/api/upgrades/quarantine/{entry_id}/restore")
+def restore_quarantine_entry(entry_id: int, http_request: Request):
+    """Undo one upgrade: put the quarantined file back where it lived.
+
+    Whatever the upgrade put there instead is itself quarantined rather than
+    deleted, so this can be undone too if it turns out to be the wrong call.
+    """
+    if _is_peon(http_request):
+        raise HTTPException(status_code=403, detail="Not available for this account")
+    result = restore_from_quarantine(
+        http_request.state.user_id, entry_id, is_admin=http_request.state.is_admin
+    )
+    if result.get("status") == "error" and result.get("reason") == "Quarantine entry not found":
+        raise HTTPException(status_code=404, detail="Quarantine entry not found")
+    return result
+
+
+@app.delete("/api/upgrades/quarantine/{entry_id}")
+def delete_quarantine_entry_route(entry_id: int, http_request: Request):
+    """Permanently discard a quarantined file. No undo past this point."""
+    if _is_peon(http_request):
+        raise HTTPException(status_code=403, detail="Not available for this account")
+    result = delete_quarantine_entry(
+        http_request.state.user_id, entry_id, is_admin=http_request.state.is_admin
+    )
+    if result.get("status") == "error" and result.get("reason") == "Quarantine entry not found":
+        raise HTTPException(status_code=404, detail="Quarantine entry not found")
+    return result
 
 
 def _audio_audit_filters(
@@ -6160,8 +6281,9 @@ def albums_resolve_release_group(body: ReleaseGroupResolveRequest):
 
 @app.post("/api/albums/resolve-album-url")
 def albums_resolve_album_url(body: PlaylistFetchRequest):
-    """Work out whether a pasted URL is a Spotify or Apple Music ALBUM, and what it is.
+    """Work out whether a pasted URL is an ALBUM on a supported service, and what it is.
 
+    Spotify, Apple Music, YouTube Music, Beatport, Tidal and Monochrome.
     Returns recognised=False for anything else, including playlist and track
     URLs from those same services, so the caller can fall through to the
     ordinary playlist path without a fuss.

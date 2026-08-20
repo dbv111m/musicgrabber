@@ -11,9 +11,37 @@ const RELEASE_NOTES = {
         title: "What's New in v4.0.3",
         sections: [
             {
+                heading: "Plex library scan",
+                items: [
+                    "Add a Plex URL and token in Settings and MusicGrabber will nudge Plex to rescan its music library after every download, same as it already does for Navidrome and Jellyfin.",
+                ]
+            },
+            {
                 heading: "Track Upgrades leave a trace",
                 items: [
                     "A completed upgrade used to vanish without a trace: the Queue entry for the download was deleted the instant the swap finished, so there was nothing to look back on. Completed upgrades now stick around in the Queue like any other finished download, marked with an UPGRADE badge, pointing at the file that's actually sitting in your library.",
+                ]
+            },
+            {
+                heading: "Track Upgrades: quarantine, and honest results",
+                items: [
+                    "New Quarantine panel on Watched Upgrades. Every file an upgrade swapped out is listed there, with Restore to put it back (whatever replaced it goes to quarantine in turn, so you can undo the undo) and Delete when you're sure. No more rummaging around in a hidden folder by hand.",
+                    "Upgrading a track no longer loses its Artist and Album tags. They were being overwritten with the name of a temporary working folder, which is exactly as useful as it sounds.",
+                    "An upgrade that lands better but still below your target quality now stays on the list and says so, instead of disappearing and mysteriously reappearing later.",
+                    "\"Upgrade All\" now shows progress as it works and refreshes the list when it's done, rather than asking you to keep hitting refresh yourself.",
+                ]
+            },
+            {
+                heading: "More album links understood",
+                items: [
+                    "Paste a YouTube Music, Beatport, Tidal or Monochrome album link into Bulk Import and it now gets treated as a proper album: matched against MusicBrainz and filed under Albums with cover art and track numbers, the same as Spotify and Apple Music links already were. Previously these were either flattened into a plain track list or refused outright.",
+                ]
+            },
+            {
+                heading: "Smaller things",
+                items: [
+                    "You can empty your own Trash without being an admin. It's your bin.",
+                    "Finishing a track upgrade now tells Jellyfin and Plex to rescan too, not just Navidrome.",
                 ]
             },
         ]

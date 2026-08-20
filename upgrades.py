@@ -874,21 +874,47 @@ def perform_upgrade(user_id: str | None, candidate_id: int, force: bool = False)
             return {"status": "error", "reason": f"Swap failed, original restored: {e}"}
         upgraded_ok = True
 
-        # Keep the library entry's identity; the download already stamped SOURCE/SOURCE_QUALITY.
+        try:
+            with db_conn() as conn:
+                conn.execute(
+                    """INSERT INTO upgrade_quarantine
+                       (user_id, quarantine_path, original_path, replaced_by_path,
+                        artist, title, file_size)
+                       VALUES (?,?,?,?,?,?,?)""",
+                    (uid, str(quarantined), str(current), str(new_path),
+                     row["artist"], row["title"], quarantined.stat().st_size),
+                )
+                conn.commit()
+        except Exception as e:
+            print(f"Quarantine tracking row failed (candidate {candidate_id}): {e}")
+
+        # Keep the library entry's identity (artist/title/album); the download
+        # already stamped SOURCE/SOURCE_QUALITY. current_info was read from the
+        # original file before it went to quarantine, so this survives even if
+        # the new copy's own tags (or lack thereof) disagree.
         try:
             from metadata import apply_metadata_to_file
-            apply_metadata_to_file(new_path, row["artist"] or "", row["title"] or new_path.stem)
+            apply_metadata_to_file(
+                new_path, row["artist"] or "", row["title"] or new_path.stem,
+                album=current_info.get("album") or "",
+                album_artist=current_info.get("album_artist") or None,
+            )
         except Exception:
             pass
 
         _fix_m3u_references(user_id, current, new_path)
+        # All three, same as every other completed-download site. This used to
+        # poke Navidrome only, so Jellyfin and Plex users were left staring at
+        # the old file's tags until their next scheduled scan wandered past.
         try:
-            from downloads import trigger_navidrome_scan
+            from downloads import trigger_navidrome_scan, trigger_jellyfin_scan, trigger_plex_scan
             trigger_navidrome_scan(user_id=user_id)
+            trigger_jellyfin_scan(user_id=user_id)
+            trigger_plex_scan(user_id=user_id)
         except Exception:
             pass
 
-        # Refresh the candidate row to reflect the upgraded file (now at/above target).
+        # Refresh the candidate row to reflect the upgraded file.
         new_info = probe_file(new_path) or info
         new_tier = effective_tier(
             new_info["codec"],
@@ -897,6 +923,11 @@ def perform_upgrade(user_id: str | None, candidate_id: int, force: bool = False)
             new_info.get("source_codec"),
             new_info.get("source_bitrate_kbps", 0),
         )
+        # A genuine upgrade can still land short of the target: the fetched copy
+        # beats what was there, then convert-audio re-encodes it to something
+        # below your tier anyway. The row legitimately stays on the list in that
+        # case, so tell the caller rather than letting the UI assume it's gone.
+        still_below = new_tier < (row["target_tier"] or TIER_LOSSLESS)
         try:
             st = new_path.stat()
             with db_conn() as conn:
@@ -912,7 +943,7 @@ def perform_upgrade(user_id: str | None, candidate_id: int, force: bool = False)
                        WHERE user_id=? AND id=?""",
                     (str(new_path), st.st_mtime, st.st_size, new_info["codec"],
                      new_info["bitrate_kbps"], new_info["duration"], new_tier,
-                     1 if new_tier < (row["target_tier"] or TIER_LOSSLESS) else 0,
+                     1 if still_below else 0,
                      new_info.get("source") or row["source"],
                      new_info.get("source_quality"), new_info.get("source_codec"),
                      new_info.get("source_bitrate_kbps"), new_info.get("file_id"),
@@ -923,7 +954,9 @@ def perform_upgrade(user_id: str | None, candidate_id: int, force: bool = False)
             print(f"Upgrade row refresh failed (candidate {candidate_id}): {e}")
 
         return {"status": "upgraded", "from": row["found_quality"] or "",
-                "path": str(new_path), "quarantined": str(quarantined)}
+                "path": str(new_path), "quarantined": str(quarantined),
+                "still_below_target": still_below,
+                "new_quality": new_info.get("source_quality") or new_info["codec"]}
     finally:
         if job_id:
             # A genuine upgrade gets to stay in the Queue as an ordinary completed
@@ -958,27 +991,235 @@ def _set_upgrade_state(uid: str, candidate_id: int, state: str) -> None:
         conn.commit()
 
 
+# Live progress for the background "Upgrade All" run, keyed by user. Upgrade All
+# is fire-and-forget in a daemon thread, so without this the UI's only option was
+# to tell the user to refresh and hope they did; a run that removed nothing then
+# looked identical to one that never started.
+_upgrade_all_progress: dict[str, dict] = {}
+_upgrade_all_lock = threading.Lock()
+
+
+def get_upgrade_all_progress(user_id: str | None) -> dict:
+    """Progress of this user's Upgrade All run, or an idle state if none has run."""
+    with _upgrade_all_lock:
+        state = _upgrade_all_progress.get(_norm_user(user_id))
+        return dict(state) if state else {
+            "running": False, "total": 0, "done": 0,
+            "upgraded": 0, "rejected": 0, "errored": 0,
+        }
+
+
+def mark_upgrade_all_starting(user_id: str | None) -> None:
+    """Flag a run as live before its thread has drawn breath.
+
+    The route calls this synchronously so a poll arriving in the gap between
+    "thread spawned" and "thread got scheduled" sees running=True, rather than
+    an idle state it would read as "already finished, nothing happened".
+    """
+    with _upgrade_all_lock:
+        _upgrade_all_progress[_norm_user(user_id)] = {
+            "running": True, "total": 0, "done": 0,
+            "upgraded": 0, "rejected": 0, "errored": 0,
+        }
+
+
 def perform_upgrade_all(user_id: str | None) -> dict:
     """Best-effort upgrade of every below-target candidate that has a proposal."""
     uid = _norm_user(user_id)
+    mark_upgrade_all_starting(uid)
     with db_conn() as conn:
         conn.row_factory = sqlite3.Row
         ids = [r["id"] for r in conn.execute(
             "SELECT id FROM upgrade_candidates WHERE user_id=? AND below_target=1 "
             "AND dismissed=0 AND found_source IS NOT NULL", (uid,)
         ).fetchall()]
+
+    with _upgrade_all_lock:
+        _upgrade_all_progress[uid]["total"] = len(ids)
+
     upgraded = rejected = errored = 0
-    for cid in ids:
-        try:
-            res = perform_upgrade(user_id, cid)
-        except Exception:
-            errored += 1
-            continue
-        st = res.get("status")
-        upgraded += st == "upgraded"
-        rejected += st == "rejected"
-        errored += st == "error"
+    try:
+        for cid in ids:
+            try:
+                res = perform_upgrade(user_id, cid)
+                st = res.get("status")
+            except Exception:
+                st = "error"
+            upgraded += st == "upgraded"
+            rejected += st == "rejected"
+            errored += st == "error"
+            with _upgrade_all_lock:
+                _upgrade_all_progress[uid].update(
+                    done=upgraded + rejected + errored,
+                    upgraded=upgraded, rejected=rejected, errored=errored,
+                )
+    finally:
+        # Always stops "running", even if something above threw: a progress bar
+        # that spins forever is worse than no progress bar at all.
+        with _upgrade_all_lock:
+            _upgrade_all_progress[uid]["running"] = False
+
     return {"total": len(ids), "upgraded": upgraded, "rejected": rejected, "errored": errored}
+
+
+# =============================================================================
+# Phase 2c: quarantine management (restore a wrongly-upgraded file, or bin it
+# for good). Nothing here ever hard-deletes the file a restore would need; a
+# restore instead quarantines whatever it displaces, so undoing an undo is
+# still possible. Only an explicit delete is final.
+# =============================================================================
+
+def list_quarantine(user_id: str | None, is_admin: bool = False) -> list[dict]:
+    """Quarantined files this user can act on.
+
+    Admins additionally see every user's entries plus any file sitting in the
+    quarantine folder without a tracking row at all (predates this table, or
+    was dropped in by hand); those come back with "restorable": False since
+    their original library location was never recorded, only deletion is safe.
+    """
+    with db_conn() as conn:
+        conn.row_factory = sqlite3.Row
+        if is_admin:
+            rows = conn.execute(
+                "SELECT * FROM upgrade_quarantine ORDER BY quarantined_at DESC"
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                "SELECT * FROM upgrade_quarantine WHERE user_id=? ORDER BY quarantined_at DESC",
+                (_norm_user(user_id),),
+            ).fetchall()
+
+    items = [dict(r, restorable=True) for r in rows]
+
+    if is_admin:
+        from datetime import datetime, timezone
+        known = {r["quarantine_path"] for r in rows}
+        try:
+            for p in _quarantine_dir().iterdir():
+                if not p.is_file() or str(p) in known:
+                    continue
+                st = p.stat()
+                # UTC, same naive "YYYY-MM-DD HH:MM:SS" shape SQLite's CURRENT_TIMESTAMP
+                # produces for the tracked rows above, so the two sort and format together.
+                mtime_utc = datetime.fromtimestamp(st.st_mtime, tz=timezone.utc)
+                items.append({
+                    "id": None,
+                    "user_id": None,
+                    "quarantine_path": str(p),
+                    "original_path": None,
+                    "replaced_by_path": None,
+                    "artist": None,
+                    "title": p.name.split("__", 1)[-1] if "__" in p.name else p.name,
+                    "file_size": st.st_size,
+                    "quarantined_at": mtime_utc.strftime("%Y-%m-%d %H:%M:%S"),
+                    "restorable": False,
+                })
+        except OSError:
+            pass
+        items.sort(key=lambda x: x["quarantined_at"], reverse=True)
+
+    return items
+
+
+def restore_from_quarantine(user_id: str | None, entry_id: int, is_admin: bool = False) -> dict:
+    """Undo one upgrade: move the quarantined file back to where it lived, and
+    quarantine whatever the upgrade put there instead of deleting it outright.
+    """
+    with db_conn() as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute("SELECT * FROM upgrade_quarantine WHERE id=?", (entry_id,)).fetchone()
+    if row is None or (not is_admin and row["user_id"] != _norm_user(user_id)):
+        return {"status": "error", "reason": "Quarantine entry not found"}
+
+    quarantined = Path(row["quarantine_path"])
+    original = Path(row["original_path"])
+    replaced_by = Path(row["replaced_by_path"])
+
+    if not quarantined.exists():
+        with db_conn() as conn:
+            conn.execute("DELETE FROM upgrade_quarantine WHERE id=?", (entry_id,))
+            conn.commit()
+        return {"status": "error", "reason": "Quarantined file no longer exists on disk"}
+
+    import shutil
+    from datetime import datetime
+
+    # Whatever the upgrade put in its place gets bumped into quarantine itself
+    # (a format-changing upgrade, e.g. mp3 -> flac, means this is a different
+    # file from "original" below, so it needs clearing out of the way either way).
+    bumped_path = None
+    if replaced_by.exists():
+        stamp = datetime.now().strftime("%Y%m%d%H%M%S")
+        bumped_path = _quarantine_dir() / f"{stamp}__{replaced_by.name}"
+        shutil.move(str(replaced_by), str(bumped_path))
+
+    if original != replaced_by and original.exists():
+        # Something unrelated is squatting on the restore target. Put the
+        # bumped file back and bail rather than guess what to do with either.
+        if bumped_path is not None:
+            shutil.move(str(bumped_path), str(replaced_by))
+        return {"status": "error",
+                "reason": f"Restore target already occupied, sort this out manually: {original}"}
+
+    try:
+        original.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(quarantined), str(original))
+    except Exception as e:
+        if bumped_path is not None:
+            shutil.move(str(bumped_path), str(replaced_by))
+        return {"status": "error", "reason": f"Restore failed: {e}"}
+
+    with db_conn() as conn:
+        conn.execute("DELETE FROM upgrade_quarantine WHERE id=?", (entry_id,))
+        if bumped_path is not None:
+            conn.execute(
+                """INSERT INTO upgrade_quarantine
+                   (user_id, quarantine_path, original_path, replaced_by_path,
+                    artist, title, file_size)
+                   VALUES (?,?,?,?,?,?,?)""",
+                (row["user_id"], str(bumped_path), str(replaced_by), str(bumped_path),
+                 row["artist"], row["title"], bumped_path.stat().st_size),
+            )
+        conn.commit()
+
+    scan_user_library(row["user_id"])
+    return {"status": "restored", "path": str(original)}
+
+
+def delete_quarantine_entry(user_id: str | None, entry_id: int, is_admin: bool = False) -> dict:
+    """Permanently discard a quarantined file. No undo past this point."""
+    with db_conn() as conn:
+        conn.row_factory = sqlite3.Row
+        row = conn.execute("SELECT * FROM upgrade_quarantine WHERE id=?", (entry_id,)).fetchone()
+    if row is None or (not is_admin and row["user_id"] != _norm_user(user_id)):
+        return {"status": "error", "reason": "Quarantine entry not found"}
+
+    try:
+        path = Path(row["quarantine_path"])
+        if path.exists():
+            path.unlink()
+    except OSError as e:
+        return {"status": "error", "reason": f"Could not delete file: {e}"}
+
+    with db_conn() as conn:
+        conn.execute("DELETE FROM upgrade_quarantine WHERE id=?", (entry_id,))
+        conn.commit()
+    return {"status": "deleted"}
+
+
+def delete_orphaned_quarantine_file(filename: str) -> dict:
+    """Admin-only cleanup for a quarantine-folder file with no tracking row
+    (predates this table, or was dropped in by hand): no known original
+    location, so deletion is the only safe action.
+    """
+    path = _quarantine_dir() / filename
+    try:
+        if path.parent.resolve() != _quarantine_dir().resolve() or not path.is_file():
+            return {"status": "error", "reason": "File not found"}
+        path.unlink()
+    except OSError as e:
+        return {"status": "error", "reason": f"Could not delete file: {e}"}
+    return {"status": "deleted"}
 
 
 def _eligible_user_ids() -> list[str | None]:

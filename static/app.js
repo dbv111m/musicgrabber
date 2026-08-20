@@ -4442,7 +4442,7 @@
                 statusText = 'Rate limited - waiting...';
                 statusColor = 'var(--warning)';
             } else if (data.status === 'cancelling') {
-                statusText = 'Cancelling after current file...';
+                statusText = 'Cancelling after active files...';
                 statusColor = 'var(--warning)';
             } else if (data.status === 'cancelled') {
                 statusText = 'Cancelled';
@@ -4565,7 +4565,7 @@
                     const error = await response.json();
                     throw new Error(error.detail || 'Could not cancel import');
                 }
-                showToast('Cancellation requested. The active file may finish.');
+                showToast('Cancellation requested. Up to two active files may finish.');
             } catch (error) {
                 showToast(error.message || 'Could not cancel import', true);
             }
@@ -5835,9 +5835,10 @@
             }
         }
 
-        // Spotify/Apple ALBUM url -> resolve-album-url -> confidence gate.
+        // ALBUM url -> resolve-album-url -> confidence gate. Handles Spotify,
+        // Apple Music, YouTube Music, Beatport, Tidal and Monochrome.
         // recognised:false falls through to the ordinary playlist path silently
-        // (it means "not actually a Spotify/Apple album url", not an error).
+        // (it means "not actually an album url", not an error).
         async function fetchAlbumUrl(url) {
             spotifyError.style.display = 'none';
             spotifyError.style.color = '';
@@ -5859,8 +5860,8 @@
                 if (!resp.ok) throw new Error(data.detail || 'Could not resolve that album URL');
 
                 if (!data.recognised) {
-                    // Not actually a Spotify/Apple album url after all (or the
-                    // service call fell over); ordinary playlist path, same url.
+                    // Not actually an album url after all (or the service call
+                    // fell over); ordinary playlist path, same url.
                     await doPlaylistFetch(url, false);
                     return;
                 }
@@ -6524,9 +6525,16 @@
             const isListenBrainzUrl = url.match(/^https?:\/\/listenbrainz\.org\/(playlist|user)\//i);
             const isBareWord = url.match(/^[a-zA-Z0-9_-]+$/);
             const isListenBrainz = isListenBrainzUrl || isBareWord;
-            const isTidal = url.match(/^https?:\/\/tidal\.com\/(?:browse\/)?playlist\//i);
-            const isMonochrome = url.match(/^https?:\/\/(?:www\.)?(?:monochrome\.tf|monochrome\.samidy\.com)\/playlist\//i);
-            const isBeatport = url.match(/^https?:\/\/(?:www\.)?beatport\.com\/(top-100|genre\/[^/]+\/\d+\/top-100|chart\/[^/]+\/\d+)/i);
+            const isTidalAlbum = url.match(/^https?:\/\/(?:www\.)?tidal\.com\/(?:browse\/)?album\/\d+/i);
+            const isTidal = isTidalAlbum || url.match(/^https?:\/\/tidal\.com\/(?:browse\/)?playlist\//i);
+            const isMonochromeAlbum = url.match(/^https?:\/\/(?:www\.)?(?:monochrome\.tf|monochrome\.samidy\.com)\/album\/\d+/i);
+            const isMonochrome = isMonochromeAlbum || url.match(/^https?:\/\/(?:www\.)?(?:monochrome\.tf|monochrome\.samidy\.com)\/playlist\//i);
+            // Beatport calls an album a "release"; charts and Top 100 are not albums.
+            const isBeatportRelease = url.match(/^https?:\/\/(?:www\.)?beatport\.com\/release\/[^/?#]+\/\d+/i);
+            const isBeatport = isBeatportRelease || url.match(/^https?:\/\/(?:www\.)?beatport\.com\/(top-100|genre\/[^/]+\/\d+\/top-100|chart\/[^/]+\/\d+)/i);
+            // YouTube's auto-generated album playlists are the OLAK5uy_ ones. An
+            // ordinary PL... playlist or an RD... mix is not an album.
+            const isYouTubeAlbum = url.match(/^https?:\/\/(?:www\.|music\.)?youtube\.com\/(?:playlist|watch)\?[^"]*list=OLAK5uy_/i);
             // MusicBrainz release/release-group URLs carry the MBID already, so they
             // skip the track-list textarea entirely and go straight to the proper
             // album pipeline: Albums/Artist/Album/, cover art, the works.
@@ -6537,10 +6545,12 @@
                 await fetchMusicBrainzRelease(url);
                 return;
             }
-            // Spotify/Apple ALBUM url: resolve-album-url first (confidence gate),
-            // NOT the ordinary playlist scrape, or the whole album flattens into
-            // a track list and loses its folder/artwork/.albuminfo/track numbers.
-            if (isSpotifyAlbum || isAppleAlbum) {
+            // ALBUM url on any supported service: resolve-album-url first
+            // (confidence gate), NOT the ordinary playlist scrape, or the whole
+            // album flattens into a track list and loses its
+            // folder/artwork/.albuminfo/track numbers.
+            if (isSpotifyAlbum || isAppleAlbum || isYouTubeAlbum || isBeatportRelease
+                || isTidalAlbum || isMonochromeAlbum) {
                 await fetchAlbumUrl(url);
                 return;
             }
@@ -7901,6 +7911,19 @@
             });
         })();
 
+        // Quarantine panel: files a Track Upgrade swap displaced. Collapsed by
+        // default; loaded on every open so it never shows stale state.
+        (function wireQuarantineControls() {
+            const toggle = document.getElementById('quarantineToggleBtn');
+            const panel = document.getElementById('quarantinePanel');
+            if (!toggle || !panel) return;
+            toggle.addEventListener('click', () => {
+                const opening = panel.style.display === 'none';
+                panel.style.display = opening ? '' : 'none';
+                if (opening) loadQuarantine();
+            });
+        })();
+
         // =============================================================================
         // Watched Artists
         // =============================================================================
@@ -8464,15 +8487,35 @@
                 const resp = await apiFetch(url, { method: 'POST' });
                 const data = await resp.json().catch(() => ({}));
                 if (resp.ok && data.status === 'upgraded') {
+                    // A successful upgrade can still sit below your target tier (the
+                    // fetched copy was better, then convert-audio re-encoded it back
+                    // down). The backend keeps such a row on the list, so removing it
+                    // here would just make it "reappear" on the next load, looking
+                    // like the upgrade silently failed when it did no such thing.
+                    const stillBelow = data.still_below_target;
                     if (row) {
-                        row.style.transition = 'opacity 0.4s';
-                        row.style.opacity = '0.5';
                         const c = row.querySelector('.upgrade-current .upgrade-meta');
-                        if (c) c.innerHTML = '<span class="upgrade-verified">Upgraded</span> old file moved to quarantine';
+                        if (c) {
+                            c.innerHTML = stillBelow
+                                ? `<span class="upgrade-verified">Upgraded</span> to ${escapeHtml(data.new_quality || '')}, still below your target &middot; old file in quarantine`
+                                : '<span class="upgrade-verified">Upgraded</span> old file moved to quarantine';
+                        }
+                        if (!stillBelow) {
+                            row.style.transition = 'opacity 0.4s';
+                            row.style.opacity = '0.5';
+                        }
                     }
-                    if (cell) cell.innerHTML = '<span class="upgrade-verified">Done</span>';
-                    showToast(force ? 'Force-upgraded; old file is in quarantine' : 'Upgraded; old file is in quarantine');
-                    setTimeout(() => { if (row) row.remove(); if (!document.querySelectorAll('#watchedUpgradesList .upgrade-row').length) loadWatchedUpgrades(); }, 1200);
+                    if (cell) {
+                        cell.innerHTML = stillBelow
+                            ? '<span class="upgrade-none">Still below target; search again for a better copy</span>'
+                            : '<span class="upgrade-verified">Done</span>';
+                    }
+                    if (stillBelow) {
+                        showToast('Upgraded, but the result is still below your target quality');
+                    } else {
+                        showToast(force ? 'Force-upgraded; old file is in quarantine' : 'Upgraded; old file is in quarantine');
+                        setTimeout(() => { if (row) row.remove(); if (!document.querySelectorAll('#watchedUpgradesList .upgrade-row').length) loadWatchedUpgrades(); }, 1200);
+                    }
                 } else if (data.status === 'rejected') {
                     // Offer a force override; the old file still goes to quarantine, so it's recoverable.
                     if (cell) cell.innerHTML = `<span class="upgrade-none">Rejected: ${escapeHtml(data.reason || 'failed checks')}</span>
@@ -8495,14 +8538,49 @@
 
         async function upgradeAll() {
             if (!confirm('Download and swap in every proposed upgrade on this page set? Old files are moved to quarantine (recoverable), not deleted.')) return;
+            const btn = document.getElementById('upgradeAllBtn');
             try {
                 const resp = await apiFetch('/api/upgrades/upgrade-all', { method: 'POST' });
                 if (resp.ok) {
-                    showToast('Upgrading all in the background; this can take a while. Refresh to see progress.');
+                    showToast('Upgrading all in the background; this can take a while.');
+                    pollUpgradeAll(btn);
                 } else if (resp.status === 400) {
                     showToast('Enable Track Upgrades in Settings first', true);
                 }
             } catch (e) { showToast('Could not start upgrade-all', true); }
+        }
+
+        // Watch the background run to completion and reload the list ourselves.
+        // The old behaviour was a toast saying "Refresh to see progress", which is
+        // easy to miss and left a finished run looking like a stuck one.
+        async function pollUpgradeAll(btn) {
+            if (btn) btn.disabled = true;
+            const originalLabel = btn ? btn.textContent : '';
+            const restore = () => { if (btn) { btn.disabled = false; btn.textContent = originalLabel; } };
+            let misses = 0;
+            while (true) {
+                await new Promise(r => setTimeout(r, 3000));
+                let data;
+                try {
+                    const resp = await apiFetch('/api/upgrades/upgrade-all/status');
+                    if (!resp.ok) { restore(); return; }
+                    data = await resp.json();
+                } catch (e) {
+                    // A blip shouldn't abandon a run that's still going; several in a
+                    // row probably means we're not getting it back.
+                    if (++misses >= 3) { restore(); return; }
+                    continue;
+                }
+                misses = 0;
+                if (btn && data.total) btn.textContent = `Upgrading ${data.done}/${data.total}...`;
+                if (!data.running) {
+                    restore();
+                    showToast(`Upgrade All finished: ${data.upgraded || 0} upgraded, ${data.rejected || 0} rejected, ${data.errored || 0} errored`);
+                    upgradesPage = 1;
+                    loadWatchedUpgrades();
+                    return;
+                }
+            }
         }
 
         async function dismissUpgrade(id) {
@@ -8516,6 +8594,112 @@
                     }
                 }
             } catch (e) { showToast('Could not dismiss', true); }
+        }
+
+        async function loadQuarantine() {
+            const list = document.getElementById('quarantineList');
+            if (!list) return;
+            list.innerHTML = '<p class="watched-empty-text">Loading&hellip;</p>';
+            try {
+                const resp = await apiFetch('/api/upgrades/quarantine');
+                if (!resp.ok) { list.innerHTML = '<p class="watched-empty-text">Could not load quarantine.</p>'; return; }
+                const data = await resp.json();
+                if (!data.items.length) {
+                    list.innerHTML = '<p class="watched-empty-text">Nothing in quarantine.</p>';
+                    return;
+                }
+                list.innerHTML = data.items.map(renderQuarantineRow).join('');
+            } catch (e) {
+                list.innerHTML = '<p class="watched-empty-text">Could not load quarantine.</p>';
+            }
+        }
+
+        function renderQuarantineRow(item) {
+            const filename = item.quarantine_path.split('/').pop();
+            const title = escapeHtml(item.title || filename);
+            const artist = escapeHtml(item.artist || '');
+            const size = item.file_size ? formatBytes(item.file_size) : '';
+            const when = formatDateYmd(item.quarantined_at);
+            const restoreBtn = item.restorable
+                ? `<button class="btn btn-primary btn-sm" onclick="restoreQuarantineEntry(${item.id}, this)" title="Put this file back where it lived; whatever replaced it is quarantined in turn">Restore</button>`
+                : `<span class="upgrade-none" title="No original library location was recorded for this file">no restore info</span>`;
+            // Orphaned entries (no numeric id) carry their filename via a data
+            // attribute rather than an inline-JS string argument: filenames routinely
+            // contain apostrophes (e.g. "Breakin' Outta Hell"), which would otherwise
+            // break out of the quoted onclick argument.
+            const deleteBtn = item.id != null
+                ? `<button class="btn btn-danger btn-sm" onclick="deleteQuarantineEntry(${item.id}, this)" title="Delete this file for good">Delete</button>`
+                : `<button class="btn btn-danger btn-sm" data-filename="${escapeAttr(filename)}" onclick="deleteOrphanedQuarantineFile(this)" title="Delete this file for good">Delete</button>`;
+            return `
+                <div class="result-item upgrade-row">
+                    <div class="upgrade-current">
+                        <div class="upgrade-track"><strong>${artist}</strong>${artist ? ' &ndash; ' : ''}${title}</div>
+                        <div class="upgrade-meta">Quarantined ${when}${size ? ' · ' + size : ''}</div>
+                    </div>
+                    <div class="upgrade-actions">
+                        ${restoreBtn}
+                        ${deleteBtn}
+                    </div>
+                </div>`;
+        }
+
+        async function restoreQuarantineEntry(id, btn) {
+            if (!confirm('Restore this file? Whatever replaced it will be quarantined in turn, so this can be undone too.')) return;
+            if (btn) btn.disabled = true;
+            try {
+                const resp = await apiFetch(`/api/upgrades/quarantine/${id}/restore`, { method: 'POST' });
+                const data = await resp.json().catch(() => ({}));
+                if (resp.ok && data.status === 'restored') {
+                    showToast('Restored');
+                    loadQuarantine();
+                    if (!document.querySelectorAll('#watchedUpgradesList .upgrade-row').length) loadWatchedUpgrades();
+                } else {
+                    showToast('Restore failed: ' + (data.reason || resp.status), true);
+                    if (btn) btn.disabled = false;
+                }
+            } catch (e) {
+                showToast('Restore failed', true);
+                if (btn) btn.disabled = false;
+            }
+        }
+
+        async function deleteQuarantineEntry(id, btn) {
+            if (!confirm('Delete this file for good? There is no undo.')) return;
+            if (btn) btn.disabled = true;
+            try {
+                const resp = await apiFetch(`/api/upgrades/quarantine/${id}`, { method: 'DELETE' });
+                if (resp.ok) {
+                    showToast('Deleted');
+                    loadQuarantine();
+                } else {
+                    const data = await resp.json().catch(() => ({}));
+                    showToast('Delete failed: ' + (data.detail || resp.status), true);
+                    if (btn) btn.disabled = false;
+                }
+            } catch (e) {
+                showToast('Delete failed', true);
+                if (btn) btn.disabled = false;
+            }
+        }
+
+        async function deleteOrphanedQuarantineFile(btn) {
+            if (!confirm('Delete this file for good? There is no undo, and its original library location is not known.')) return;
+            const filename = btn.dataset.filename;
+            btn.disabled = true;
+            try {
+                const resp = await apiFetch(`/api/upgrades/quarantine/orphaned?filename=${encodeURIComponent(filename)}`, { method: 'DELETE' });
+                if (resp.ok) {
+                    showToast('Deleted');
+                    loadQuarantine();
+                } else {
+                    const data = await resp.json().catch(() => ({}));
+                    showToast('Delete failed: ' + (data.detail || resp.status), true);
+                    if (btn) btn.disabled = false;
+                }
+            } catch (e) {
+                showToast('Delete failed', true);
+                if (btn) btn.disabled = false;
+            }
         }
 
         // =====================================================================
@@ -9485,6 +9669,17 @@
                         btn.textContent = 'Queued...';
                         try {
                             const res = await apiFetch(`/api/mismatches/${mid}/accept`, { method: 'POST' });
+                            if (res.status === 404) {
+                                // Already dealt with elsewhere (e.g. Force Download from the
+                                // Queue tab, which clears this same row as a side effect).
+                                // Stale, not broken, so drop it quietly rather than crying wolf.
+                                showToast('Already handled elsewhere');
+                                btn.closest('.mismatch-row').remove();
+                                if (!content.querySelector('.mismatch-row')) {
+                                    section.style.display = 'none';
+                                }
+                                return;
+                            }
                             if (!res.ok) {
                                 const err = await res.json().catch(() => ({}));
                                 throw new Error(err.detail || 'Failed');
@@ -9758,6 +9953,8 @@
             'navidrome_pass': 'settingNavidromePass',
             'jellyfin_url': 'settingJellyfinUrl',
             'jellyfin_api_key': 'settingJellyfinApiKey',
+            'plex_url': 'settingPlexUrl',
+            'plex_token': 'settingPlexToken',
             'lidarr_url': 'settingLidarrUrl',
             'lidarr_api_key': 'settingLidarrApiKey',
             'notify_on': 'settingNotifyOn',
@@ -10704,6 +10901,11 @@
                     url: document.getElementById('settingJellyfinUrl').value.trim(),
                     api_key: document.getElementById('settingJellyfinApiKey').value.trim()
                 };
+            } else if (service === 'plex') {
+                body = {
+                    url: document.getElementById('settingPlexUrl').value.trim(),
+                    token: document.getElementById('settingPlexToken').value.trim()
+                };
             } else if (service === 'lidarr') {
                 body = {
                     url: document.getElementById('settingLidarrUrl').value.trim(),
@@ -10873,6 +11075,7 @@
         document.getElementById('testSlskdBtn').addEventListener('click', () => testConnection('slskd'));
         document.getElementById('testNavidromeBtn').addEventListener('click', () => testConnection('navidrome'));
         document.getElementById('testJellyfinBtn').addEventListener('click', () => testConnection('jellyfin'));
+        document.getElementById('testPlexBtn').addEventListener('click', () => testConnection('plex'));
         document.getElementById('testLidarrBtn').addEventListener('click', () => testConnection('lidarr'));
         document.getElementById('testYoutubeCookiesBtn').addEventListener('click', () => testConnection('youtube-cookies'));
         document.getElementById('testSpotifyCookiesBtn').addEventListener('click', () => testConnection('spotify-cookies'));

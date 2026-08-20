@@ -123,7 +123,7 @@ def probe_file(path: Path) -> dict | None:
     else:
         codec = cls or None
 
-    source = source_quality = title = artist = file_id = source_codec = source_bitrate = None
+    source = source_quality = title = artist = album = album_artist = file_id = source_codec = source_bitrate = None
     if tags is not None:
         source = _read_tag(tags, "SOURCE", "----:com.musicgrabber:SOURCE")
         source_quality = _read_tag(
@@ -131,6 +131,8 @@ def probe_file(path: Path) -> dict | None:
         )
         title = _read_tag(tags, "TITLE", "\xa9nam", id3="TIT2")
         artist = _read_tag(tags, "ARTIST", "\xa9ART", id3="TPE1")
+        album = _read_tag(tags, "ALBUM", "\xa9alb", id3="TALB")
+        album_artist = _read_tag(tags, "ALBUMARTIST", "aART", id3="TPE2")
         file_id = _read_tag(
             tags, "MUSICGRABBER_FILE_ID", "----:com.musicgrabber:FILE_ID"
         )
@@ -159,6 +161,8 @@ def probe_file(path: Path) -> dict | None:
         "source_quality": source_quality,
         "artist": artist,
         "title": title,
+        "album": album,
+        "album_artist": album_artist,
         "file_id": file_id,
         "source_codec": source_codec,
         "source_bitrate_kbps": _digits_to_int(source_bitrate or ""),

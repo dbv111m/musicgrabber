@@ -6,6 +6,7 @@ monkeypatched, and no real MusicBrainz lookups happen either (matching is
 stubbed at the album_urls.match_album_to_musicbrainz seam). No network calls.
 """
 
+import json
 import os
 import sys
 
@@ -99,11 +100,11 @@ def test_apple_music_song_url_is_not_recognised_as_an_album():
 
 
 @pytest.mark.parametrize("url", [
-    "https://music.youtube.com/playlist?list=OLAK5uy_kmPseHwrPCbC1DsXhwQjLdcpQjZzDNKOU",
-    "https://www.youtube.com/playlist?list=OLAK5uy_kmPseHwrPCbC1DsXhwQjLdcpQjZzDNKOU",
+    # Amazon has a real album url shape but no scraper that can read one: a plain
+    # fetch is an SPA shell and amazonpl.py returns zero tracks on album pages.
+    # Deliberately still unrecognised; see the album_urls module docstring.
     "https://music.amazon.co.uk/albums/B00136RSDG",
-    "https://www.beatport.com/release/ok-computer/12345",
-    "https://monochrome.tf/album/12345",
+    "https://music.amazon.com/albums/B0DJT8XQ5S",
     "not a url at all",
     "",
     None,
@@ -111,6 +112,134 @@ def test_apple_music_song_url_is_not_recognised_as_an_album():
 def test_out_of_scope_and_junk_urls_are_not_recognised(url):
     album_urls = _import_album_urls_or_skip()
     assert album_urls.parse_album_url(url) is None
+
+
+# ---------------------------------------------------------------------------
+# YouTube Music / Beatport / Tidal / Monochrome albums
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("url", [
+    "https://music.youtube.com/playlist?list=OLAK5uy_kmPseHwrPCbC1DsXhwQjLdcpQjZzDNKOU",
+    "https://www.youtube.com/playlist?list=OLAK5uy_kmPseHwrPCbC1DsXhwQjLdcpQjZzDNKOU",
+    "https://music.youtube.com/watch?v=abc123&list=OLAK5uy_kmPseHwrPCbC1DsXhwQjLdcpQjZzDNKOU",
+])
+def test_youtube_music_album_playlists_are_recognised(monkeypatch, url):
+    album_urls = _import_album_urls_or_skip()
+    monkeypatch.setattr(
+        album_urls, "_parse_youtube_album",
+        lambda pid: {"service": "youtube", "id": pid, "artist": "Radiohead", "album": "OK Computer"},
+    )
+    parsed = album_urls.parse_album_url(url)
+    assert parsed["service"] == "youtube"
+    assert parsed["id"] == "OLAK5uy_kmPseHwrPCbC1DsXhwQjLdcpQjZzDNKOU"
+
+
+@pytest.mark.parametrize("url", [
+    # An ordinary user playlist and a radio mix are not albums, however much
+    # they look like one from a distance. OLAK5uy_ is the whole signal.
+    "https://music.youtube.com/playlist?list=PLFgquLnL59alCl_2TQvOiD5Vgm1hCaGSI",
+    "https://www.youtube.com/playlist?list=RDdQw4w9WgXcQ",
+    "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+])
+def test_non_album_youtube_playlists_are_not_recognised(url):
+    album_urls = _import_album_urls_or_skip()
+    assert album_urls.parse_album_url(url) is None
+
+
+def test_youtube_album_reads_title_and_artist_from_ytdlp(monkeypatch):
+    """The playlist title is the album; the first entry's uploader is the artist,
+    with YouTube's "- Topic" plumbing stripped off."""
+    album_urls = _import_album_urls_or_skip()
+    import youtube
+
+    class _Result:
+        returncode = 0
+        stdout = json.dumps({
+            "title": "OK Computer",
+            "entries": [{"title": "Airbag", "uploader": "Radiohead - Topic"}],
+        })
+
+    monkeypatch.setattr(youtube, "_ytdlp_base_args", lambda *a, **kw: [])
+    monkeypatch.setattr(youtube, "run_ytdlp_with_retries", lambda *a, **kw: (_Result(), False))
+
+    parsed = album_urls._parse_youtube_album("OLAK5uy_abc")
+    assert parsed == {"service": "youtube", "id": "OLAK5uy_abc",
+                      "artist": "Radiohead", "album": "OK Computer"}
+
+
+def test_youtube_album_lookup_failure_still_recognises_the_url(monkeypatch):
+    album_urls = _import_album_urls_or_skip()
+    import youtube
+
+    monkeypatch.setattr(youtube, "_ytdlp_base_args", lambda *a, **kw: [])
+    monkeypatch.setattr(youtube, "run_ytdlp_with_retries", lambda *a, **kw: (None, True))
+
+    parsed = album_urls._parse_youtube_album("OLAK5uy_abc")
+    assert parsed == {"service": "youtube", "id": "OLAK5uy_abc", "artist": None, "album": None}
+
+
+def test_beatport_release_url_is_recognised(monkeypatch):
+    album_urls = _import_album_urls_or_skip()
+    import beatport
+    monkeypatch.setattr(
+        beatport, "fetch_beatport_release_info",
+        lambda url: {"artist": "Ultra Nate", "album": "Movin' To The Sun"},
+    )
+    parsed = album_urls.parse_album_url("https://www.beatport.com/release/movin-to-the-sun/6959796")
+    assert parsed == {"service": "beatport", "id": "6959796",
+                      "artist": "Ultra Nate", "album": "Movin' To The Sun"}
+
+
+@pytest.mark.parametrize("url", [
+    "https://www.beatport.com/chart/some-chart/12345",
+    "https://www.beatport.com/top-100",
+    "https://www.beatport.com/genre/techno/6/top-100",
+])
+def test_beatport_charts_are_not_albums(url):
+    album_urls = _import_album_urls_or_skip()
+    assert album_urls.parse_album_url(url) is None
+
+
+@pytest.mark.parametrize("url,service", [
+    ("https://tidal.com/album/77640617", "tidal"),
+    ("https://tidal.com/browse/album/77640617", "tidal"),
+    ("https://monochrome.tf/album/77640617", "monochrome"),
+    ("https://monochrome.samidy.com/album/77640617", "monochrome"),
+])
+def test_tidal_and_monochrome_albums_are_recognised(monkeypatch, url, service):
+    """A Monochrome album share is a Tidal album id on a different host, so both
+    resolve through the same embed."""
+    album_urls = _import_album_urls_or_skip()
+    import tidal
+    monkeypatch.setattr(
+        tidal, "fetch_tidal_album_info",
+        lambda album_id: {"artist": "U2", "album": "Achtung Baby"},
+    )
+    parsed = album_urls.parse_album_url(url)
+    assert parsed == {"service": service, "id": "77640617",
+                      "artist": "U2", "album": "Achtung Baby"}
+
+
+@pytest.mark.parametrize("url", [
+    "https://tidal.com/playlist/1b418bb8-90b7-4f6c-8a05-fa9ffe72fbf5",
+    "https://tidal.com/browse/playlist/1b418bb8-90b7-4f6c-8a05-fa9ffe72fbf5",
+    "https://monochrome.tf/playlist/1b418bb8-90b7-4f6c-8a05-fa9ffe72fbf5",
+])
+def test_tidal_and_monochrome_playlists_are_not_albums(url):
+    album_urls = _import_album_urls_or_skip()
+    assert album_urls.parse_album_url(url) is None
+
+
+def test_tidal_album_scrape_failure_still_recognises_the_url(monkeypatch):
+    album_urls = _import_album_urls_or_skip()
+    import tidal
+
+    def _boom(album_id):
+        raise RuntimeError("Tidal had a moment")
+
+    monkeypatch.setattr(tidal, "fetch_tidal_album_info", _boom)
+    parsed = album_urls.parse_album_url("https://tidal.com/album/77640617")
+    assert parsed == {"service": "tidal", "id": "77640617", "artist": None, "album": None}
 
 
 def test_spotify_album_scrape_failure_still_recognises_the_url(monkeypatch):

@@ -226,6 +226,69 @@ def test_lidarr_duplicate_matches_primary_credited_artist(monkeypatch):
     assert found == pathlib.Path("/music/The Chemical Brothers/Go.flac")
 
 
+def test_trigger_plex_scan_refreshes_only_music_sections(monkeypatch):
+    downloads = _import_downloads_or_skip()
+    refreshed = []
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def get(self, url, headers=None, **kwargs):
+            assert headers.get("X-Plex-Token") == "token"
+            if url.endswith("/library/sections"):
+                return _FakeResponse({
+                    "MediaContainer": {
+                        "Directory": [
+                            {"key": "1", "type": "movie", "title": "Movies"},
+                            {"key": "2", "type": "artist", "title": "Music"},
+                            {"key": "3", "type": "artist", "title": "Audiobooks"},
+                        ]
+                    }
+                })
+            refreshed.append(url)
+            return _FakeResponse({})
+
+    monkeypatch.setattr(
+        downloads,
+        "get_setting",
+        lambda key, user_id=None: {
+            "plex_url": "http://plex",
+            "plex_token": "token",
+        }.get(key, ""),
+    )
+    monkeypatch.setattr(downloads.httpx, "Client", FakeClient)
+
+    downloads.trigger_plex_scan()
+
+    assert refreshed == [
+        "http://plex/library/sections/2/refresh",
+        "http://plex/library/sections/3/refresh",
+    ]
+
+
+def test_trigger_plex_scan_noop_when_unconfigured(monkeypatch):
+    downloads = _import_downloads_or_skip()
+    called = []
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            called.append(True)
+
+    monkeypatch.setattr(downloads, "get_setting", lambda key, user_id=None: "")
+    monkeypatch.setattr(downloads.httpx, "Client", FakeClient)
+
+    downloads.trigger_plex_scan()
+
+    assert called == []
+
+
 @pytest.mark.parametrize("stderr, expected", [
     # The exact shape that flaked a release build: YouTube's thumbnail CDN
     # didn't serve the .webp, so the convert/embed step died even though the
@@ -511,6 +574,72 @@ def test_auto_route_playlist_uses_album_artist_for_folder_and_flat_filename(tmp_
     assert did_route is True
     assert routed == playlist_dir / "Luis Fonsi" / "Vida" / "Luis Fonsi - Despacito (Remix).flac"
     assert routed.exists()
+
+
+def _setup_job_album_context_db(monkeypatch, downloads):
+    """In-memory sqlite with just enough schema for _get_job_album_context."""
+    import sqlite3
+    from contextlib import contextmanager
+
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.executescript("""
+        CREATE TABLE jobs (
+            id TEXT PRIMARY KEY,
+            override_dir TEXT,
+            album_release_mbid TEXT,
+            album_name TEXT,
+            album_track_title TEXT,
+            album_track_number INTEGER,
+            album_track_total INTEGER,
+            download_type TEXT DEFAULT 'single'
+        );
+        CREATE TABLE bulk_imports (id TEXT PRIMARY KEY, override_dir TEXT, album_release_mbid TEXT,
+                                    total_tracks INTEGER, album_total_tracks INTEGER);
+        CREATE TABLE bulk_import_tracks (id INTEGER PRIMARY KEY AUTOINCREMENT, import_id TEXT,
+                                          job_id TEXT, song TEXT, line_num INTEGER);
+    """)
+
+    @contextmanager
+    def fake_db_conn():
+        yield conn
+
+    monkeypatch.setattr(downloads, "db_conn", fake_db_conn)
+    return conn
+
+
+def test_get_job_album_context_ignores_staging_dir_for_upgrade_jobs(monkeypatch):
+    """Regression guard: Track Upgrades stages downloads under a scratch temp
+    dir (e.g. /data/upg_42_xyz), not a real Artist/Album path. Treating that
+    temp dir as album routing wrote garbage ARTIST/ALBUM tags ("data" /
+    "upg_42_xyz") over the user's real metadata on swap-in."""
+    downloads = _import_downloads_or_skip()
+    conn = _setup_job_album_context_db(monkeypatch, downloads)
+
+    conn.execute(
+        "INSERT INTO jobs (id, override_dir, download_type) VALUES (?, ?, ?)",
+        ("job-1", "/data/upg_42_abc123", "upgrade"),
+    )
+    conn.commit()
+
+    assert downloads._get_job_album_context("job-1") == {}
+
+
+def test_get_job_album_context_still_derives_names_for_album_jobs(monkeypatch):
+    """Sanity check the upgrade-job carve-out didn't break real album routing,
+    where override_dir genuinely is an Albums/Artist/Album path."""
+    downloads = _import_downloads_or_skip()
+    conn = _setup_job_album_context_db(monkeypatch, downloads)
+
+    conn.execute(
+        "INSERT INTO jobs (id, override_dir, download_type) VALUES (?, ?, ?)",
+        ("job-2", "/music/Albums/Luis Fonsi/Vida", "single"),
+    )
+    conn.commit()
+
+    ctx = downloads._get_job_album_context("job-2")
+    assert ctx["album_artist"] == "Luis Fonsi"
+    assert ctx["album_name"] == "Vida"
 
 
 # ---------------------------------------------------------------------------
