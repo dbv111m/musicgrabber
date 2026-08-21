@@ -138,25 +138,6 @@ def _remember_hifi_api_url(base: str) -> None:
     _hifi_api_url_cache = base
 
 
-def _hifi_api_get(path: str, params: dict, timeout: int | float = TIMEOUT_MONOCHROME_SEARCH) -> httpx.Response:
-    errors = []
-    for base in _hifi_api_urls():
-        try:
-            resp = httpx.get(
-                f"{base}{path}",
-                params=params,
-                headers=_HEADERS,
-                timeout=timeout,
-                follow_redirects=True,
-            )
-            resp.raise_for_status()
-            _remember_hifi_api_url(base)
-            return resp
-        except Exception as exc:
-            errors.append(f"{base}: {exc}")
-    raise RuntimeError("; ".join(errors))
-
-
 def download_leg_healthy() -> tuple[bool, str]:
     """Health check for the source layer: can Monochrome actually stream a FLAC?
 
@@ -1647,45 +1628,3 @@ def run_download_diagnostic(query: str = "") -> dict:
         if temp_dir:
             shutil.rmtree(temp_dir, ignore_errors=True)
         _diagnostic_lock.release()
-
-
-def fetch_tidal_playlist_tracks(playlist_uuid: str) -> tuple[list[tuple[str, str]], str]:
-    """Fetch a Tidal playlist's track list via hifi-api.
-
-    Returns ([(artist, title), ...], playlist_name).
-    """
-    def _playlist_payload(offset: int = 0) -> dict:
-        resp = _hifi_api_get(
-            "/playlist/",
-            params={"id": playlist_uuid, "offset": offset},
-            timeout=30,
-        )
-        body = resp.json()
-        return body.get("data") or body
-
-    data = _playlist_payload()
-    playlist = data.get("playlist") or data
-    name = playlist.get("title") or "Monochrome Playlist"
-    items = data.get("items") or (data.get("tracks") or {}).get("items", [])
-    total = playlist.get("numberOfTracks") or len(items)
-
-    offset = len(items)
-    while offset < total:
-        page = _playlist_payload(offset)
-        page_items = page.get("items") or (page.get("tracks") or {}).get("items", [])
-        if not page_items:
-            break
-        items.extend(page_items)
-        offset += len(page_items)
-
-    tracks = []
-    for item in items:
-        item = item.get("item") if isinstance(item, dict) and "item" in item else item
-        if not isinstance(item, dict):
-            continue
-        track_title = item.get("title", "").strip()
-        artist_name = (item.get("artist") or {}).get("name", "").strip()
-        if track_title and artist_name:
-            tracks.append((artist_name, track_title))
-
-    return tracks, name

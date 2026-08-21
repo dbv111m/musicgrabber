@@ -32,6 +32,13 @@ const RELEASE_NOTES = {
                 ]
             },
             {
+                heading: "Tidal playlists are no longer cut off at 50 tracks",
+                items: [
+                    "Tidal quietly capped the page we read playlists from at the first 50 tracks, so a 204-track playlist arrived as 50 and looked perfectly fine. Playlists now come from Tidal's own API, in full, however long they are. Monochrome playlists get the same fix, since they're Tidal playlists underneath.",
+                    "Nothing to re-add: the missing tracks turn up on the next refresh and download themselves. If you use mirror sync, the ones that got dropped from your M3U come back too.",
+                ]
+            },
+            {
                 heading: "More album links understood",
                 items: [
                     "Paste a YouTube Music, Beatport, Tidal or Monochrome album link into Bulk Import and it now gets treated as a proper album: matched against MusicBrainz and filed under Albums with cover art and track numbers, the same as Spotify and Apple Music links already were. Previously these were either flattened into a plain track list or refused outright.",

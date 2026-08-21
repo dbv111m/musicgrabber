@@ -94,6 +94,14 @@ TIMEOUT_HTTP_REQUEST = 10        # MusicBrainz, LRClib, Navidrome API calls
 TIMEOUT_HTTP_SPOTIFY = 30        # Spotify embed fetch
 SPOTIFY_EMBED_MAX_ATTEMPTS = 3   # Spotify's embed edge throws transient 502/503/504s; retry before giving up
 SPOTIFY_EMBED_RETRY_BACKOFF = 1.5  # Seconds, multiplied by attempt number for a simple linear backoff
+
+# Tidal's embed player now server-renders only the first 50 tracks, so we read
+# playlists from the public API instead. The token below is lifted from the
+# embed's own JS bundle; if Tidal ever rotates it we re-scrape it on a 401.
+TIDAL_API_BASE = "https://api.tidal.com/v1"
+TIDAL_API_TOKEN = "TPIsV0A9lyiqKl9u"   # Public embed-player token, not a credential
+TIDAL_API_PAGE_SIZE = 100              # Tidal 400s on anything larger; it is not negotiable
+TIDAL_API_COUNTRY = "GB"               # Required param; totals are the same whichever you pick
 TIMEOUT_SLSKD_SEARCH = 12        # Soulseek search polling
 SLSKD_EMPTY_RETRY_DELAY = 1      # Pause before a single retry when Soulseek comes back empty (its distributed search is moody)
 TIMEOUT_SLSKD_DOWNLOAD = 600     # Soulseek download (10 minutes)

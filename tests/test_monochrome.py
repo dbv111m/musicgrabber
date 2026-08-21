@@ -386,50 +386,6 @@ def test_monochrome_search_falls_back_to_next_hifi_api_endpoint(monkeypatch):
     assert monochrome._hifi_api_url_cache == "https://working.example.test"
 
 
-def test_monochrome_playlist_fetch_handles_top_level_playlist_payload(monkeypatch):
-    import monochrome
-
-    class FakeResponse:
-        def json(self):
-            return {
-                "version": "2.3",
-                "playlist": {
-                    "uuid": "0dfc3b10-fbdb-4419-bf54-11b90051fa6c",
-                    "title": "Chill Pop",
-                    "numberOfTracks": 2,
-                },
-                "items": [
-                    {
-                        "item": {
-                            "title": "Carrie Bradshaw",
-                            "artist": {"name": "Kylie Cantrall"},
-                        }
-                    },
-                    {
-                        "item": {
-                            "title": "Somebody New",
-                            "artist": {"name": "Morgan St. Jean"},
-                        }
-                    },
-                ],
-            }
-
-    def fake_hifi_api_get(path, params, timeout):
-        assert path == "/playlist/"
-        assert params["id"] == "0dfc3b10-fbdb-4419-bf54-11b90051fa6c"
-        return FakeResponse()
-
-    monkeypatch.setattr(monochrome, "_hifi_api_get", fake_hifi_api_get)
-
-    tracks, name = monochrome.fetch_tidal_playlist_tracks("0dfc3b10-fbdb-4419-bf54-11b90051fa6c")
-
-    assert name == "Chill Pop"
-    assert tracks == [
-        ("Kylie Cantrall", "Carrie Bradshaw"),
-        ("Morgan St. Jean", "Somebody New"),
-    ]
-
-
 def test_hifi_search_leg_stops_at_its_wall_clock_budget(monkeypatch):
     import monochrome
     clock = {"now": 100.0}
