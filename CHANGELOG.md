@@ -1,6 +1,6 @@
 # Changelog
 
-## v4.0.3 (DEV)
+## v4.0.3 (2026-08-21)
 
 ### Added
 - **Plex library scan on completion**: add a Plex URL and token in Settings and MusicGrabber pokes Plex for a rescan after every download, same as it already does for Navidrome and Jellyfin. Plex scopes rescans to a library section rather than the whole server, so MusicGrabber asks it which sections exist and refreshes every one tagged as a music library itself, no fiddly section ID to dig out of a URL. Not tested against a real Plex instance (nobody on the team runs one), so shout if your setup does something the API docs didn't mention.
