@@ -1,6 +1,6 @@
 # Changelog
 
-## v4.0.4 (DEV)
+## v4.0.4 (2026-08-30)
 
 ### Added
 - **MP3Phoenix results can be previewed now, like every other source**: it was the one source with no way to audition a result, because the original reasoning was that spending a Cloudflare-cleared browser session on a hover is an impressively expensive tooltip, and that was fair enough. It now previews anyway, just carefully: only the opening megabyte is fetched, roughly 25 seconds at 320 kbps, and then MusicGrabber hangs up rather than pulling a whole file so somebody can decide it is the wrong mix. The bytes cannot go straight to the browser, because Cloudflare will not serve an `<audio>` element any more than it serves plain curl, so they come down through the same cleared session everything else uses and go back out from MusicGrabber's own address under a short-lived token, exactly as Monochrome previews already do. MP3 is quite happy being cut off mid-flow, so unlike Monochrome there is no ffmpeg in the way. Resolved previews stay cached in the browser for two minutes, so a second look at the same result costs the session nothing, and `MP3PHOENIX_PREVIEW_BYTES` and `TIMEOUT_MP3PHOENIX_PREVIEW` are there if you want it leaner still.
