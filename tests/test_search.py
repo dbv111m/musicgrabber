@@ -89,6 +89,20 @@ def test_monochrome_preview_rejects_non_monochrome_url(api, base_url):
     assert r.status_code == 400
 
 
+@pytest.mark.parametrize("url", [
+    "https://mp3phoenix.net/",
+    "https://mp3phoenix.net/ajax/music/not-a-track",
+    "http://mp3phoenix.net/getmp3/token/file.mp3",
+])
+def test_mp3phoenix_preview_rejects_non_media_urls_without_fetching(api, base_url, url):
+    r = api.get(
+        f"{base_url}/api/preview/px_not_a_track",
+        params={"source": "mp3phoenix", "url": url},
+        timeout=10,
+    )
+    assert r.status_code == 400
+
+
 @pytest.mark.slow
 def test_search_response_includes_unavailable_sources(api, base_url):
     r = api.post(

@@ -32,7 +32,10 @@ from apple import fetch_apple_music_playlist
 from beatport import fetch_beatport_playlist
 from tidal import fetch_tidal_playlist
 from downloads import rebuild_watched_playlist_m3u
-from settings import get_playlists_dir, get_setting, get_download_dir, resolve_custom_subdir
+from settings import (
+    get_playlists_dir, get_setting, get_setting_bool, get_download_dir,
+    resolve_custom_subdir,
+)
 from spotify import fetch_spotify_playlist_via_browser
 from utils import (
     extract_artist_title, hash_track, spawn_daemon_thread, sanitize_filename,
@@ -1388,7 +1391,12 @@ def refresh_watched_playlist(playlist_id: str) -> dict:
             missing_tracks = []
             removed_count = 0
             healed_history_count = 0
+            unresolved_count = 0
             lidarr_refresh_cache = {}
+            # When this is off, a track downloaded once stays downloaded even if
+            # we can no longer find the file. Stops the merry-go-round where an
+            # external organiser moves files and we re-download them forever.
+            redownload_missing = get_setting_bool("redownload_missing_files", True)
 
             for position, (artist, title) in enumerate(tracks):
                 track_hash = hash_track(artist, title)
@@ -1425,6 +1433,12 @@ def refresh_watched_playlist(playlist_id: str) -> dict:
                         resolved_path=existing["resolved_path"],
                     )
                     if not found:
+                        if not redownload_missing:
+                            # Downloaded once, and that's that. The file has gone
+                            # walkabout somewhere we cannot see; we note it and
+                            # leave well alone rather than fetching a duplicate.
+                            unresolved_count += 1
+                            continue
                         conn.execute(
                             "UPDATE watched_playlist_tracks SET downloaded_at = NULL WHERE playlist_id = ? AND track_hash = ?",
                             (playlist_id, track_hash)
@@ -1540,9 +1554,10 @@ def refresh_watched_playlist(playlist_id: str) -> dict:
             set_refresh_stage("finalizing")
             conn.execute("""
                 UPDATE watched_playlists
-                SET last_checked = datetime('now'), last_track_count = ?
+                SET last_checked = datetime('now'), last_track_count = ?,
+                    unresolved_tracks = ?
                 WHERE id = ?
-            """, (len(tracks), playlist_id))
+            """, (len(tracks), unresolved_count, playlist_id))
 
             conn.commit()
 
@@ -1556,6 +1571,12 @@ def refresh_watched_playlist(playlist_id: str) -> dict:
                     sync_mode=sync_mode,
                     user_id=user_id,
                     custom_subdir=custom_subdir,
+                )
+
+            if unresolved_count:
+                print(
+                    f"Watched playlist '{playlist['name']}': {unresolved_count} downloaded track(s) "
+                    f"no longer findable on disk, left as-is (re-download of missing files is off)"
                 )
 
             queued_count = len(tracks_to_import)
@@ -1573,6 +1594,7 @@ def refresh_watched_playlist(playlist_id: str) -> dict:
                 "new_tracks": len(new_tracks),
                 "missing_tracks": len(missing_tracks),
                 "healed_history_tracks": healed_history_count,
+                "unresolved_tracks": unresolved_count,
                 "removed_tracks": removed_count,
                 "queued": queued_count,
                 "import_id": import_id,

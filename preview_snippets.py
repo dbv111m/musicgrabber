@@ -95,6 +95,25 @@ def build_snippet(source_url: str, decryption_key: str, user: dict | None) -> st
     return token
 
 
+def store_snippet(data: bytes, user: dict | None) -> str:
+    """Park bytes a browser can already play, and hand back the token for them.
+
+    build_snippet() above is for audio no browser will touch. This one is for
+    audio it would play perfectly happily if only it were allowed to go and
+    fetch it, which behind Cloudflare it is not.
+    """
+    _SNIPPET_DIR.mkdir(mode=0o700, parents=True, exist_ok=True)
+    token = uuid.uuid4().hex
+    path = _SNIPPET_DIR / f"{token}.mp3"
+    path.write_bytes(data)
+
+    now = time.time()
+    with _lock:
+        _snippets[token] = {"path": path, "user": user, "created_at": now}
+        _prune_locked(now)
+    return token
+
+
 def snippet_user(token: str) -> dict | None:
     """The user context a live token belongs to, for the auth middleware.
 

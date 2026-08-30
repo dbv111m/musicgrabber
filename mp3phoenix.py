@@ -1,4 +1,4 @@
-"""Experimental MP3Phoenix source using Selenium-assisted HTTP sessions."""
+"""MP3Phoenix source using Selenium-assisted HTTP sessions."""
 
 import hashlib
 import html
@@ -19,7 +19,9 @@ from constants import (
     MP3PHOENIX_BROWSER_FAILURE_COOLDOWN,
     MP3PHOENIX_BROWSER_TIMEOUT,
     MP3PHOENIX_SESSION_TTL,
+    MP3PHOENIX_PREVIEW_BYTES,
     TIMEOUT_MP3PHOENIX_DOWNLOAD,
+    TIMEOUT_MP3PHOENIX_PREVIEW,
     TIMEOUT_MP3PHOENIX_SEARCH,
 )
 from youtube import parse_duration, score_search_result_with_breakdown
@@ -68,8 +70,25 @@ def _duration_to_secs(value: str) -> int:
 
 
 def is_mp3phoenix_url(url: str | None) -> bool:
-    hostname = (urlsplit(url).hostname or "").lower() if url else ""
-    return hostname == "mp3phoenix.net" or hostname.endswith(".mp3phoenix.net")
+    """Return whether *url* has the media shape emitted by MP3Phoenix search.
+
+    This is deliberately narrower than a hostname allowlist. Preview URLs come
+    from an authenticated caller and a provider-homepage URL is not a track; if
+    it reaches the shared client and returns HTML it must not be allowed to
+    count as a provider failure.
+    """
+    if not url:
+        return False
+    try:
+        parsed = urlsplit(url)
+        hostname = (parsed.hostname or "").lower().rstrip(".")
+        port = parsed.port
+    except ValueError:
+        return False
+    if parsed.scheme != "https" or hostname != "mp3phoenix.net" or port is not None:
+        return False
+    parts = [part for part in parsed.path.split("/") if part]
+    return len(parts) >= 2 and parts[0] == "getmp3" and all(part not in (".", "..") for part in parts)
 
 
 class _PhoenixBrowser:
@@ -235,6 +254,46 @@ class _PhoenixClient:
                 if response is not None:
                     response.close()
 
+    def preview(self, url: str, max_bytes: int) -> bytes:
+        """The opening chunk of a track, for auditioning rather than keeping.
+
+        Cloudflare will not serve the browser directly, so the bytes have to come
+        through this session like everything else. Unlike download() we take the
+        first chunk and hang up, which spares the provider serving a whole file
+        so somebody can decide it is the wrong mix.
+        """
+        with self._lock:
+            response = None
+            try:
+                response = self._get(url, timeout=TIMEOUT_MP3PHOENIX_PREVIEW, stream=True)
+                response.raise_for_status()
+                content_type = (response.headers.get("content-type") or "").lower()
+                if content_type and not (
+                    content_type.startswith("audio/") or content_type == "application/octet-stream"
+                ):
+                    raise RuntimeError(f"MP3Phoenix returned {content_type!r} instead of audio")
+                snippet = bytearray()
+                for chunk in response.iter_content(64 * 1024):
+                    if chunk:
+                        snippet.extend(chunk)
+                        if len(snippet) >= max_bytes:
+                            break
+                if not snippet:
+                    raise RuntimeError("MP3Phoenix preview produced no audio")
+                self._failures = 0
+                return bytes(snippet)
+            except _CoolingDown:
+                raise
+            except Exception:
+                # A preview URL is supplied by the caller. Even after its shape
+                # has been validated, a stale or invented token can return a
+                # perfectly healthy 404/HTML response. That request may fail,
+                # but it must not park search and downloads for every user.
+                raise
+            finally:
+                if response is not None:
+                    response.close()
+
     def health(self) -> tuple[bool, str]:
         """Report remembered health without spinning up Chrome for a probe."""
         now = time.monotonic()
@@ -332,6 +391,13 @@ def download_mp3phoenix_track(download_url: str, output_path: Path) -> None:
     if not output_path.exists() or output_path.stat().st_size == 0:
         output_path.unlink(missing_ok=True)
         raise RuntimeError("MP3Phoenix download produced no audio file")
+
+
+def fetch_mp3phoenix_preview(download_url: str) -> bytes:
+    """Opening seconds of a track as MP3 bytes, for the preview endpoint."""
+    if not is_mp3phoenix_url(download_url):
+        raise ValueError("Invalid MP3Phoenix download URL")
+    return _CLIENT.preview(download_url, MP3PHOENIX_PREVIEW_BYTES)
 
 
 def browser_healthy() -> tuple[bool, str]:

@@ -184,6 +184,7 @@ class SettingsUpdate(BaseModel):
     auto_import_dir: Optional[str] = None
     reject_live_versions: Optional[bool] = None
     playlist_comment_tagging: Optional[bool] = None
+    redownload_missing_files: Optional[bool] = None
     enable_track_upgrades: Optional[bool] = None
     upgrade_scan_interval_hours: Optional[int] = None
     singles_subdir: Optional[str] = None

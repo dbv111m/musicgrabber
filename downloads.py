@@ -297,7 +297,7 @@ def _get_job_album_context(job_id: str) -> dict:
                 bi_row = conn.execute(
                     """
                     SELECT bi.override_dir, bi.album_release_mbid, bi.total_tracks,
-                           bi.album_total_tracks,
+                           bi.album_total_tracks, bi.album_year,
                            bit.song AS track_title, bit.line_num AS track_number
                     FROM bulk_import_tracks bit
                     JOIN bulk_imports bi ON bi.id = bit.import_id
@@ -320,6 +320,7 @@ def _get_job_album_context(job_id: str) -> dict:
                 "track_title": (bi_row["track_title"] or "").strip() or None,
                 "track_number": int(bi_row["track_number"]) if bi_row["track_number"] else None,
                 "track_total": int(_track_total_raw) if _track_total_raw else None,
+                "year": (bi_row["album_year"] or "").strip() or None,
             }
 
         override_dir = (row["override_dir"] or "").strip() or None
@@ -335,7 +336,7 @@ def _get_job_album_context(job_id: str) -> dict:
                 bi_row = conn.execute(
                     """
                     SELECT bi.override_dir, bi.album_release_mbid, bi.total_tracks,
-                           bi.album_total_tracks,
+                           bi.album_total_tracks, bi.album_year,
                            bit.song AS track_title, bit.line_num AS track_number
                     FROM bulk_import_tracks bit
                     JOIN bulk_imports bi ON bi.id = bit.import_id
@@ -357,6 +358,7 @@ def _get_job_album_context(job_id: str) -> dict:
                     "track_title": (bi_row["track_title"] or "").strip() or None,
                     "track_number": int(bi_row["track_number"]) if bi_row["track_number"] else None,
                     "track_total": int(_track_total_raw) if _track_total_raw else None,
+                    "year": (bi_row["album_year"] or "").strip() or None,
                 }
 
         album_artist, album_name_from_dir = _derive_names_from_override_dir(override_dir)
@@ -4110,6 +4112,10 @@ def process_slskd_download(job_id: str, username: str, filename: str, artist: st
     forced_album_artist = album_ctx.get("album_artist")
     forced_album_name = album_ctx.get("album_name")
     forced_track_title = album_ctx.get("track_title")
+    # The release year from the album we queued. Beats the per-track MusicBrainz
+    # guess, which happily hands back a different pressing for every track and
+    # leaves one album spread across four decades.
+    forced_album_year = album_ctx.get("year")
     album_track_number, album_track_total = _get_album_track_tag_context(job_id)
     album_art_bytes, album_art_mime = get_album_art_context(job_id)
     ensure_album_cover_files(override_dir, album_art_bytes, album_art_mime)
@@ -4461,7 +4467,7 @@ def process_slskd_download(job_id: str, username: str, filename: str, artist: st
             apply_metadata_to_file(
                 final_file, mb_artist, tag_title,
                 pl_album or tag_album,
-                mb_metadata.get("year"),
+                forced_album_year or mb_metadata.get("year"),
                 track_number=tag_track_num,
                 track_total=tag_track_total,
                 album_art_bytes=album_art_bytes,
@@ -4500,6 +4506,7 @@ def process_slskd_download(job_id: str, username: str, filename: str, artist: st
                 artist,
                 forced_track_title or title,
                 pl_album or forced_album_name or "",
+                year=forced_album_year,
                 track_number=tag_track_num,
                 track_total=tag_track_total,
                 album_art_bytes=album_art_bytes,
@@ -4659,6 +4666,7 @@ def _process_direct_mp3_download(job_id: str, download_url: str, artist_hint: st
     forced_album_artist = album_ctx.get("album_artist")
     forced_album_name = album_ctx.get("album_name")
     forced_track_title = album_ctx.get("track_title")
+    forced_album_year = album_ctx.get("year")
     if forced_track_title:
         title = forced_track_title
     album_track_number, album_track_total = _get_album_track_tag_context(job_id)
@@ -4948,7 +4956,7 @@ def _process_direct_mp3_download(job_id: str, download_url: str, artist_hint: st
             _update_job(job_id, artist=artist, title=title)
         else:
             title = forced_track_title or title
-        year  = mb_metadata.get("year") if mb_metadata else None
+        year  = forced_album_year or (mb_metadata.get("year") if mb_metadata else None)
         album = forced_album_name or (mb_metadata.get("album") if mb_metadata else None)
         tag_album_artist = forced_album_artist or ((mb_metadata or {}).get("album_artist"))
 
@@ -5057,16 +5065,50 @@ def _process_direct_mp3_download(job_id: str, download_url: str, artist_hint: st
         )
 
 
+def _watched_playlist_m3u_disabled(playlist_name: str, user_id: str | None) -> bool:
+    """True when a watched playlist owns this M3U and has "Create M3U" switched off.
+
+    The per-download append and the full rebuild both write
+    <playlists dir>/<playlist name>.m3u, so the rebuild's make_m3u check counted
+    for very little while the append cheerfully created the file behind its back.
+    Worse, it appended in download order, so the M3U drifted away from the
+    upstream running order it was meant to mirror. If another playlist of the
+    same name still wants an M3U they share the file, so somebody has to write
+    it and the append stands.
+    """
+    if not playlist_name:
+        return False
+    try:
+        with db_conn() as conn:
+            rows = conn.execute(
+                "SELECT make_m3u FROM watched_playlists WHERE user_id IS ? AND name = ?",
+                (user_id, playlist_name),
+            ).fetchall()
+    except Exception as e:
+        print(f"Warning: could not check make_m3u for playlist '{playlist_name}': {e}")
+        return False
+    if not rows:
+        # Not a watched playlist at all (bulk import, manual routing); carry on.
+        return False
+    return not any(row[0] for row in rows)
+
+
 def _append_to_physical_m3u(audio_file: Path, playlist_name: str, use_playlists_dir: bool, user_id: str | None = None, custom_subdir: str | None = None) -> None:
     """Append a downloaded track's path to a physical .m3u file.
 
-    Runs whenever a playlist_name is supplied. When a Playlists folder (or custom
-    subdir) is configured, the M3U lives there alongside the audio; otherwise we
-    fall back to writing the M3U at the Singles root so the playlist still gets
-    a file, matching how generate_playlist_m3u behaves for bulk imports.
+    Runs whenever a playlist_name is supplied, unless a watched playlist of that
+    name has "Create M3U" turned off. When a Playlists folder (or custom subdir)
+    is configured, the M3U lives there alongside the audio; otherwise we fall
+    back to writing the M3U at the Singles root so the playlist still gets a
+    file, matching how generate_playlist_m3u behaves for bulk imports.
     Avoids duplicating entries that are already in the file.
     """
     if not playlist_name:
+        return
+
+    # "Create M3U" off means exactly that: do not create one, do not touch an
+    # existing one. Downloading tracks into the folder carries on as normal.
+    if _watched_playlist_m3u_disabled(playlist_name, user_id):
         return
 
     if custom_subdir:
@@ -5170,6 +5212,7 @@ def process_download(job_id: str, video_id: str, convert_audio: bool = True, sou
     forced_album_artist = album_ctx.get("album_artist")
     forced_album_name = album_ctx.get("album_name")
     forced_track_title = album_ctx.get("track_title")
+    forced_album_year = album_ctx.get("year")
     album_track_number, album_track_total = _get_album_track_tag_context(job_id)
     album_art_bytes, album_art_mime = get_album_art_context(job_id)
     # For single jobs routed into an album folder via "Add to..." (no bulk_imports row),
@@ -5642,7 +5685,7 @@ def process_download(job_id: str, video_id: str, convert_audio: bool = True, sou
             apply_metadata_to_file(
                 audio_file, mb_artist, tag_title,
                 pl_album or tag_album,
-                mb_metadata.get("year"),
+                forced_album_year or mb_metadata.get("year"),
                 track_number=tag_track_num,
                 track_total=tag_track_total,
                 album_art_bytes=album_art_bytes,
@@ -5683,6 +5726,7 @@ def process_download(job_id: str, video_id: str, convert_audio: bool = True, sou
                 artist,
                 tag_title,
                 pl_album or forced_album_name or "",
+                year=forced_album_year,
                 track_number=tag_track_num,
                 track_total=tag_track_total,
                 album_art_bytes=album_art_bytes,

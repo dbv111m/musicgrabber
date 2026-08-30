@@ -33,12 +33,14 @@ def _reset_circuit_breaker():
     mp3phoenix._CLIENT._disabled_until = 0.0
 
 
-def test_source_is_experimental_and_disabled_by_default():
+def test_source_previews_but_stays_disabled_by_default():
     source = search.SOURCE_REGISTRY["mp3phoenix"]
+    # Off by default like Soulseek: it briefly launches Chrome for Cloudflare
+    # clearance, which no install should get sprung on it by an upgrade.
     assert source["default_enabled"] is False
-    assert source["has_preview"] is False
-    # Kept short for compact UI (source health chips, toast text); the Settings
-    # toggle spells "experimental" out in full right next to its description.
+    # Preview goes out through our own address rather than the provider's, because
+    # Cloudflare will not serve the browser directly.
+    assert source["has_preview"] is True
     assert source["label"] == "MP3Phoenix"
 
 
@@ -168,6 +170,81 @@ def test_http_download_rejects_non_audio_response(monkeypatch, tmp_path):
         assert "instead of audio" in str(exc)
     else:
         raise AssertionError("HTML challenge response was accepted as an MP3")
+
+
+def test_preview_takes_the_opening_chunk_and_hangs_up(monkeypatch):
+    """A preview auditions a track; it has no business dragging the whole file
+    through the one guarded session that searches and downloads are queueing for."""
+    served = []
+
+    class _CountingResponse(_FakeResponse):
+        def iter_content(self, size):
+            for index in range(50):
+                served.append(index)
+                yield b"x" * size
+
+    response = _CountingResponse(content_type="audio/mpeg")
+    monkeypatch.setattr(mp3phoenix._CLIENT, "_session", _FakeSession([response]))
+    monkeypatch.setattr(mp3phoenix._CLIENT, "_refreshed_at", mp3phoenix.time.monotonic())
+    monkeypatch.setattr(mp3phoenix, "MP3PHOENIX_PREVIEW_BYTES", 128 * 1024)
+
+    snippet = mp3phoenix.fetch_mp3phoenix_preview(
+        "https://mp3phoenix.net/getmp3/token/file.mp3"
+    )
+
+    assert len(snippet) == 128 * 1024
+    assert len(served) == 2  # 64 KB a go, so two of them, and then we stop asking
+
+
+def test_preview_rejects_non_audio_response(monkeypatch):
+    """A Cloudflare challenge page is not a song, however confidently it is served."""
+    response = _FakeResponse("ordinary error page", content_type="text/html")
+    monkeypatch.setattr(mp3phoenix._CLIENT, "_session", _FakeSession([response]))
+    monkeypatch.setattr(mp3phoenix._CLIENT, "_refreshed_at", mp3phoenix.time.monotonic())
+
+    with pytest.raises(RuntimeError, match="instead of audio"):
+        mp3phoenix.fetch_mp3phoenix_preview(
+            "https://mp3phoenix.net/getmp3/token/file.mp3"
+        )
+
+
+def test_preview_refuses_a_url_that_is_not_mp3phoenix():
+    """The preview endpoint is a fetcher; it does not take requests from strangers."""
+    with pytest.raises(ValueError):
+        mp3phoenix.fetch_mp3phoenix_preview("https://example.com/definitely-a-song.mp3")
+
+
+@pytest.mark.parametrize("url", [
+    "http://mp3phoenix.net/getmp3/token/file.mp3",
+    "https://www.mp3phoenix.net/getmp3/token/file.mp3",
+    "https://mp3phoenix.net/",
+    "https://mp3phoenix.net/ajax/music/not-a-track",
+    "https://mp3phoenix.net/getmp3/",
+    "https://mp3phoenix.net:443/getmp3/token/file.mp3",
+])
+def test_preview_refuses_provider_urls_that_are_not_search_result_media(url):
+    with pytest.raises(ValueError, match="Invalid MP3Phoenix download URL"):
+        mp3phoenix.fetch_mp3phoenix_preview(url)
+
+
+def test_bad_preview_does_not_open_the_shared_provider_circuit(monkeypatch):
+    """A caller can hold a stale or invented media token. Its preview should
+    fail, but search and downloads for every other user must remain available."""
+    responses = [
+        _FakeResponse("ordinary error page", content_type="text/html")
+        for _ in range(mp3phoenix.MP3PHOENIX_BROWSER_FAILURE_LIMIT)
+    ]
+    monkeypatch.setattr(mp3phoenix._CLIENT, "_session", _FakeSession(responses))
+    monkeypatch.setattr(mp3phoenix._CLIENT, "_refreshed_at", mp3phoenix.time.monotonic())
+
+    for _ in responses:
+        with pytest.raises(RuntimeError, match="instead of audio"):
+            mp3phoenix.fetch_mp3phoenix_preview(
+                "https://mp3phoenix.net/getmp3/stale-token/file.mp3"
+            )
+
+    assert mp3phoenix._CLIENT._failures == 0
+    assert mp3phoenix.browser_healthy()[0] is True
 
 
 def test_cloudflare_rejection_refreshes_session_once(monkeypatch):

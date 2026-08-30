@@ -9,7 +9,80 @@
 const RELEASE_NOTES = {
     "4.0.4": {
         title: "What's New in v4.0.4",
-        sections: []
+        sections: [
+            {
+                heading: "\"Create M3U\" off now actually means off",
+                items: [
+                    "A watched playlist with Create M3U disabled was still getting an .m3u file made for it, and added to after every download. It now gets neither: no new file, and an existing one is left exactly as you left it.",
+                    "Two different bits of code write that file. The full rebuild checked the setting; the per-download append did not, so the setting held until something downloaded.",
+                    "That append also added tracks in the order they finished downloading rather than the playlist's own order, so the file drifted out of order as well. Turning Create M3U back on and refreshing rebuilds it properly, as before.",
+                    "Downloading tracks into the playlist folder is unaffected; that never had anything to do with the M3U. Reported in issue #82.",
+                ]
+            },
+            {
+                heading: "Replace works again on older playlist tracks",
+                items: [
+                    "Replace on a watched playlist track could fail with 'Failed to trash file' when the file was plainly there and perfectly writable.",
+                    "The cause was a missing database row, not a missing file: Replace works through the original download job, and clearing completed jobs removes those rows while the playlist track carries on pointing at them.",
+                    "The playlist track knows where its own file lives, so that is what gets used when the job has gone. The file is trashed, the track goes back to missing, and you carry on to the search step as usual.",
+                    "Error messages from this button now say what actually went wrong rather than always blaming the trash. Reported in issue #83.",
+                ]
+            },
+            {
+                heading: "Amazon playlists keep their running order",
+                items: [
+                    "Watched Amazon Music playlists were coming back sorted alphabetically by artist instead of in playlist order. They now arrive in the order Amazon shows them.",
+                    "The order comes from the position Amazon's own list gives each row, so it holds up even on long playlists where the page recycles rows as you scroll.",
+                    "Existing watched Amazon playlists sort themselves out on their next refresh. Thanks to the reporter of issue #81, who had already found the exact line at fault.",
+                    "Explicit tracks were also picking up a stray 'E' on the end of the title, from the badge Amazon puts next to them, and were being searched for under that name. Not any more.",
+                ]
+            },
+            {
+                heading: "Albums finally know what year they are",
+                items: [
+                    "Album downloads now tag every track with the release year, taken from the album you picked rather than each track guessing for itself.",
+                    "Previously the tracks each asked MusicBrainz separately, so one album could end up with several different years and a few blanks. They now all agree.",
+                    "It is the year of that particular pressing, so a remaster says so instead of borrowing the original's date. The year is written into the .albuminfo sidecar as well.",
+                    "Albums already on disk are untouched; this applies to new downloads.",
+                ]
+            },
+            {
+                heading: "Stop re-downloading files another tool has moved",
+                items: [
+                    "Settings, under General: 'Re-download Missing Files'. On by default, so nothing changes unless you turn it off.",
+                    "Watched playlists and artists have always re-fetched a track whose file they can no longer find, which is right if you deleted a bad rip and wrong if MusicBee, beets or similar moved it somewhere we cannot see. In that case we download it again, your organiser tidies the copy away, and the pair of them keep each other busy indefinitely.",
+                    "Renaming is enough to trigger it, by the way. The file never has to leave your music folder for us to lose track of it.",
+                    "Turn the setting off and a track downloaded once stays downloaded. The Retry button in a playlist's Missing panel still fetches one back when you actually want it.",
+                    "Playlist cards will tell you how many tracks are in this state, and warn that they will not appear in the M3U. The count clears itself if the files turn up again.",
+                ]
+            },
+            {
+                heading: "Preview button on desktop",
+                items: [
+                    "Settings, under General: 'Preview Button on Desktop' puts the Preview button that phones and tablets already get onto desktop results too.",
+                    "With it on, a preview only starts when you press the button. Resting the mouse on a result no longer sets one off, and the preview carries on playing when the mouse wanders somewhere else.",
+                    "Off by default, and remembered in your browser rather than on the server, so each machine you use can decide for itself.",
+                    "The button now says what it is doing: 'Loading...' while the URL is fetched, 'Stop' while it plays, back to 'Preview' when it is done.",
+                    "Starting a different preview cancels the old request, and pressing a loading button again cancels it instead of fetching the same preview twice.",
+                ]
+            },
+            {
+                heading: "MP3Phoenix grows up",
+                items: [
+                    "It is no longer labelled experimental, because it works. Still off by default, since it briefly launches Chrome for Cloudflare clearance and that is not something an upgrade should spring on you.",
+                    "MP3Phoenix results can be previewed now, the last source that could not be. Only the opening 25 seconds or so is fetched, and it comes through MusicGrabber rather than straight from the provider, because Cloudflare will not serve a browser directly.",
+                    "A stale or invalid preview can fail without tripping MP3Phoenix's shared ten-minute search and download cooldown.",
+                ]
+            },
+            {
+                heading: "YouTube previews work again",
+                items: [
+                    "YouTube stopped letting browsers stream the media URLs that the yt-dlp version in the image produced, so previews went quiet while downloads carried on perfectly happily. A current yt-dlp resolves them differently and previews play again.",
+                    "The container now updates yt-dlp when it starts, so this sort of thing fixes itself rather than waiting for a new image. It is bounded and never fatal, and YTDLP_AUTO_UPDATE=false turns it off if you would rather pin the shipped version.",
+                    "Preview requests also wait up to 30 seconds instead of 15, since YouTube's player challenge can take a while to solve.",
+                ]
+            },
+        ]
     },
     "4.0.3": {
         title: "What's New in v4.0.3",

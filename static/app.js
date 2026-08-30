@@ -1187,7 +1187,10 @@
         // Preview state
         const previewAudio = document.getElementById('previewAudio');
         let hoverTimeout = null;
-        let currentPreviewId = null;
+        let currentPreviewKey = null;
+        let previewRequestKey = null;
+        let previewRequestSerial = 0;
+        let previewAbortController = null;
         let previewCache = new Map(); // Short-lived cache of resolved preview URLs
         const MAX_PREVIEW_CACHE = 100;
         const PREVIEW_CACHE_TTL = 2 * 60 * 1000;
@@ -1197,9 +1200,77 @@
 
         const previewVolume = 0.8; // Fixed preview volume - fade-in handles the ramp
 
+        // Desktop preview button: some folk would rather press a button than have
+        // music start up because the mouse paused on its way to the biscuit tin.
+        // Kept in localStorage rather than on the server, since which machine you
+        // happen to be sat at is the entire point of the setting.
+        function desktopPreviewButtonEnabled() {
+            return localStorage.getItem(userStorageKey('desktopPreviewButton')) === '1';
+        }
+
+        function resultTooltip(previewable) {
+            if (!previewable) return 'Click to download';
+            return desktopPreviewButtonEnabled()
+                ? 'Press Preview to listen, click to download'
+                : 'Hover to preview, click to download';
+        }
+
+        function applyDesktopPreviewButton() {
+            const on = desktopPreviewButtonEnabled();
+            document.body.classList.toggle('desktop-preview-button', on);
+            const toggle = document.getElementById('settingDesktopPreviewButton');
+            if (toggle) toggle.checked = on;
+            // Cards already on screen would otherwise carry on promising a hover
+            // preview that is never coming, which is just rude.
+            document.querySelectorAll('.result-item').forEach(item => {
+                if (item.querySelector('.preview-btn')) item.dataset.tooltip = resultTooltip(true);
+            });
+        }
+
+        // The button's own label doubles as its status light. A four second yt-dlp
+        // resolve is otherwise indistinguishable from a button that does nothing,
+        // and people press it again, which helps nobody.
+        const PREVIEW_BTN_LABELS = {
+            idle: 'Preview \u25B6',
+            loading: 'Loading...',
+            playing: 'Stop \u25A0',
+        };
+
+        function setPreviewBtnLabel(element, state) {
+            const btn = element && element.querySelector && element.querySelector('.preview-btn');
+            if (btn) btn.textContent = PREVIEW_BTN_LABELS[state];
+        }
+
+        function resetPreviewBtnLabels() {
+            document.querySelectorAll('.preview-btn').forEach(btn => {
+                btn.textContent = PREVIEW_BTN_LABELS.idle;
+            });
+        }
+
+        function previewKey(videoId, result) {
+            const source = (result && result.source) || 'youtube';
+            const identity = (result && result.source_url) || videoId;
+            return `${source}:${identity}`;
+        }
+
+        function previewIsActiveOrLoading(videoId, result) {
+            const key = previewKey(videoId, result);
+            return currentPreviewKey === key || previewRequestKey === key;
+        }
+
+        // Leaving a card cancels a hover-started preview. With the button on, the
+        // preview was a deliberate press, so it carries on until told otherwise.
+        function stopHoverPreview() {
+            if (desktopPreviewButtonEnabled()) return;
+            stopPreview();
+        }
+
         // Preview functions
         function startHoverTimer(videoId, element, result) {
             clearHoverTimer();
+            // With the button on, previews are strictly opt-in: a resting mouse is
+            // no longer taken as consent.
+            if (desktopPreviewButtonEnabled()) return;
             hoverTimeout = setTimeout(() => {
                 startPreview(videoId, element, result);
             }, HOVER_DELAY);
@@ -1216,57 +1287,80 @@
             // Don't preview if already downloading
             if (downloadingIds.has(videoId)) return;
 
+            const cacheKey = previewKey(videoId, result);
+            // Upgrade previews can invoke this from both mouseenter and click.
+            // One in-flight request for a result is plenty.
+            if (previewRequestKey === cacheKey) return;
+
             // Stop any current preview
             stopPreview();
+            const requestId = ++previewRequestSerial;
+            previewRequestKey = cacheKey;
+            previewAbortController = new AbortController();
 
             element.classList.add('loading-preview');
+            setPreviewBtnLabel(element, 'loading');
 
             try {
-                const cachedPreview = previewCache.get(videoId);
+                const cachedPreview = previewCache.get(cacheKey);
                 let audioUrl = null;
                 if (cachedPreview && Date.now() - cachedPreview.cachedAt < PREVIEW_CACHE_TTL) {
                     audioUrl = cachedPreview.url;
                 } else if (cachedPreview) {
-                    previewCache.delete(videoId);
+                    previewCache.delete(cacheKey);
                 }
 
                 if (!audioUrl) {
                     // Build preview URL with source params
                     const previewSource = (result && result.source) || 'youtube';
                     const params = new URLSearchParams({ source: previewSource });
-                    if ((previewSource === 'soundcloud' || previewSource === 'zvu4no' || previewSource === 'freemp3cloud' || previewSource === 'monochrome') && result.source_url) {
+                    if ((previewSource === 'soundcloud' || previewSource === 'zvu4no' || previewSource === 'freemp3cloud' || previewSource === 'monochrome' || previewSource === 'mp3phoenix') && result.source_url) {
                         params.set('url', result.source_url);
                     }
                     if (previewSource === 'monochrome' && result) {
                         params.set('artist', result.channel || result.artist || '');
                         params.set('title', result.title || '');
                     }
-                    const response = await apiFetch(`/api/preview/${encodeURIComponent(videoId)}?${params}`);
+                    const response = await apiFetch(`/api/preview/${encodeURIComponent(videoId)}?${params}`, {
+                        signal: previewAbortController.signal,
+                    });
+                    if (requestId !== previewRequestSerial) return;
                     if (!response.ok) throw new Error('Failed to get preview');
 
                     const data = await response.json();
+                    if (requestId !== previewRequestSerial) return;
                     audioUrl = data.url;
-                    previewCache.set(videoId, { url: audioUrl, cachedAt: Date.now() });
+                    previewCache.set(cacheKey, { url: audioUrl, cachedAt: Date.now() });
                     if (previewCache.size > MAX_PREVIEW_CACHE) {
                         const oldestKey = previewCache.keys().next().value;
                         previewCache.delete(oldestKey);
                     }
                 }
 
+                if (requestId !== previewRequestSerial) return;
+
                 element.classList.remove('loading-preview');
                 element.classList.add('previewing');
-                currentPreviewId = videoId;
+                setPreviewBtnLabel(element, 'playing');
+                currentPreviewKey = cacheKey;
+                previewRequestKey = null;
 
                 previewAudio.onerror = () => {
-                    previewCache.delete(videoId);
-                    if (currentPreviewId === videoId) stopPreview();
+                    previewCache.delete(cacheKey);
+                    if (currentPreviewKey === cacheKey) stopPreview();
+                };
+                // A preview that runs to the end used to leave the card looking as
+                // though it were still going. Now that the button says "Stop", that
+                // particular fib is a bit too obvious to leave in.
+                previewAudio.onended = () => {
+                    if (currentPreviewKey === cacheKey) stopPreview();
                 };
                 previewAudio.src = audioUrl;
                 previewAudio.volume = 0;
                 previewAudio.play().catch(() => {
                     // Autoplay blocked or other error
-                    previewCache.delete(videoId);
-                    stopPreview();
+                    previewCache.delete(cacheKey);
+                    if (currentPreviewKey === cacheKey) stopPreview();
                 });
 
                 // Fade in to target volume over PREVIEW_FADE_DURATION
@@ -1282,18 +1376,30 @@
 
 
             } catch (error) {
+                if (requestId !== previewRequestSerial) return;
                 element.classList.remove('loading-preview');
+                setPreviewBtnLabel(element, 'idle');
                 // Silently fail - preview is a nice-to-have
+            } finally {
+                if (requestId === previewRequestSerial) {
+                    previewRequestKey = null;
+                    previewAbortController = null;
+                }
             }
         }
 
         function stopPreview() {
             clearHoverTimer();
+            previewRequestSerial++;
+            if (previewAbortController) previewAbortController.abort();
+            previewAbortController = null;
+            previewRequestKey = null;
             if (_previewFadeInterval) { clearInterval(_previewFadeInterval); _previewFadeInterval = null; }
             previewAudio.onerror = null;
+            previewAudio.onended = null;
             previewAudio.pause();
             previewAudio.src = '';
-            currentPreviewId = null;
+            currentPreviewKey = null;
 
             // Remove previewing class from all items
             document.querySelectorAll('.result-item.previewing').forEach(item => {
@@ -1302,6 +1408,7 @@
             document.querySelectorAll('.result-item.loading-preview').forEach(item => {
                 item.classList.remove('loading-preview');
             });
+            resetPreviewBtnLabels();
         }
 
         // Search history management
@@ -2387,9 +2494,9 @@
         }
 
         // Sources with no preview endpoint (mirrors has_preview in search.py's SOURCE_REGISTRY).
-        // Soulseek has no streamable URL until it's downloaded; MP3Phoenix's Cloudflare-guarded
-        // session isn't worth spending on a hover.
-        const NO_PREVIEW_SOURCES = new Set(['soulseek', 'mp3phoenix']);
+        // Soulseek is the only holdout: there is no streamable URL until the file has
+        // already been downloaded, at which point previewing it is rather beside the point.
+        const NO_PREVIEW_SOURCES = new Set(['soulseek']);
         const sourceHasPreview = source => !NO_PREVIEW_SOURCES.has(source);
 
         // Render a single result card as an HTML string (mirrors the main renderResults template)
@@ -2403,7 +2510,7 @@
                      data-quality-tier="${Number(r.quality_tier) || 0}"
                      data-index="${index}"
                      data-title="${escapeHtml(r.title)}"
-                     data-tooltip="${previewable ? 'Hover to preview, click to download' : 'Click to download'}">
+                     data-tooltip="${resultTooltip(previewable)}">
                     ${previewable ? '<div class="preview-indicator">▶</div>' : ''}
                     ${r.thumbnail ? `<img class="result-thumb" src="${escapeHtml(r.thumbnail)}" alt="" loading="lazy">` : '<div class="result-thumb"></div>'}
                     <div class="result-info">
@@ -2437,14 +2544,14 @@
                 }
             });
 
-            item.addEventListener('mouseleave', () => stopPreview());
+            item.addEventListener('mouseleave', () => stopHoverPreview());
 
             const previewBtn = item.querySelector('.preview-btn');
             if (previewBtn) {
                 previewBtn.addEventListener('click', (e) => {
                     e.stopPropagation();
                     if (downloadingIds.has(videoId)) return;
-                    if (currentPreviewId === videoId) {
+                    if (previewIsActiveOrLoading(videoId, result)) {
                         stopPreview();
                     } else {
                         startPreview(videoId, item, result);
@@ -2481,13 +2588,13 @@
                         startHoverTimer(videoId, item, result);
                     }
                 });
-                item.addEventListener('mouseleave', () => stopPreview());
+                item.addEventListener('mouseleave', () => stopHoverPreview());
 
                 const previewBtn = item.querySelector('.preview-btn');
                 if (previewBtn) {
                     previewBtn.addEventListener('click', (e) => {
                         e.stopPropagation();
-                        if (currentPreviewId === videoId) {
+                        if (previewIsActiveOrLoading(videoId, result)) {
                             stopPreview();
                         } else {
                             startPreview(videoId, item, result);
@@ -2612,7 +2719,7 @@
                      data-quality-tier="${Number(r.quality_tier) || 0}"
                      data-index="${index}"
                      data-title="${escapeHtml(r.title)}"
-                     data-tooltip="${previewable ? 'Hover to preview, click to download' : 'Click to download'}">
+                     data-tooltip="${resultTooltip(previewable)}">
                     ${previewable ? '<div class="preview-indicator">▶</div>' : ''}
                     ${r.thumbnail ? `<img class="result-thumb" src="${escapeHtml(r.thumbnail)}" alt="" loading="lazy">` : '<div class="result-thumb"></div>'}
                     <div class="result-info">
@@ -2662,7 +2769,7 @@
                 });
 
                 item.addEventListener('mouseleave', () => {
-                    stopPreview();
+                    stopHoverPreview();
                 });
 
                 // Mobile preview button - tap to preview without triggering download
@@ -2671,7 +2778,7 @@
                     previewBtn.addEventListener('click', (e) => {
                         e.stopPropagation();
                         if (downloadingIds.has(videoId)) return;
-                        if (currentPreviewId === videoId) {
+                        if (previewIsActiveOrLoading(videoId, result)) {
                             stopPreview();
                         } else {
                             startPreview(videoId, item, result);
@@ -5650,6 +5757,21 @@
             });
         }
 
+        // Preview button on desktop: off by default, so hover-to-preview stays the
+        // behaviour everybody already knows.
+        const desktopPreviewButtonToggle = document.getElementById('settingDesktopPreviewButton');
+        if (desktopPreviewButtonToggle) {
+            desktopPreviewButtonToggle.addEventListener('change', () => {
+                localStorage.setItem(
+                    userStorageKey('desktopPreviewButton'),
+                    desktopPreviewButtonToggle.checked ? '1' : '0'
+                );
+                stopPreview();  // whatever was playing belonged to the old rules
+                applyDesktopPreviewButton();
+            });
+        }
+        applyDesktopPreviewButton();
+
         // =============================================================
         // Album name / URL routing (Bulk Import as the general acquisition
         // input). Three album-shaped things share one confirmation panel:
@@ -6785,6 +6907,11 @@
                                 </select>
                             </label>
                         </div>
+                        ${p.unresolved_tracks > 0 ? `
+                        <div class="watched-card-stale-warning">
+                            <i class="fa-solid fa-circle-info"></i>
+                            <span><strong>${p.unresolved_tracks} downloaded track${p.unresolved_tracks === 1 ? '' : 's'}</strong> can no longer be found on disk. Because <strong>Re-download Missing Files</strong> is off, they are being left alone rather than fetched again, so they will not appear in the M3U. This is what you want if another tool has moved or renamed them; if you deleted them on purpose, use the Missing panel's Retry to fetch one back.</span>
+                        </div>` : ''}
                         ${p.stale_navidrome_paths > 0 ? `
                         <div class="watched-card-stale-warning">
                             <i class="fa-solid fa-triangle-exclamation"></i>
@@ -7474,7 +7601,12 @@
             try {
                 // Trash (or unlink from playlist) the bad file and clear downloaded_at
                 const resp = await apiFetch(`/api/jobs/${jobId}/file`, { method: 'DELETE' });
-                if (!resp.ok) throw new Error('Trash failed');
+                if (!resp.ok) {
+                    // A generic "Failed to trash file" told nobody anything. Pass on
+                    // whatever the backend actually said instead.
+                    const body = await resp.json().catch(() => null);
+                    throw new Error(body?.detail || `HTTP ${resp.status}`);
+                }
                 const data = await resp.json();
 
                 showToast(`Trashed ${artist} - ${title}. Pick the correct version below.`);
@@ -7513,7 +7645,7 @@
                 // Route to search tab pre-filled with this track + playlist selected
                 searchMissingTrack(playlistId, playlistName, artist, title);
             } catch (e) {
-                showToast('Failed to trash file', true);
+                showToast(`Failed to trash file: ${e.message || e}`, true);
                 if (btn) { btn.disabled = false; btn.textContent = 'Replace'; }
             }
         }
@@ -9915,6 +10047,7 @@
             'min_audio_bitrate': 'settingMinBitrate',
             'reject_live_versions': 'settingRejectLiveVersions',
             'playlist_comment_tagging': 'settingPlaylistCommentTagging',
+            'redownload_missing_files': 'settingRedownloadMissingFiles',
             'enable_track_upgrades': 'settingEnableTrackUpgrades',
             'upgrade_scan_interval_hours': 'settingUpgradeScanInterval',
             'singles_subdir': 'settingSinglesSubdir',

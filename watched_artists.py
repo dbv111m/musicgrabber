@@ -14,6 +14,7 @@ from constants import WATCHED_PLAYLIST_CHECK_HOURS, WATCHED_REFRESH_STALE_SECOND
 from db import db_conn
 from bulk_import import start_bulk_import_for_tracks
 from metadata import fetch_artist_singles, fetch_artist_albums, MusicBrainzUnavailable
+from settings import get_setting_bool
 from utils import hash_track, spawn_daemon_thread, check_duplicate
 
 
@@ -318,6 +319,9 @@ def refresh_watched_artist(artist_id: str) -> dict:
             from_date = artist.get("from_date") or ""
             tracks_to_import: list[tuple[str, str]] = []
             new_count = 0
+            # Same bargain as watched playlists: off means a track we downloaded
+            # once is never chased again, however far its file has wandered.
+            redownload_missing = get_setting_bool("redownload_missing_files", True)
 
             # Compute pass: decide what to write WITHOUT touching the DB. This is
             # the slow bit  -  check_duplicate() walks the library on disk for every
@@ -372,6 +376,8 @@ def refresh_watched_artist(artist_id: str) -> dict:
 
                 # Already tracked  -  check if file went missing
                 if existing.get("downloaded_at"):
+                    if not redownload_missing:
+                        continue  # Downloaded once is downloaded for good
                     if not check_duplicate(
                         existing.get("artist") or track_artist,
                         existing.get("title") or track_title,

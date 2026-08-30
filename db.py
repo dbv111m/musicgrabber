@@ -354,6 +354,7 @@ def init_db():
             override_dir TEXT,
             album_release_mbid TEXT,
             album_total_tracks INTEGER,
+            album_year TEXT,
             rate_limited_until TIMESTAMP,
             cancel_requested INTEGER DEFAULT 0,
             error TEXT,
@@ -476,6 +477,7 @@ def init_db():
             use_playlists_dir INTEGER DEFAULT 0,
             sync_mode TEXT DEFAULT 'append',
             stale_navidrome_paths INTEGER DEFAULT 0,
+            unresolved_tracks INTEGER DEFAULT 0,
             preferred_sources TEXT DEFAULT 'all',
             priority_source TEXT,
             lb_username TEXT,
@@ -1040,6 +1042,12 @@ def init_db():
         except sqlite3.OperationalError:
             pass
         try:
+            # The release year, so every track on an album agrees on one, rather
+            # than each going off to MusicBrainz and coming back with its own.
+            conn.execute("ALTER TABLE bulk_imports ADD COLUMN album_year TEXT")
+        except sqlite3.OperationalError:
+            pass
+        try:
             conn.execute("ALTER TABLE watched_playlists ADD COLUMN custom_subdir TEXT")
         except sqlite3.OperationalError:
             pass
@@ -1582,6 +1590,20 @@ def init_db():
                 "INSERT OR REPLACE INTO settings (key, value) VALUES ('db_version', '14')"
             )
             print("DB migrated to version 14: cleared dead default hifi-api URL, if it was still set to one")
+
+        # v15: with redownload_missing_files switched off, a track whose file has
+        # wandered off (hello, MusicBee) stays marked downloaded instead of being
+        # fetched again on a loop. Count them per playlist so the card can own up
+        # to why the M3U is looking thinner than the track list.
+        if db_version < 15:
+            try:
+                conn.execute("ALTER TABLE watched_playlists ADD COLUMN unresolved_tracks INTEGER DEFAULT 0")
+            except sqlite3.OperationalError:
+                pass  # Column already present (fresh DB built from the new schema)
+            conn.execute(
+                "INSERT OR REPLACE INTO settings (key, value) VALUES ('db_version', '15')"
+            )
+            print("DB migrated to version 15: watched playlists can now count tracks they have stopped chasing")
 
         # Defensive backstop: early dev builds of v1 silently dropped custom_subdir
         # when recreating watched_playlists. Re-add it for any DB that already

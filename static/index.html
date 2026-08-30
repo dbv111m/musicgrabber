@@ -744,6 +744,14 @@
             <div class="settings-section">
                 <h3 class="settings-section-title">General</h3>
                 <div class="settings-grid">
+                    <label class="settings-label settings-label-wrap">
+                        <span>Preview Button on Desktop</span>
+                        <div class="toggle-switch">
+                            <input type="checkbox" id="settingDesktopPreviewButton">
+                            <span class="toggle-slider"></span>
+                        </div>
+                        <span class="settings-hint settings-hint-full">Puts the Preview button on every search result on desktop, the same one phones and tablets get. Previews then only start when you press it; resting the mouse on a result no longer sets one off. Saved in this browser rather than on the server, so every machine gets to make its own mind up, and it applies the moment you flip it; no Save needed.</span>
+                    </label>
                     <label class="settings-label settings-label-wrap admin-only">
                         <span>Skip duplicates</span>
                         <div class="toggle-switch">
@@ -792,6 +800,14 @@
                         </div>
                         <span class="settings-hint settings-hint-full">Writes the watched-playlist name(s) a track belongs to into its Comment tag, so macOS Music can build smart playlists from them. A track on several playlists gets all their names. Off by default; use the one-shot backfill to tag your existing library.</span>
                     </label>
+                    <label class="settings-label settings-label-wrap admin-only">
+                        <span>Re-download Missing Files</span>
+                        <div class="toggle-switch">
+                            <input type="checkbox" id="settingRedownloadMissingFiles" checked>
+                            <span class="toggle-slider"></span>
+                        </div>
+                        <span class="settings-hint settings-hint-full">When a watched playlist or artist track is marked downloaded but its file can no longer be found, fetch it again. Switch this off if another tool (MusicBee, beets, Lidarr and friends) moves or renames your files afterwards, otherwise every refresh re-downloads them and you end up with duplicates breeding quietly in the dark. With it off, tracks stay downloaded and the per-track Retry button in the Missing panel remains your way to fetch one back on purpose.</span>
+                    </label>
                     <label class="settings-label settings-label-top admin-only">
                         <span>Search Sources</span>
                         <div class="source-toggle-list">
@@ -809,8 +825,8 @@
                                     <span class="toggle-slider"></span>
                                 </div>
                             </label>
-                            <label class="source-toggle-item" title="Experimental. Selenium clears Cloudflare, then a Chrome-impersonating HTTP session handles MP3Phoenix search and download. Disabled by default.">
-                                <span class="source-toggle-text">MP3Phoenix (experimental) <i class="fa-solid fa-circle-info source-toggle-help" aria-label="MP3Phoenix help"></i></span>
+                            <label class="source-toggle-item" title="Selenium clears Cloudflare, then a Chrome-impersonating HTTP session handles MP3Phoenix search, preview and download. Disabled by default, since it briefly launches Chrome.">
+                                <span class="source-toggle-text">MP3Phoenix <i class="fa-solid fa-circle-info source-toggle-help" aria-label="MP3Phoenix help"></i></span>
                                 <div class="toggle-switch">
                                     <input type="checkbox" id="settingSourceMp3phoenix">
                                     <span class="toggle-slider"></span>

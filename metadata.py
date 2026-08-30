@@ -2428,22 +2428,14 @@ def fetch_artist_albums(mbid: str) -> list[dict]:
     return albums
 
 
-def fetch_album_tracks(release_mbid: str) -> list[dict]:
-    """Fetch the tracklist for a specific release from MusicBrainz.
+def fetch_album_release(release_mbid: str) -> dict:
+    """Fetch a release from MusicBrainz as {"year": "1973", "tracks": [...]}.
 
-    Returns [{position, title, artist, isrc, recording_mbid}, ...] in track order.
-    Position is a string (e.g. "1", "A1") as MusicBrainz provides it.
-    The ISRC pins the exact studio recording so the album download path can grab
-    that specific cut rather than a live take; recording_mbid is for the
-    post-download fingerprint check. Both are None when MusicBrainz has nothing.
-
-    `artist` is the performer credited on that track, which on a normal album is
-    just the album artist repeated, and on a compilation is the entire point.
-    Without it every track on a soundtrack goes looking for "Various Artists -
-    Whatever", which is not a recording anyone has ever released, and album
-    mode's strict artist gate then rejects the real one when it turns up.
-    Empty when MusicBrainz declines to say; callers fall back to the release
-    credit.
+    Same single HTTP call as `fetch_album_tracks`, which is the point: the
+    release date is sitting right there in the response we already ask for, so
+    there is no excuse for a second round trip just to learn what year it is.
+    `year` is the date of *this* pressing, so a 2015 remaster says 2015, and is
+    "" when MusicBrainz is coy about it.
 
     Raises MusicBrainzUnavailable when MB is unreachable after retries.
     """
@@ -2455,12 +2447,15 @@ def fetch_album_tracks(release_mbid: str) -> list[dict]:
     )
     if response.status_code != 200:
         print(f"MusicBrainz tracklist fetch failed for {release_mbid}: HTTP {response.status_code}")
-        return []
+        return {"year": "", "tracks": []}
     try:
         data = response.json()
     except Exception as e:
         print(f"MusicBrainz tracklist parse error for {release_mbid}: {e}")
-        return []
+        return {"year": "", "tracks": []}
+    # MB dates come as "1973", "1973-05" or "1973-05-25"; we only ever want the front.
+    year_match = re.match(r"(\d{4})", data.get("date") or "")
+    year = year_match.group(1) if year_match else ""
     release_credit = data.get("artist-credit") or []
     tracks: list[dict] = []
     for medium in data.get("media", []):
@@ -2494,7 +2489,29 @@ def fetch_album_tracks(release_mbid: str) -> list[dict]:
                     "isrc": isrc,
                     "recording_mbid": recording.get("id") or None,
                 })
-    return tracks
+    return {"year": year, "tracks": tracks}
+
+
+def fetch_album_tracks(release_mbid: str) -> list[dict]:
+    """Fetch the tracklist for a specific release from MusicBrainz.
+
+    Returns [{position, title, artist, isrc, recording_mbid}, ...] in track order.
+    Position is a string (e.g. "1", "A1") as MusicBrainz provides it.
+    The ISRC pins the exact studio recording so the album download path can grab
+    that specific cut rather than a live take; recording_mbid is for the
+    post-download fingerprint check. Both are None when MusicBrainz has nothing.
+
+    `artist` is the performer credited on that track, which on a normal album is
+    just the album artist repeated, and on a compilation is the entire point.
+    Without it every track on a soundtrack goes looking for "Various Artists -
+    Whatever", which is not a recording anyone has ever released, and album
+    mode's strict artist gate then rejects the real one when it turns up.
+    Empty when MusicBrainz declines to say; callers fall back to the release
+    credit.
+
+    Raises MusicBrainzUnavailable when MB is unreachable after retries.
+    """
+    return fetch_album_release(release_mbid)["tracks"]
 
 
 # ---------------------------------------------------------------------------

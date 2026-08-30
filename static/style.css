@@ -973,6 +973,12 @@ h1 {
     color: #000;
 }
 
+/* Resolving a YouTube URL takes a few seconds; a button that just sits there
+   looking pressed invites a second press. Let it breathe while it waits. */
+.result-item.loading-preview .preview-btn {
+    animation: pulse 0.8s infinite;
+}
+
 /* Actions row  -  sits below the card content.
    On desktop: hidden by default, shows on hover with only the ~ Similar button.
    On mobile: always visible as a full-width button strip with both buttons. */
@@ -991,6 +997,20 @@ h1 {
     /* Preview is handled by hover-to-preview on desktop; keep it out of the row */
     .result-item:hover .mobile-actions .preview-btn {
         display: none;
+    }
+}
+
+/* Opt-in (Settings > Preview Button on Desktop): give hover-capable machines the
+   same permanent button strip touch devices get. Hover-to-preview is switched off
+   in JS when this is on, so the button is the only way in. */
+@media (hover: hover) {
+    body.desktop-preview-button .mobile-actions {
+        display: flex;
+    }
+
+    /* Undoes the rule above that keeps the button out of the hover row */
+    body.desktop-preview-button .result-item:hover .mobile-actions .preview-btn {
+        display: inline-flex;
     }
 }
 

@@ -229,7 +229,7 @@ def test_migration_removes_obsolete_qobuz_proxy_setting(tmp_path, monkeypatch):
                 "SELECT value FROM settings WHERE key = 'db_version'"
             ).fetchone()[0]
         assert row is None
-        assert version == "14"  # migrations run to the latest version in one boot
+        assert version == "15"  # migrations run to the latest version in one boot
     finally:
         _drain(migration_pool)
 
@@ -262,7 +262,7 @@ def test_migration_clears_dead_default_hifi_api_url_but_not_a_self_hosted_one(tm
                 "SELECT value FROM settings WHERE key = 'db_version'"
             ).fetchone()[0]
         assert row is None
-        assert version == "14"
+        assert version == "15"
     finally:
         _drain(migration_pool)
 

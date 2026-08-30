@@ -210,6 +210,14 @@ SETTINGS_SCHEMA = {
     # Stamp watched-playlist names into the COMMENT tag so macOS Music can build
     # smart playlists off them. Off by default; it writes to every playlist file.
     "playlist_comment_tagging": {"type": "bool", "default": False, "env": "PLAYLIST_COMMENT_TAGGING"},
+    # Watched playlists and artists re-fetch a track whose file has vanished from
+    # the library. Grand when you have binned a duff rip on purpose; considerably
+    # less grand when an external organiser (MusicBee, beets and friends) moves or
+    # renames files out from under us, and every refresh dutifully downloads them
+    # all over again, forever. Turn this off and a track downloaded once stays
+    # downloaded; the Missing panel's per-track Retry is still there if you want
+    # one back. On by default, so nothing changes unless you say so.
+    "redownload_missing_files": {"type": "bool", "default": True, "env": "REDOWNLOAD_MISSING_FILES"},
     # Track upgrades (Lidarr-style). Off by default; opt-in. The scan flags library
     # files sitting below the quality you already download at, ready for a manual upgrade.
     "enable_track_upgrades": {"type": "bool", "default": False, "env": "ENABLE_TRACK_UPGRADES"},

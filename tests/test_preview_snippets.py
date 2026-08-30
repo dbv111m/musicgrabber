@@ -30,6 +30,20 @@ def test_snippet_round_trips_to_its_owner(monkeypatch):
     assert snippets.snippet_path(token).exists()
 
 
+def test_stored_bytes_round_trip_without_ffmpeg(monkeypatch):
+    """MP3Phoenix hands us audio the browser could already play; the only reason it
+    comes through us at all is that Cloudflare will not serve the browser directly."""
+    def explode(*_args, **_kwargs):
+        raise AssertionError("store_snippet has no business calling ffmpeg")
+    monkeypatch.setattr(snippets.subprocess, "run", explode)
+    user = {"id": "u1", "username": "karl"}
+
+    token = snippets.store_snippet(b"ID3already-playable", user)
+
+    assert snippets.snippet_user(token) == user
+    assert snippets.snippet_path(token).read_bytes() == b"ID3already-playable"
+
+
 def test_unknown_token_resolves_to_nothing():
     assert snippets.snippet_user("not-a-real-token") is None
     assert snippets.snippet_path("not-a-real-token") is None

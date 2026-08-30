@@ -15,6 +15,8 @@ from urllib.parse import urlsplit
 
 import pytest
 import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 
 
 BASE_URL = os.environ.get("MG_BASE_URL", "http://localhost:38274").rstrip("/")
@@ -31,6 +33,33 @@ class QueueHistorySafeSession(requests.Session):
     def __init__(self, *, allow_history_deletion=False):
         super().__init__()
         self.allow_history_deletion = allow_history_deletion
+        self._mount_connection_retries()
+
+    def _mount_connection_retries(self):
+        """Survive uvicorn hanging up on an idle keep-alive connection.
+
+        The server closes idle connections after five seconds. urllib3 spots a
+        socket that is already dead and quietly opens a new one, so the ordinary
+        case is fine; what it cannot dodge is the close crossing in flight with
+        our send, which comes back as ConnectionError(RemoteDisconnected) and
+        killed roughly one slow run in two, a different test each time. The
+        request may or may not have reached a handler in that case: TCP cannot
+        tell us whether a server committed work before losing its response.
+
+        Retry only safe read-only methods. Replaying POST/PUT/PATCH/DELETE can
+        duplicate real mutations, so those failures remain visible. There is no
+        status_forcelist either: a 500 is a finding, and retrying it until it
+        goes away is how you ship a bug.
+        """
+        retry = Retry(
+            total=3,
+            backoff_factor=0.5,
+            allowed_methods=frozenset({"HEAD", "GET", "OPTIONS"}),
+            status_forcelist=(),
+        )
+        adapter = HTTPAdapter(max_retries=retry)
+        self.mount("http://", adapter)
+        self.mount("https://", adapter)
 
     @classmethod
     def deletes_history(cls, method, url):

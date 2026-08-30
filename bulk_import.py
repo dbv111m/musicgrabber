@@ -296,6 +296,7 @@ def start_bulk_import_for_tracks(
     override_dir: Optional[str] = None,
     album_release_mbid: Optional[str] = None,
     album_total_tracks: Optional[int] = None,
+    album_year: Optional[str] = None,
     custom_subdir: Optional[str] = None,
     priority_source: Optional[str] = None,
     *,
@@ -325,12 +326,13 @@ def start_bulk_import_for_tracks(
             """INSERT INTO bulk_imports
                (id, status, total_tracks, create_playlist, playlist_name, convert_audio,
                 watch_playlist_id, use_playlists_dir, watch_artist_id, user_id, preferred_sources,
-                override_dir, album_release_mbid, album_total_tracks, custom_subdir, priority_source)
-               VALUES (?, 'pending', ?, 0, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                override_dir, album_release_mbid, album_total_tracks, album_year, custom_subdir,
+                priority_source)
+               VALUES (?, 'pending', ?, 0, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (import_id, len(tracks), int(convert_audio), watch_playlist_id,
              int(use_playlists_dir), watch_artist_id, user_id, preferred_sources or "all",
-             override_dir, album_release_mbid, album_total_tracks, custom_subdir or None,
-             _priority)
+             override_dir, album_release_mbid, album_total_tracks, album_year or None,
+             custom_subdir or None, _priority)
         )
 
         for line_num, (artist, song) in enumerate(tracks, 1):

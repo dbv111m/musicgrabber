@@ -17,6 +17,21 @@ echo "=========================================="
 echo "  Music Grabber is starting..."
 echo "  Listening on ${LISTEN_ADDR}:${LISTEN_PORT} (map host port in docker-compose as needed)"
 
+# yt-dlp goes stale a great deal faster than this image does. YouTube swaps a
+# player client, and a binary that was perfectly happy last month starts handing
+# browsers media URLs they are not allowed to stream. So we bring it up to date
+# at boot: bounded, so a sulking network delays the start rather than preventing
+# it, and never fatal, because yesterday's yt-dlp still beats no MusicGrabber at
+# all. Set YTDLP_AUTO_UPDATE=false if you would rather pin whatever shipped.
+if [ "${YTDLP_AUTO_UPDATE:-true}" = "true" ]; then
+    echo "  yt-dlp: $(yt-dlp --version 2>/dev/null || echo unknown), checking for a newer one..."
+    if timeout 45 yt-dlp -U > /dev/null 2>&1; then
+        echo "  yt-dlp: now on $(yt-dlp --version 2>/dev/null || echo unknown)"
+    else
+        echo "  yt-dlp: staying on the installed version (no network, or GitHub is having a moment)"
+    fi
+fi
+
 # Only do user/group setup if not running as root (PUID/PGID specified)
 if [ "$PUID" != "0" ] || [ "$PGID" != "0" ]; then
     echo "  Running as UID: $PUID / GID: $PGID"

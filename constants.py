@@ -42,7 +42,11 @@ SEARCH_ALL_DEADLINE = int(os.getenv("SEARCH_ALL_DEADLINE", "30"))  # Multi-sourc
 SEARCH_SLOT_WAIT_INTERACTIVE = float(os.getenv("SEARCH_SLOT_WAIT_INTERACTIVE", "15"))
 SEARCH_SLOT_WAIT_AUTOMATED = float(os.getenv("SEARCH_SLOT_WAIT_AUTOMATED", "15"))
 TIMEOUT_YTDLP_DOWNLOAD = int(os.getenv("TIMEOUT_YTDLP_DOWNLOAD", "300"))  # Downloading a track (5 minutes)
-TIMEOUT_YTDLP_PREVIEW = 15       # Getting preview URL
+# Getting a preview URL. yt-dlp now solves YouTube's player challenge through
+# Deno, which is a few seconds when the answer is cached and rather more when
+# YouTube has just shipped a new player. 15s sat right on that boundary and
+# turned a slow resolve into a 504.
+TIMEOUT_YTDLP_PREVIEW = int(os.getenv("TIMEOUT_YTDLP_PREVIEW", "30"))
 TIMEOUT_YTDLP_PLAYLIST = 60      # Getting playlist contents
 TIMEOUT_FFMPEG_CONVERT = int(os.getenv("TIMEOUT_FFMPEG_CONVERT", "120"))  # Converting audio formats
 
@@ -123,6 +127,12 @@ TIMEOUT_AMAZON_BROWSER = 180     # Amazon Music playlist scraping (3 minutes)
 TIMEOUT_FPCALC = 30              # Audio fingerprinting via fpcalc
 TIMEOUT_MP3PHOENIX_SEARCH = int(os.getenv("TIMEOUT_MP3PHOENIX_SEARCH", "30"))
 TIMEOUT_MP3PHOENIX_DOWNLOAD = int(os.getenv("TIMEOUT_MP3PHOENIX_DOWNLOAD", "180"))
+# A preview takes the opening chunk and hangs up rather than pulling the lot, so
+# it waits nothing like as long as a download. A megabyte is roughly 25 seconds
+# at 320 kbps, which is ample for deciding whether it is the right song, and MP3
+# is quite happy being cut off mid-flow.
+TIMEOUT_MP3PHOENIX_PREVIEW = int(os.getenv("TIMEOUT_MP3PHOENIX_PREVIEW", "45"))
+MP3PHOENIX_PREVIEW_BYTES = int(os.getenv("MP3PHOENIX_PREVIEW_BYTES", str(1024 * 1024)))
 # How long the Chrome bootstrap gets to clear Cloudflare and hand back cookies.
 # Forwarded to mp3phoenix_browser.py; the parent's own kill timer allows this
 # plus a buffer, so the child isn't killed mid-clearance (see MONOCHROME_BROWSER_AUTH_TIMEOUT).

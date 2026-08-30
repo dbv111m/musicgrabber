@@ -190,14 +190,15 @@ SOURCE_REGISTRY = {
         "has_preview": True,
     },
     "mp3phoenix": {
-        # Short label: this feeds compact UI (source health chips, toast text), where
-        # "(experimental)" just wrapped awkwardly. The Settings toggle still spells out
-        # "experimental" in full next to its own description, which is where it counts.
         "label": "MP3Phoenix",
         "badge": "PX",
         "colour": "#e05c00",
         "search_fn": search_mp3phoenix,
-        "has_preview": False,
+        # Preview streams through the cleared session and back out of our own
+        # address, since Cloudflare will not serve the browser directly.
+        "has_preview": True,
+        # Off by default, like Soulseek: it briefly launches Chrome for Cloudflare
+        # clearance, which is not something to spring on an install that never asked.
         "default_enabled": False,
     },
     "soundcloud": {

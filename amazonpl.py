@@ -24,12 +24,26 @@ def _normalise_track(artist: str, title: str) -> str:
     return f"{artist} - {title}"
 
 
+def _strip_explicit_badge(text: str) -> str:
+    r"""Drop Amazon's explicit marker, which lives on its own line in the cell.
+
+    The rendered title cell reads "petal\nE", and collapsing that whitespace
+    gives "petal E", so half the chart ends up being searched for under a
+    title nobody has ever released.  Only a trailing line that is exactly the
+    badge goes; a song genuinely called "Vitamin E" keeps its vitamins.
+    """
+    return re.sub(r"\n\s*(?:E|EXPLICIT)\s*$", "", text, flags=re.IGNORECASE)
+
+
 def _looks_like_duration(text: str) -> bool:
     return bool(re.match(r"^\d{1,2}:\d{2}$", text))
 
 
-def _extract_from_payload(payload: Any, out: set[str]) -> None:
-    """Best-effort recursive extractor for track-like JSON objects."""
+def _extract_from_payload(payload: Any, out: dict[str, None]) -> None:
+    """Best-effort recursive extractor for track-like JSON objects.
+
+    `out` is a dict used as an ordered set, so discovery order survives.
+    """
     if isinstance(payload, dict):
         typename = str(payload.get("__typename", "")).lower()
         has_track_hint = any(
@@ -53,7 +67,7 @@ def _extract_from_payload(payload: Any, out: set[str]) -> None:
             title = title.strip()
             artist = artist.strip()
             if title and artist and title.lower() != artist.lower():
-                out.add(_normalise_track(artist, title))
+                out.setdefault(_normalise_track(artist, title), None)
 
         for value in payload.values():
             _extract_from_payload(value, out)
@@ -62,17 +76,21 @@ def _extract_from_payload(payload: Any, out: set[str]) -> None:
             _extract_from_payload(item, out)
 
 
-def _collect_visible_tracks(page) -> set[str]:
-    """Extract visible rows from the rendered DOM.
+def _collect_visible_tracks(page) -> list[tuple[float, str]]:
+    """Extract visible rows from the rendered DOM, with their list positions.
 
     Amazon Music uses <music-image-row> web components with structured
     columns: .col1 (title), .col2 (artist), .col3 (album).  We try
     those first, then fall back to generic row selectors for resilience.
+
+    Every row comes back paired with an ordering key, because the list is
+    virtualised and we crawl it twice; discovery order on its own would dump
+    any row we missed on the first pass at the very bottom of the playlist.
     """
     # Primary strategy: Amazon's structured web components
     structured_js = r"""
 () => {
-  const tracks = [];
+  const rows = [];
   for (const row of document.querySelectorAll('music-image-row')) {
     const col1 = row.querySelector('.col1');
     const col2 = row.querySelector('.col2');
@@ -81,22 +99,32 @@ def _collect_visible_tracks(page) -> set[str]:
     // (e.g. "Kay Kyser & His Orchestra" might be split across child links)
     const title = (col1.innerText || col1.textContent || '').trim();
     const artist = (col2.innerText || col2.textContent || '').trim();
-    if (title && artist) tracks.push({title, artist});
+    if (!title || !artist) continue;
+    const rect = row.getBoundingClientRect();
+    rows.push({title, artist, off: row.offsetTop,
+               abs: Math.round(rect.top + window.scrollY)});
   }
-  return tracks;
+  // offsetTop is the virtual list's own row offset, so it stays put however
+  // far we have scrolled.  If this layout doesn't position its rows we use
+  // document coordinates for all of them, rather than mixing the two scales.
+  const positioned = rows.some(r => r.off > 0);
+  return rows.map(r => ({title: r.title, artist: r.artist,
+                         pos: positioned ? r.off : r.abs}));
 }
 """
-    tracks: set[str] = set()
+    tracks: list[tuple[float, str]] = []
     for item in page.evaluate(structured_js):
-        title = item["title"].strip()
+        title = _strip_explicit_badge(item["title"]).strip()
         artist = item["artist"].strip()
         if title and artist and title.lower() != artist.lower():
-            tracks.add(_normalise_track(artist, title))
+            tracks.append((item["pos"], _normalise_track(artist, title)))
 
     if tracks:
         return tracks
 
-    # Fallback: generic row selectors with heuristic parsing
+    # Fallback: generic row selectors with heuristic parsing.  These come from
+    # several selectors at once, so their offsetParents disagree; document
+    # coordinates are the only scale they all share.
     fallback_js = r"""
 () => {
   const rowSelectors = [
@@ -107,14 +135,16 @@ def _collect_visible_tracks(page) -> set[str]:
   for (const sel of rowSelectors) {
     for (const el of document.querySelectorAll(sel)) {
       const txt = (el.innerText || '').trim();
-      if (txt) rows.push(txt);
+      if (!txt) continue;
+      const rect = el.getBoundingClientRect();
+      rows.push({txt, pos: Math.round(rect.top + window.scrollY)});
     }
   }
   return rows;
 }
 """
-    for text in page.evaluate(fallback_js):
-        parts = [p.strip() for p in text.split("\n") if p.strip()]
+    for row in page.evaluate(fallback_js):
+        parts = [p.strip() for p in row["txt"].split("\n") if p.strip()]
         if len(parts) < 2:
             continue
 
@@ -139,9 +169,21 @@ def _collect_visible_tracks(page) -> set[str]:
             continue
 
         if title and artist and title.lower() != artist.lower():
-            tracks.add(_normalise_track(artist, title))
+            tracks.append((row["pos"], _normalise_track(artist, title)))
 
     return tracks
+
+
+def _merge_positioned(collected: list[tuple[float, str]], seen: dict[str, float]) -> None:
+    """Fold a scrape into the running set, keeping each track's earliest slot.
+
+    A track we meet twice is the same track; the position it had the first
+    time up the page is the one the playlist actually means.
+    """
+    for position, track in collected:
+        existing = seen.get(track)
+        if existing is None or position < existing:
+            seen[track] = position
 
 
 def _accept_cookie_banner(page) -> None:
@@ -203,8 +245,10 @@ def main() -> None:
         return
 
     playlist_name = "Amazon Music Playlist"
-    dom_tracks: set[str] = set()
-    network_tracks: set[str] = set()
+    # track -> position in the list; dicts keep insertion order, which is the
+    # tie-break for anything the page couldn't give us a position for.
+    dom_tracks: dict[str, float] = {}
+    network_tracks: dict[str, None] = {}  # ordered set, discovery order
 
     try:
         with sync_playwright() as p:
@@ -262,7 +306,7 @@ def main() -> None:
             stale = 0
             previous = 0
             while stale < 30:
-                dom_tracks.update(_collect_visible_tracks(page))
+                _merge_positioned(_collect_visible_tracks(page), dom_tracks)
 
                 page.mouse.wheel(0, 600)
                 time.sleep(0.3)
@@ -281,7 +325,7 @@ def main() -> None:
             time.sleep(1)
             stale = 0
             while stale < 15:
-                dom_tracks.update(_collect_visible_tracks(page))
+                _merge_positioned(_collect_visible_tracks(page), dom_tracks)
                 page.mouse.wheel(0, 600)
                 time.sleep(0.3)
                 new_total = len(dom_tracks) + len(network_tracks)
@@ -293,7 +337,11 @@ def main() -> None:
 
             browser.close()
 
-        tracks = sorted(dom_tracks | network_tracks)
+        # Playlist order, not alphabetical order.  Sorting the "Artist - Title"
+        # strings was tidy and completely wrong: a playlist is a running order,
+        # and Amazon's is the one the user actually chose to follow.
+        tracks = [track for track, _ in sorted(dom_tracks.items(), key=lambda item: item[1])]
+        tracks += [track for track in network_tracks if track not in dom_tracks]
         print(
             json.dumps(
                 {

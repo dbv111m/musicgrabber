@@ -197,6 +197,68 @@ def test_fetch_album_tracks_propagates_unavailable(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# Album release year
+#
+# The release date rides along in the tracklist response we already fetch, so
+# grabbing it costs nothing. It is the date of *this* pressing, so a remaster
+# honestly says it is a remaster rather than pretending to be the original.
+# ---------------------------------------------------------------------------
+
+def _release_body(date):
+    body = {
+        "artist-credit": [{"name": "Pink Floyd"}],
+        "media": [{"tracks": [
+            {"position": 1, "title": "Speak to Me",
+             "recording": {"id": "rec-1", "title": "Speak to Me", "isrcs": ["GBAYE7300001"]}},
+            {"position": 2, "title": "Breathe",
+             "recording": {"id": "rec-2", "title": "Breathe", "isrcs": []}},
+        ]}],
+    }
+    if date is not None:
+        body["date"] = date
+    return body
+
+
+@pytest.mark.parametrize("mb_date", ["1973", "1973-03", "1973-03-01"])
+def test_fetch_album_release_takes_the_year_off_any_date_shape(monkeypatch, mb_date):
+    """MusicBrainz is vague to varying degrees; we only ever want the front four."""
+    metadata = _import_metadata_or_skip()
+    _patch_httpx(monkeypatch, metadata, [_FakeResp(200, _release_body(mb_date))])
+
+    release = metadata.fetch_album_release("rel-mbid")
+
+    assert release["year"] == "1973"
+    assert [t["title"] for t in release["tracks"]] == ["Speak to Me", "Breathe"]
+
+
+@pytest.mark.parametrize("mb_date", [None, "", "unknown"])
+def test_fetch_album_release_year_is_empty_when_there_is_no_usable_date(monkeypatch, mb_date):
+    metadata = _import_metadata_or_skip()
+    _patch_httpx(monkeypatch, metadata, [_FakeResp(200, _release_body(mb_date))])
+
+    assert metadata.fetch_album_release("rel-mbid")["year"] == ""
+
+
+def test_fetch_album_release_survives_a_4xx_without_pretending_it_worked(monkeypatch):
+    metadata = _import_metadata_or_skip()
+    _patch_httpx(monkeypatch, metadata, [_FakeResp(404, {})])
+
+    assert metadata.fetch_album_release("rel-mbid") == {"year": "", "tracks": []}
+
+
+def test_fetch_album_tracks_still_hands_back_a_plain_list(monkeypatch):
+    """Back-compat guard: four callers in app.py want the list and nothing else."""
+    metadata = _import_metadata_or_skip()
+    _patch_httpx(monkeypatch, metadata, [_FakeResp(200, _release_body("1973-03-01"))])
+
+    tracks = metadata.fetch_album_tracks("rel-mbid")
+
+    assert isinstance(tracks, list)
+    assert tracks[0]["isrc"] == "GBAYE7300001"
+    assert tracks[1]["isrc"] is None
+
+
+# ---------------------------------------------------------------------------
 # Track numbers on singles (GitLab #43)
 #
 # MusicBrainz returns the matched track under `track` (singular) from the search

@@ -595,7 +595,8 @@ def _setup_job_album_context_db(monkeypatch, downloads):
             download_type TEXT DEFAULT 'single'
         );
         CREATE TABLE bulk_imports (id TEXT PRIMARY KEY, override_dir TEXT, album_release_mbid TEXT,
-                                    total_tracks INTEGER, album_total_tracks INTEGER);
+                                    total_tracks INTEGER, album_total_tracks INTEGER,
+                                    album_year TEXT);
         CREATE TABLE bulk_import_tracks (id INTEGER PRIMARY KEY AUTOINCREMENT, import_id TEXT,
                                           job_id TEXT, song TEXT, line_num INTEGER);
     """)
@@ -640,6 +641,49 @@ def test_get_job_album_context_still_derives_names_for_album_jobs(monkeypatch):
     ctx = downloads._get_job_album_context("job-2")
     assert ctx["album_artist"] == "Luis Fonsi"
     assert ctx["album_name"] == "Vida"
+
+
+def test_get_job_album_context_carries_the_album_year(monkeypatch):
+    """The year we captured when the album was queued must reach the tagger.
+    Without it each track asks MusicBrainz on its own and an album can come
+    back wearing four different years, which pleases absolutely nobody."""
+    downloads = _import_downloads_or_skip()
+    conn = _setup_job_album_context_db(monkeypatch, downloads)
+
+    conn.execute(
+        "INSERT INTO bulk_imports (id, override_dir, album_release_mbid, total_tracks,"
+        " album_total_tracks, album_year) VALUES (?, ?, ?, ?, ?, ?)",
+        ("imp-1", "/music/Albums/Pink Floyd/The Dark Side of the Moon", "rel-1", 10, 10, "1973"),
+    )
+    conn.execute(
+        "INSERT INTO bulk_import_tracks (import_id, job_id, song, line_num) VALUES (?, ?, ?, ?)",
+        ("imp-1", "job-3", "Time", 4),
+    )
+    conn.commit()
+
+    ctx = downloads._get_job_album_context("job-3")
+    assert ctx["year"] == "1973"
+    assert ctx["album_name"] == "The Dark Side of the Moon"
+
+
+def test_get_job_album_context_year_is_none_when_musicbrainz_had_no_date(monkeypatch):
+    """A missing year must stay None so the per-track MusicBrainz guess can
+    still have a go, rather than an empty string stamping a blank DATE tag."""
+    downloads = _import_downloads_or_skip()
+    conn = _setup_job_album_context_db(monkeypatch, downloads)
+
+    conn.execute(
+        "INSERT INTO bulk_imports (id, override_dir, album_release_mbid, total_tracks,"
+        " album_total_tracks, album_year) VALUES (?, ?, ?, ?, ?, ?)",
+        ("imp-2", "/music/Albums/Some Artist/Some Album", "rel-2", 3, 3, ""),
+    )
+    conn.execute(
+        "INSERT INTO bulk_import_tracks (import_id, job_id, song, line_num) VALUES (?, ?, ?, ?)",
+        ("imp-2", "job-4", "Track One", 1),
+    )
+    conn.commit()
+
+    assert downloads._get_job_album_context("job-4")["year"] is None
 
 
 # ---------------------------------------------------------------------------
@@ -750,6 +794,140 @@ def test_append_to_physical_m3u_falls_back_when_name_sanitizes_empty(tmp_path, m
 
     m3u = singles_dir / "Playlist.m3u"
     assert m3u.exists(), "Expected empty-after-sanitizing playlist names to fall back"
+
+
+# ---------------------------------------------------------------------------
+# Regression guards for issue #82: "Create M3U" off must mean off. The per-track
+# append used to ignore the setting entirely, creating the file the user had
+# explicitly declined and appending in download order, which quietly shuffled
+# the playlist out of its upstream running order.
+# ---------------------------------------------------------------------------
+
+def _wire_watched_playlists_table(monkeypatch, downloads, rows):
+    """Give downloads.db_conn a tiny watched_playlists table and nothing else.
+
+    rows is a list of (name, make_m3u, user_id) tuples.
+    """
+    import sqlite3
+    from contextlib import contextmanager
+
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.execute(
+        "CREATE TABLE watched_playlists (id TEXT PRIMARY KEY, name TEXT, "
+        "make_m3u INTEGER DEFAULT 0, user_id TEXT)"
+    )
+    for i, (name, make_m3u, user_id) in enumerate(rows):
+        conn.execute(
+            "INSERT INTO watched_playlists (id, name, make_m3u, user_id) VALUES (?, ?, ?, ?)",
+            (f"pl-{i}", name, make_m3u, user_id),
+        )
+    conn.commit()
+
+    @contextmanager
+    def fake_db_conn():
+        yield conn
+
+    monkeypatch.setattr(downloads, "db_conn", fake_db_conn)
+    return conn
+
+
+def _wire_playlists_dir(monkeypatch, downloads, tmp_path):
+    playlists_dir = tmp_path / "Playlists"
+    playlists_dir.mkdir(exist_ok=True)
+    monkeypatch.setattr(downloads, "get_playlists_dir", lambda user_id=None: playlists_dir)
+    monkeypatch.setattr(downloads, "get_singles_dir", lambda user_id=None: tmp_path / "Singles")
+    return playlists_dir
+
+
+def test_append_to_physical_m3u_skipped_when_watched_playlist_has_m3u_disabled(tmp_path, monkeypatch):
+    """make_m3u = 0 means no M3U gets conjured into existence."""
+    downloads = _import_downloads_or_skip()
+
+    playlists_dir = _wire_playlists_dir(monkeypatch, downloads, tmp_path)
+    _wire_watched_playlists_table(monkeypatch, downloads, [("Rock Mix", 0, None)])
+
+    audio_file = playlists_dir / "Rock Mix" / "Some Track.flac"
+    audio_file.parent.mkdir(parents=True)
+    audio_file.write_bytes(b"not real audio")
+
+    downloads._append_to_physical_m3u(audio_file, "Rock Mix", use_playlists_dir=True)
+
+    assert not (playlists_dir / "Rock Mix.m3u").exists(), \
+        "Create M3U is off; MusicGrabber should not have created the file"
+
+
+def test_append_to_physical_m3u_leaves_existing_file_alone_when_disabled(tmp_path, monkeypatch):
+    """An M3U that already exists is left exactly as the user left it."""
+    downloads = _import_downloads_or_skip()
+
+    playlists_dir = _wire_playlists_dir(monkeypatch, downloads, tmp_path)
+    _wire_watched_playlists_table(monkeypatch, downloads, [("Rock Mix", 0, None)])
+
+    m3u = playlists_dir / "Rock Mix.m3u"
+    original = "#EXTM3U\nRock Mix/Old Track.flac\n"
+    m3u.write_text(original, encoding="utf-8")
+
+    audio_file = playlists_dir / "Rock Mix" / "New Track.flac"
+    audio_file.parent.mkdir(parents=True)
+    audio_file.write_bytes(b"not real audio")
+
+    downloads._append_to_physical_m3u(audio_file, "Rock Mix", use_playlists_dir=True)
+
+    assert m3u.read_text(encoding="utf-8") == original, \
+        "Create M3U is off; the existing playlist file must not be touched"
+
+
+def test_append_to_physical_m3u_still_writes_when_watched_playlist_wants_m3u(tmp_path, monkeypatch):
+    """The guard must not overreach: make_m3u = 1 still appends as before."""
+    downloads = _import_downloads_or_skip()
+
+    playlists_dir = _wire_playlists_dir(monkeypatch, downloads, tmp_path)
+    _wire_watched_playlists_table(monkeypatch, downloads, [("Rock Mix", 1, None)])
+
+    audio_file = playlists_dir / "Rock Mix" / "Some Track.flac"
+    audio_file.parent.mkdir(parents=True)
+    audio_file.write_bytes(b"not real audio")
+
+    downloads._append_to_physical_m3u(audio_file, "Rock Mix", use_playlists_dir=True)
+
+    contents = (playlists_dir / "Rock Mix.m3u").read_text(encoding="utf-8")
+    assert "Rock Mix/Some Track.flac" in contents
+
+
+def test_append_to_physical_m3u_unaffected_for_non_watched_playlists(tmp_path, monkeypatch):
+    """Bulk imports own no watched_playlists row, so nothing changes for them."""
+    downloads = _import_downloads_or_skip()
+
+    playlists_dir = _wire_playlists_dir(monkeypatch, downloads, tmp_path)
+    # A watched playlist exists with M3U off, but under a completely different name.
+    _wire_watched_playlists_table(monkeypatch, downloads, [("Someone Else's Mix", 0, None)])
+
+    audio_file = playlists_dir / "Road Trip" / "Some Track.flac"
+    audio_file.parent.mkdir(parents=True)
+    audio_file.write_bytes(b"not real audio")
+
+    downloads._append_to_physical_m3u(audio_file, "Road Trip", use_playlists_dir=True)
+
+    contents = (playlists_dir / "Road Trip.m3u").read_text(encoding="utf-8")
+    assert "Road Trip/Some Track.flac" in contents
+
+
+def test_append_to_physical_m3u_scopes_make_m3u_check_to_the_owning_user(tmp_path, monkeypatch):
+    """Another user's identically named playlist must not veto this write."""
+    downloads = _import_downloads_or_skip()
+
+    playlists_dir = _wire_playlists_dir(monkeypatch, downloads, tmp_path)
+    _wire_watched_playlists_table(monkeypatch, downloads, [("Rock Mix", 0, "someone-else")])
+
+    audio_file = playlists_dir / "Rock Mix" / "Some Track.flac"
+    audio_file.parent.mkdir(parents=True)
+    audio_file.write_bytes(b"not real audio")
+
+    downloads._append_to_physical_m3u(audio_file, "Rock Mix", use_playlists_dir=True, user_id="me")
+
+    contents = (playlists_dir / "Rock Mix.m3u").read_text(encoding="utf-8")
+    assert "Rock Mix/Some Track.flac" in contents
 
 
 def _setup_watched_playlist_db(monkeypatch, downloads):

@@ -1970,6 +1970,25 @@ def get_preview_url(http_request: Request, video_id: str, source: str = "youtube
                 return {"url": f"/api/preview-audio/{token}", "video_id": video_id}
             return {"url": cdn_url, "video_id": video_id}
 
+        if source == "mp3phoenix":
+            if not url:
+                raise HTTPException(status_code=400, detail="MP3Phoenix preview requires url parameter")
+            try:
+                validate_source_url(source, url)
+            except ValueError as e:
+                raise HTTPException(status_code=400, detail=str(e))
+            # Cloudflare will not serve an <audio> element directly, so the opening
+            # seconds come down through the cleared session and go back out from
+            # here. MP3 does not mind being cut off mid-flow, so no ffmpeg needed.
+            from mp3phoenix import fetch_mp3phoenix_preview, is_mp3phoenix_url
+            if not is_mp3phoenix_url(url):
+                raise HTTPException(status_code=400, detail="Invalid MP3Phoenix download URL")
+            from preview_snippets import store_snippet
+            token = store_snippet(
+                fetch_mp3phoenix_preview(url), getattr(http_request.state, "user", None)
+            )
+            return {"url": f"/api/preview-audio/{token}", "video_id": video_id}
+
         if source == "youtube":
             if not is_valid_youtube_id(video_id):
                 raise HTTPException(status_code=400, detail="Invalid YouTube video ID")
@@ -3383,6 +3402,40 @@ def force_accept_job(job_id: str, http_request: Request):
     return retry_job(job_id, http_request)
 
 
+def _watched_track_as_job(job_id: str, user_id: str | None, is_admin: bool) -> dict | None:
+    """Rebuild the bare bones of a vanished job from its watched playlist track.
+
+    "Clear completed" bins the jobs row but leaves watched_playlist_tracks pointing
+    at it, so Replace used to 404 on a file that was sitting right there on disk,
+    smugly. The watched row still knows the artist, the title and where the file
+    landed, which is everything the delete actually needs. Returns None when no
+    watched track claims this job.
+    """
+    with db_conn() as conn:
+        conn.row_factory = sqlite3.Row
+        if is_admin:
+            scope_sql, scope_params = "(wp.user_id = ? OR wp.user_id IS NULL)", (user_id,)
+        else:
+            scope_sql, scope_params = "wp.user_id = ?", (user_id,)
+        row = conn.execute(
+            f"""SELECT wpt.artist, wpt.title, wpt.resolved_path
+                FROM watched_playlist_tracks wpt
+                JOIN watched_playlists wp ON wp.id = wpt.playlist_id
+                WHERE wpt.job_id = ? AND {scope_sql}
+                LIMIT 1""",
+            (job_id, *scope_params),
+        ).fetchone()
+
+    if not row:
+        return None
+    return {
+        "status": "completed",
+        "artist": row["artist"],
+        "title": row["title"],
+        "final_path": row["resolved_path"],
+    }
+
+
 @app.delete("/api/jobs/{job_id}/file")
 def delete_job_file(job_id: str, http_request: Request):
     """Delete the downloaded audio file (and lyrics) for a completed job."""
@@ -3397,12 +3450,15 @@ def delete_job_file(job_id: str, http_request: Request):
         )
         row = cursor.fetchone()
 
-    if not row:
-        raise HTTPException(status_code=404, detail="Job not found")
-
-    job = dict(row)
-    if job["status"] not in ("completed", "completed_with_errors"):
-        raise HTTPException(status_code=400, detail="Only completed jobs have files to delete")
+    if row:
+        job = dict(row)
+        if job["status"] not in ("completed", "completed_with_errors"):
+            raise HTTPException(status_code=400, detail="Only completed jobs have files to delete")
+    else:
+        # No job row, but a watched playlist may still remember this download.
+        job = _watched_track_as_job(job_id, user_id, is_admin)
+        if job is None:
+            raise HTTPException(status_code=404, detail="Job not found")
 
     artist = job.get("artist")
     title = job.get("title")
@@ -3466,6 +3522,17 @@ def delete_job_file(job_id: str, http_request: Request):
                LIMIT 1""",
             (job_id,)
         ).fetchone()
+
+        if not playlist_row:
+            # The bulk import trail can go cold; the watched track itself never does.
+            playlist_row = conn.execute(
+                """SELECT wp.id, wp.name, wp.make_m3u, wp.use_playlists_dir, wp.sync_mode
+                   FROM watched_playlist_tracks wpt
+                   JOIN watched_playlists wp ON wp.id = wpt.playlist_id
+                   WHERE wpt.job_id = ? AND wp.make_m3u = 1
+                   LIMIT 1""",
+                (job_id,)
+            ).fetchone()
 
         conn.commit()
 

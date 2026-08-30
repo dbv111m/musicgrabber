@@ -24,7 +24,7 @@ from pathlib import Path
 from constants import AUDIO_EXTENSIONS
 from db import db_conn
 from downloads import rebuild_album_m3u
-from metadata import fetch_album_tracks
+from metadata import fetch_album_release
 from settings import get_albums_dir, get_setting_bool
 from utils import clean_title, sanitize_filename, sanitize_playlist_name, set_file_permissions
 
@@ -315,7 +315,9 @@ def queue_album_download(
     Raises AlbumTracklistUnavailable if MusicBrainz has no tracklist for the
     release.
     """
-    tracks = fetch_album_tracks(release_mbid)
+    release = fetch_album_release(release_mbid)
+    tracks = release["tracks"]
+    album_year = release["year"]
     if not tracks:
         raise AlbumTracklistUnavailable("Could not fetch tracklist from MusicBrainz")
 
@@ -331,7 +333,12 @@ def queue_album_download(
         tmp_fd, tmp_path = tempfile.mkstemp(dir=album_dir, suffix=".albuminfo.tmp")
         try:
             with os.fdopen(tmp_fd, "w", encoding="utf-8") as fh:
-                fh.write(json.dumps({"artist": artist, "album": album_title, "release_mbid": release_mbid}, indent=2))
+                fh.write(json.dumps({
+                    "artist": artist,
+                    "album": album_title,
+                    "release_mbid": release_mbid,
+                    "year": album_year,
+                }, indent=2))
             Path(tmp_path).rename(albuminfo_path)
             set_file_permissions(albuminfo_path)
         except Exception:
@@ -396,6 +403,7 @@ def queue_album_download(
             override_dir=str(album_dir),
             album_release_mbid=release_mbid,
             album_total_tracks=len(tracks),
+            album_year=album_year,
         )
     except sqlite3.IntegrityError:
         # Someone else got there between our check above and this insert. The
