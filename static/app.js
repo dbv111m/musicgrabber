@@ -441,6 +441,7 @@
         const queueTabContainer = document.getElementById('queueTabContainer');
         const queueTab = document.getElementById('queueTab');
         const queueLiveSummary = document.getElementById('queueLiveSummary');
+        const queueHistorySort = document.getElementById('queueHistorySort');
         const clearQueueBtn = document.getElementById('clearQueueBtn');
         const resetStatsBtn = document.getElementById('resetStatsBtn');
         const watchedTabContainer = document.getElementById('watchedTabContainer');
@@ -1158,6 +1159,7 @@
         const QUEUE_PAGE_SIZE = 10;
         let queuePage = 1;
         let allQueueJobs = [];
+        let queueHistorySortMode = 'recent';
         let currentBulkImportId = null;
         let bulkImportPollInterval = null;
         let longformSplitPollInterval = null;
@@ -3267,9 +3269,10 @@
         }
 
         function renderQueuePage() {
-            const totalPages = Math.max(1, Math.ceil(allQueueJobs.length / QUEUE_PAGE_SIZE));
+            const displayJobs = getSortedQueueJobs();
+            const totalPages = Math.max(1, Math.ceil(displayJobs.length / QUEUE_PAGE_SIZE));
             const start = (queuePage - 1) * QUEUE_PAGE_SIZE;
-            const pageJobs = allQueueJobs.slice(start, start + QUEUE_PAGE_SIZE);
+            const pageJobs = displayJobs.slice(start, start + QUEUE_PAGE_SIZE);
             renderJobs(pageJobs);
 
             const pagerEl = document.getElementById('queuePager');
@@ -3286,6 +3289,28 @@
             }
         }
 
+        function getSortedQueueJobs() {
+            const isLive = job => ['queued', 'downloading'].includes(job.status);
+            const newestFirst = (left, right) => String(right.created_at || '').localeCompare(String(left.created_at || ''));
+            const liveJobs = allQueueJobs
+                .filter(isLive)
+                .sort((left, right) => {
+                    const statusOrder = (left.status === 'downloading' ? 0 : 1) - (right.status === 'downloading' ? 0 : 1);
+                    return statusOrder || newestFirst(left, right);
+                });
+            const historyJobs = allQueueJobs.filter(job => !isLive(job));
+
+            if (queueHistorySortMode === 'recent') {
+                return [...liveJobs, ...historyJobs];
+            }
+
+            return [
+                ...liveJobs,
+                ...historyJobs.filter(job => job.status === queueHistorySortMode),
+                ...historyJobs.filter(job => job.status !== queueHistorySortMode),
+            ];
+        }
+
         function qualityDetailRows(quality) {
             if (!quality) return '';
             const match = String(quality).match(/^(.*?)\s+\(from\s+(.+)\)$/i);
@@ -3299,7 +3324,7 @@
         }
 
         function changeQueuePage(delta) {
-            const totalPages = Math.max(1, Math.ceil(allQueueJobs.length / QUEUE_PAGE_SIZE));
+            const totalPages = Math.max(1, Math.ceil(getSortedQueueJobs().length / QUEUE_PAGE_SIZE));
             queuePage = Math.max(1, Math.min(totalPages, queuePage + delta));
             renderQueuePage();
         }
@@ -5735,6 +5760,20 @@
         clearQueueBtn.addEventListener('click', clearQueue);
         document.getElementById('emptyTrashBtn').addEventListener('click', emptyTrash);
         resetStatsBtn.addEventListener('click', resetStats);
+
+        if (queueHistorySort) {
+            const savedQueueSort = localStorage.getItem(userStorageKey('queueHistorySort'));
+            if (savedQueueSort && Array.from(queueHistorySort.options).some(option => option.value === savedQueueSort)) {
+                queueHistorySort.value = savedQueueSort;
+                queueHistorySortMode = savedQueueSort;
+            }
+            queueHistorySort.addEventListener('change', () => {
+                queueHistorySortMode = queueHistorySort.value;
+                localStorage.setItem(userStorageKey('queueHistorySort'), queueHistorySortMode);
+                queuePage = 1;
+                renderQueuePage();
+            });
+        }
 
         // Minimum-quality filter: remembered between searches, since somebody who
         // only wants lossless generally still only wants lossless five minutes later.

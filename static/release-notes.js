@@ -11,6 +11,13 @@ const RELEASE_NOTES = {
         title: "What's New in v4.1.0",
         sections: [
             {
+                heading: "Queue history is easier to sift through",
+                items: [
+                    "The Queue now has a History picker for Failed first, Completed first, or Needs attention first.",
+                    "Anything queued or downloading stays above the history whichever view you choose, so the work still in flight cannot disappear beneath yesterday's paperwork.",
+                ]
+            },
+            {
                 heading: "Amazon Music album links work now",
                 items: [
                     "Paste an Amazon Music album link into Bulk Import's Fetch box and it downloads as a proper album, with cover art and track numbers, the same as Spotify, Apple Music, YouTube Music, Beatport and Tidal already did.",
@@ -24,6 +31,12 @@ const RELEASE_NOTES = {
                 items: [
                     "If MusicGrabber can't confidently match a YouTube Music album to MusicBrainz, it now imports it as an ordinary playlist instead of just giving up.",
                     "That is how these links always used to work anyway, before album matching existed, so an unmatched one now behaves at least as well as it did before.",
+                ]
+            },
+            {
+                heading: "Manually searched tracks link to their watched playlist right away",
+                items: [
+                    "Search for a track by hand and route it into a watched playlist, and Retry or Replace on it now work immediately, rather than only after the download finished.",
                 ]
             },
         ]

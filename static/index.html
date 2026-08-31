@@ -691,7 +691,18 @@
         <div id="queueTabContainer" class="tab-panel">
             <div class="queue-header">
                 <h2 class="queue-section-heading">Download Queue / <a href="#downloadableSection" title="Jump to Downloadable to Device">Downloadable to Device &#8595;</a></h2>
-                <button class="btn btn-danger peon-hide" id="clearQueueBtn">Clear Queue</button>
+                <div class="queue-header-actions">
+                    <label class="watched-control-label" for="queueHistorySort" title="Choose which finished status appears first. Queued and downloading work always remains at the top.">
+                        History:
+                        <select id="queueHistorySort" class="watched-select">
+                            <option value="recent">Newest first</option>
+                            <option value="failed">Failed first</option>
+                            <option value="completed">Completed first</option>
+                            <option value="completed_with_errors">Needs attention first</option>
+                        </select>
+                    </label>
+                    <button class="btn btn-danger peon-hide" id="clearQueueBtn">Clear Queue</button>
+                </div>
             </div>
             <div id="queueLiveSummary" class="queue-live-summary" style="display:none;" role="status" aria-live="polite" aria-atomic="false"></div>
             <div id="queueTab" class="results"></div>

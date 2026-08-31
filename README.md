@@ -59,7 +59,7 @@ MusicGrabber is intentionally narrow. It is **not**:
 - **Duplicate detection:** local filesystem check plus optional Navidrome Subsonic API check
 - **Trash bin:** deleted files move to `/data/.trash/` instead of being permanently removed; restore with one click to skip re-downloading. Files that fail mismatch or duration checks also land in the trash so you can listen before they vanish
 - **In-queue playback:** play button on completed queue cards and trashed files for instant preview without leaving the tab
-- **Job queue:** track progress, retry failures, re-download or delete files, see metadata provenance
+- **Job queue:** track progress, retry failures, re-download or delete files, see metadata provenance, and sort finished history by outcome while live work stays at the top
 - **Statistics dashboard:** download counts, success rate, daily chart, top artists, search analytics
 - **Release notes modal:** shows once after each update; also accessible from the Settings tab
 - **Preview:** hover a result for 2 seconds on desktop, or tap Preview on mobile

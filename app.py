@@ -2442,6 +2442,27 @@ def download(body: DownloadRequest, http_request: Request):
                     override_dir, album_release_mbid, album_name, album_track_title, album_track_number, album_track_total,
                 )
             )
+            if body.playlist_name:
+                # The manual Search route routes the file correctly via
+                # playlist_name/use_playlists_dir, but until now never linked
+                # the job to its watched_playlist_tracks row, leaving that to
+                # _mark_watched_track_downloaded's after-the-fact artist/title
+                # healing once the download finished. Link it here instead, so
+                # Retry, Replace and the M3U rebuild can all find this job by
+                # job_id from the moment it's queued rather than waiting for
+                # the download to finish and heal itself. A playlist_name with
+                # no matching watched row (a one-off manual playlist) simply
+                # matches nothing here, which is fine.
+                track_hash = hash_track(artist or "", title)
+                conn.execute(
+                    """UPDATE watched_playlist_tracks
+                       SET job_id = ?, downloaded_at = NULL
+                       WHERE track_hash = ?
+                         AND playlist_id IN (
+                             SELECT id FROM watched_playlists WHERE user_id IS ? AND name = ?
+                         )""",
+                    (job_id, track_hash, user_id, body.playlist_name),
+                )
         conn.commit()
 
     acquisition_target_id = None
