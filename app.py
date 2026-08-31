@@ -3514,7 +3514,8 @@ def delete_job_file(job_id: str, http_request: Request):
 
         # Fetch playlist info for M3U rebuild (if this job belongs to a watched playlist)
         playlist_row = conn.execute(
-            """SELECT wp.id, wp.name, wp.make_m3u, wp.use_playlists_dir, wp.sync_mode
+            """SELECT wp.id, wp.name, wp.make_m3u, wp.use_playlists_dir, wp.sync_mode,
+                      wp.custom_subdir, wp.user_id
                FROM watched_playlists wp
                JOIN bulk_imports bi ON bi.watch_playlist_id = wp.id
                JOIN bulk_import_tracks bt ON bt.import_id = bi.id AND bt.job_id = ?
@@ -3526,7 +3527,8 @@ def delete_job_file(job_id: str, http_request: Request):
         if not playlist_row:
             # The bulk import trail can go cold; the watched track itself never does.
             playlist_row = conn.execute(
-                """SELECT wp.id, wp.name, wp.make_m3u, wp.use_playlists_dir, wp.sync_mode
+                """SELECT wp.id, wp.name, wp.make_m3u, wp.use_playlists_dir, wp.sync_mode,
+                          wp.custom_subdir, wp.user_id
                    FROM watched_playlist_tracks wpt
                    JOIN watched_playlists wp ON wp.id = wpt.playlist_id
                    WHERE wpt.job_id = ? AND wp.make_m3u = 1
@@ -3538,10 +3540,15 @@ def delete_job_file(job_id: str, http_request: Request):
 
     # Rebuild M3U to remove this track from the playlist file
     if playlist_row:
+        # custom_subdir and user_id matter: without them a playlist routed to its
+        # own folder gets rebuilt against the default Playlists dir instead, which
+        # writes the M3U somewhere nobody is looking. Every other caller passes both.
         rebuild_watched_playlist_m3u(
             playlist_row["id"], playlist_row["name"],
             use_playlists_dir=bool(playlist_row["use_playlists_dir"]),
             sync_mode=playlist_row["sync_mode"] or "append",
+            user_id=playlist_row["user_id"],
+            custom_subdir=playlist_row["custom_subdir"] or None,
         )
 
     return {"deleted": trashed_files, "job_id": job_id, "trashed": bool(trashed_files)}

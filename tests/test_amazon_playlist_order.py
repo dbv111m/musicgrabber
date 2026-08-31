@@ -78,3 +78,30 @@ def test_payload_extractor_keeps_discovery_order():
         out,
     )
     assert list(out) == ["Zed - Zebra", "Ann - Apple"]
+
+
+# ---------------------------------------------------------------------------
+# Featured-artist chips (backlog note from issue #81, fixed in v4.1.0)
+# ---------------------------------------------------------------------------
+
+def test_featured_artist_suffix_is_dropped_when_the_credit_repeats_it():
+    """Amazon's own title for a collaboration carries the guest's name."""
+    assert amazonpl._strip_featured_suffix(
+        "Stateside + Zara Larsson", "PinkPantheress feat. Zara Larsson"
+    ) == "Stateside"
+
+
+def test_featured_artist_suffix_survives_when_it_is_part_of_the_song_name():
+    """The whole reason this is not a bare regex."""
+    assert amazonpl._strip_featured_suffix("Peaches + Cream", "112") == "Peaches + Cream"
+    assert amazonpl._strip_featured_suffix("Ghosts + Guilt", "Nine Inch Nails") == "Ghosts + Guilt"
+
+
+def test_featured_artist_suffix_leaves_ordinary_titles_alone():
+    assert amazonpl._strip_featured_suffix("Boston", "STELLA LEFTY") == "Boston"
+    assert amazonpl._strip_featured_suffix("Dai Dai", "Shakira & Burna Boy") == "Dai Dai"
+
+
+def test_featured_artist_suffix_ignores_a_dangling_plus():
+    assert amazonpl._strip_featured_suffix("Something + ", "Someone") == "Something + "
+    assert amazonpl._strip_featured_suffix(" + Someone", "Someone") == " + Someone"

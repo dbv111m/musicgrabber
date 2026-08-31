@@ -9,7 +9,24 @@
 const RELEASE_NOTES = {
     "4.1.0": {
         title: "What's New in v4.1.0",
-        sections: []
+        sections: [
+            {
+                heading: "Amazon Music album links work now",
+                items: [
+                    "Paste an Amazon Music album link into Bulk Import's Fetch box and it downloads as a proper album, with cover art and track numbers, the same as Spotify, Apple Music, YouTube Music, Beatport and Tidal already did.",
+                    "Amazon was the one service left out when album links arrived in v4.0.3. Its album pages hand a browser a shell that never fills in, so there was no tracklist to read.",
+                    "There did not need to be. MusicGrabber only needs the artist and album name; MusicBrainz supplies the tracklist once the record is matched, and the page title turns out to carry exactly that.",
+                    "An album Amazon will not serve, whether delisted, region-locked or just a wrong link, now fails honestly instead of guessing at the wrong record.",
+                ]
+            },
+            {
+                heading: "YouTube Music album links that stump us now fall back to a playlist",
+                items: [
+                    "If MusicGrabber can't confidently match a YouTube Music album to MusicBrainz, it now imports it as an ordinary playlist instead of just giving up.",
+                    "That is how these links always used to work anyway, before album matching existed, so an unmatched one now behaves at least as well as it did before.",
+                ]
+            },
+        ]
     },
     "4.0.4": {
         title: "What's New in v4.0.4",

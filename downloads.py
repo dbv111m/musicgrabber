@@ -272,6 +272,26 @@ def _get_job_album_context(job_id: str) -> dict:
         except Exception:
             return None, None
 
+    def _year_from_albuminfo(override_dir: str | None) -> str | None:
+        """Read the album year out of the folder's .albuminfo sidecar.
+
+        "Add to album..." singles set the jobs.album_* columns rather than
+        creating a bulk_imports row, so there is no album_year to inherit and
+        the track lands with an empty DATE tag while its neighbours all carry
+        one. The sidecar written when the album was first downloaded knows the
+        answer and is sitting in the very folder the file is about to land in.
+        """
+        if not override_dir:
+            return None
+        try:
+            sidecar = Path(override_dir) / ".albuminfo"
+            if not sidecar.exists():
+                return None
+            data = json.loads(sidecar.read_text())
+            return (str(data.get("year") or "").strip()) or None
+        except Exception:
+            return None
+
     try:
         with db_conn() as conn:
             conn.row_factory = sqlite3.Row
@@ -370,6 +390,7 @@ def _get_job_album_context(job_id: str) -> dict:
             "track_title": track_title,
             "track_number": track_number,
             "track_total": track_total,
+            "year": _year_from_albuminfo(override_dir),
         }
     except Exception:
         return {}

@@ -9,6 +9,7 @@ Receives URL via environment and prints JSON to stdout:
 import json
 import os
 import re
+import sys
 import time
 from typing import Any
 
@@ -16,6 +17,40 @@ try:
     from playwright.sync_api import sync_playwright
 except ModuleNotFoundError:
     sync_playwright = None
+
+
+# How long to wait for Amazon to render its first row before concluding the
+# page is a dud and worth one reload.
+ROW_RENDER_WAIT = 20
+
+
+def _wait_for_rows(page, timeout: float = ROW_RENDER_WAIT) -> int:
+    """Poll until at least one row has actually rendered text.
+
+    Returns how many populated rows were seen, 0 if the page never got going.
+    A skeleton row exists in the DOM long before it has any content in it, so
+    counting <music-image-row> elements proves nothing; only text does.
+    """
+    deadline = time.time() + timeout
+    count_js = """
+() => {
+  let n = 0;
+  for (const row of document.querySelectorAll('music-image-row')) {
+    const c = row.querySelector('.col1');
+    if (c && (c.innerText || '').trim()) n++;
+  }
+  return n;
+}
+"""
+    while time.time() < deadline:
+        try:
+            filled = page.evaluate(count_js)
+        except Exception:
+            filled = 0
+        if filled:
+            return filled
+        time.sleep(1)
+    return 0
 
 
 def _normalise_track(artist: str, title: str) -> str:
@@ -33,6 +68,30 @@ def _strip_explicit_badge(text: str) -> str:
     badge goes; a song genuinely called "Vitamin E" keeps its vitamins.
     """
     return re.sub(r"\n\s*(?:E|EXPLICIT)\s*$", "", text, flags=re.IGNORECASE)
+
+
+def _strip_featured_suffix(title: str, artist: str) -> str:
+    r"""Drop Amazon's "+ Featured Artist" tail when the credit already says so.
+
+    Amazon names a collaboration "Stateside + Zara Larsson" while crediting
+    "PinkPantheress feat. Zara Larsson" in the very next column, so the search
+    query carries her twice and matches a song of that name nowhere on earth.
+    This is Amazon's own title string, not a stray DOM node, so no amount of
+    reading the right element gets rid of it.
+
+    Only strip when the trailing name genuinely appears in the artist credit.
+    A track actually called "Peaches + Cream" by somebody unrelated keeps its
+    cream, which is the whole reason this is not a bare regex.
+    """
+    if " + " not in title:
+        return title
+    head, tail = title.rsplit(" + ", 1)
+    head, tail = head.strip(), tail.strip()
+    if not head or not tail:
+        return title
+    if tail.lower() in (artist or "").lower():
+        return head
+    return title
 
 
 def _looks_like_duration(text: str) -> bool:
@@ -95,9 +154,20 @@ def _collect_visible_tracks(page) -> list[tuple[float, str]]:
     const col1 = row.querySelector('.col1');
     const col2 = row.querySelector('.col2');
     if (!col1 || !col2) continue;
-    // Use the column's full text so compound artists aren't truncated
-    // (e.g. "Kay Kyser & His Orchestra" might be split across child links)
-    const title = (col1.innerText || col1.textContent || '').trim();
+    // The title cell is the anchor; everything else in there is a badge.
+    // Amazon hangs an explicit "E" and featured-artist chips off a sibling
+    // <div class="tags">, so the cell's full text reads "petal E" or
+    // "Stateside + Zara Larsson" and we go looking for songs of that name.
+    // The anchor carries the title and nothing else, which fixes both at once
+    // and lets a song genuinely called "E85" keep its name without a regex
+    // having to be clever about it. Fall back to the cell text for any row
+    // that renders without a link (unavailable tracks, layout changes).
+    const titleLink = col1.querySelector('music-link a') || col1.querySelector('a');
+    const title = titleLink
+      ? (titleLink.innerText || titleLink.textContent || '').trim()
+      : (col1.innerText || col1.textContent || '').trim();
+    // Artists keep the column's full text so compound credits aren't truncated
+    // (e.g. "Kay Kyser & His Orchestra" split across child links).
     const artist = (col2.innerText || col2.textContent || '').trim();
     if (!title || !artist) continue;
     const rect = row.getBoundingClientRect();
@@ -114,8 +184,9 @@ def _collect_visible_tracks(page) -> list[tuple[float, str]]:
 """
     tracks: list[tuple[float, str]] = []
     for item in page.evaluate(structured_js):
-        title = _strip_explicit_badge(item["title"]).strip()
         artist = item["artist"].strip()
+        title = _strip_explicit_badge(item["title"]).strip()
+        title = _strip_featured_suffix(title, artist)
         if title and artist and title.lower() != artist.lower():
             tracks.append((item["pos"], _normalise_track(artist, title)))
 
@@ -288,6 +359,22 @@ def main() -> None:
             except Exception:
                 pass
 
+            # A cold container occasionally draws an Amazon page that never
+            # renders a single row, then behaves perfectly a minute later.
+            # Left alone, a watched playlist refreshing seconds after a restart
+            # logs a spurious empty fetch and, in mirror mode, concludes the
+            # whole playlist has been emptied upstream. One reload is far
+            # cheaper than that conversation.
+            if not _wait_for_rows(page):
+                print("No rows rendered on first load; reloading once", file=sys.stderr)
+                try:
+                    page.reload(timeout=90000, wait_until="domcontentloaded")
+                    time.sleep(3)
+                    _accept_cookie_banner(page)
+                    _wait_for_rows(page)
+                except Exception as exc:
+                    print(f"Reload failed: {exc}", file=sys.stderr)
+
             # Extract playlist title if available
             for sel in ("h1", '[data-testid*="title"]'):
                 try:
@@ -341,7 +428,20 @@ def main() -> None:
         # strings was tidy and completely wrong: a playlist is a running order,
         # and Amazon's is the one the user actually chose to follow.
         tracks = [track for track, _ in sorted(dom_tracks.items(), key=lambda item: item[1])]
-        tracks += [track for track in network_tracks if track not in dom_tracks]
+        network_only = [track for track in network_tracks if track not in dom_tracks]
+        tracks += network_only
+        # The network-JSON extractor is on probation. It contributed nothing at
+        # all on the playlists measured so far, everything having come from the
+        # DOM, but it costs nothing to run and might be the only thing that
+        # works on a shape nobody has tried yet. Log what it actually earns so
+        # the decision to keep or bin it is eventually made on evidence rather
+        # than on a hunch. If this line reads "network-only: 0" for every
+        # playlist shape you can find, delete _extract_from_payload guilt-free.
+        print(
+            f"Amazon extract: dom={len(dom_tracks)} network={len(network_tracks)} "
+            f"network-only={len(network_only)}",
+            file=sys.stderr,
+        )
         print(
             json.dumps(
                 {

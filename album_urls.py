@@ -22,14 +22,14 @@ Note that all any of these has to produce is an artist and an album title.
 The real tracklist comes from MusicBrainz once the album is matched, so a
 scraper that can name the album has done its whole job here.
 
-Amazon Music is still NOT handled. It does have a distinct album URL shape
-(music.amazon.*/albums/<ASIN>), but a plain fetch returns an 11KB SPA shell
-with no title, no og: tags and no tracklist, and pointing the existing
-Playwright scraper (amazonpl.py) at an album page returns zero tracks: it is
-built around the playlist page's <music-image-row> components, which the album
-page does not use. Naming an Amazon album therefore needs new browser scraping
-work against a DOM Amazon actively discourages reading, so it stays out until
-someone does that properly, with its own tests.
+Amazon Music album pages are the odd one out and need their own browser.
+Everything else here borrows a scraper that already worked; Amazon's album
+pages hand Playwright twenty <music-image-row> skeletons that never populate,
+fire no JSON carrying the record, and keep nothing useful in window.amznMusic.
+Under SeleniumBase's undetected mode, however, the page titles itself
+"Play <ALBUM> by <ARTIST> on Amazon Music Unlimited", which is the whole job.
+That lives in amazonalbum.py; see docs/requests and bugs.md for the list of
+approaches that did not work, so nobody re-runs them.
 """
 
 import re
@@ -69,6 +69,12 @@ _BEATPORT_RELEASE_RE = re.compile(
 # mirroring how the playlist path accepts both shapes.
 _TIDAL_ALBUM_RE = re.compile(
     r'^https?://(?:www\.)?tidal\.com/(?:browse/)?album/(\d+)(?:[/?#].*)?$',
+    re.IGNORECASE,
+)
+# Amazon Music albums are /albums/<ASIN> on any regional TLD. A playlist lives
+# at /playlists/ or /user-playlists/ and must not be caught here.
+_AMAZON_ALBUM_RE = re.compile(
+    r'^https?://music\.amazon\.[a-z.]+/albums/([A-Z0-9]{10})(?:[/?#].*)?$',
     re.IGNORECASE,
 )
 # Monochrome album shares are Tidal album ids behind Monochrome's own host,
@@ -137,6 +143,10 @@ def parse_album_url(url: str) -> dict | None:
     monochrome_match = _MONOCHROME_ALBUM_RE.match(url)
     if monochrome_match:
         return _parse_tidal_album("monochrome", monochrome_match.group(1))
+
+    amazon_match = _AMAZON_ALBUM_RE.match(url)
+    if amazon_match:
+        return _parse_amazon_album(url, amazon_match.group(1).upper())
 
     return None
 
@@ -240,6 +250,25 @@ def _parse_tidal_album(service: str, album_id: str) -> dict:
         print(f"Tidal album scrape failed for album {album_id}: {exc}")
 
     return {"service": service, "id": album_id, "artist": artist, "album": album}
+
+
+def _parse_amazon_album(url: str, asin: str) -> dict:
+    """Name an Amazon album by driving SeleniumBase at its page title.
+
+    The slowest reader here by some way, since it starts a real browser and
+    waits out a consent dialog, so it deliberately sits last in the dispatch
+    order where the cheap pattern matches have already had their go.
+    """
+    from amazon import fetch_amazon_album_info
+
+    artist, album = None, None
+    try:
+        info = fetch_amazon_album_info(url)
+        artist, album = info.get("artist"), info.get("album")
+    except Exception as exc:
+        print(f"Amazon album scrape failed for {url}: {exc}")
+
+    return {"service": "amazon", "id": asin, "artist": artist, "album": album}
 
 
 def resolve_album_url(url: str) -> dict:

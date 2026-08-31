@@ -5995,6 +5995,13 @@
                     );
                 } else if (Array.isArray(data.candidates) && data.candidates.length) {
                     renderAlbumCandidates(data.candidates, `Not confident which album that is. Pick one:`);
+                } else if (data.service === 'youtube') {
+                    // OLAK5uy_ album playlists were importable as ordinary
+                    // playlists before album support existed; an unmatched
+                    // one falls back to that rather than dead-ending, since
+                    // (unlike Spotify/Apple album urls) it's a genuine
+                    // playlist url too.
+                    await doPlaylistFetch(url, false);
                 } else {
                     spotifyError.textContent = `Couldn't confidently match that to a MusicBrainz album (scraped as "${data.artist || '?'} - ${data.album || '?'}"). Try typing the album name in this box instead.`;
                     spotifyError.style.display = 'block';

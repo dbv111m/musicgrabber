@@ -100,11 +100,6 @@ def test_apple_music_song_url_is_not_recognised_as_an_album():
 
 
 @pytest.mark.parametrize("url", [
-    # Amazon has a real album url shape but no scraper that can read one: a plain
-    # fetch is an SPA shell and amazonpl.py returns zero tracks on album pages.
-    # Deliberately still unrecognised; see the album_urls module docstring.
-    "https://music.amazon.co.uk/albums/B00136RSDG",
-    "https://music.amazon.com/albums/B0DJT8XQ5S",
     "not a url at all",
     "",
     None,
@@ -112,6 +107,88 @@ def test_apple_music_song_url_is_not_recognised_as_an_album():
 def test_out_of_scope_and_junk_urls_are_not_recognised(url):
     album_urls = _import_album_urls_or_skip()
     assert album_urls.parse_album_url(url) is None
+
+
+# ---------------------------------------------------------------------------
+# Amazon Music albums
+#
+# The scrape itself needs a real browser, so these cover the parts that do not:
+# the url shape, and the title parser that turns Amazon's page title into an
+# artist and an album. The browser call is stubbed out.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("url,asin", [
+    ("https://music.amazon.co.uk/albums/B0FBGRYDM9", "B0FBGRYDM9"),
+    ("https://music.amazon.com/albums/B0GS72231Q", "B0GS72231Q"),
+    ("https://music.amazon.de/albums/B0H1FB344C", "B0H1FB344C"),
+    # A track deep-link still names the whole album, so it stays recognised.
+    ("https://music.amazon.co.uk/albums/B0GFQ5FZFY?trackAsin=B0GFQ3Y24D", "B0GFQ5FZFY"),
+])
+def test_amazon_album_urls_are_recognised(url, asin, monkeypatch):
+    album_urls = _import_album_urls_or_skip()
+    import amazon
+    monkeypatch.setattr(
+        amazon, "fetch_amazon_album_info",
+        lambda u: {"artist": "Olivia Dean", "album": "The Art of Loving"},
+    )
+    result = album_urls.parse_album_url(url)
+    assert result is not None
+    assert result["service"] == "amazon"
+    assert result["id"] == asin
+    assert result["artist"] == "Olivia Dean"
+    assert result["album"] == "The Art of Loving"
+
+
+@pytest.mark.parametrize("url", [
+    "https://music.amazon.co.uk/playlists/B09ZHBTLFF",
+    "https://music.amazon.co.uk/user-playlists/abc123def456",
+    "https://music.amazon.co.uk/artists/B0ABCDEFGH",
+])
+def test_amazon_non_album_urls_are_not_recognised(url):
+    album_urls = _import_album_urls_or_skip()
+    assert album_urls.parse_album_url(url) is None
+
+
+def test_amazon_album_survives_a_failed_scrape(monkeypatch):
+    """A dead ASIN is still a recognised album url, just an unnamed one.
+
+    Same contract as every other service here: recognition is a pattern match
+    and must not depend on the network call working.
+    """
+    album_urls = _import_album_urls_or_skip()
+    import amazon
+
+    def boom(url):
+        raise RuntimeError("Amazon did not name this album")
+
+    monkeypatch.setattr(amazon, "fetch_amazon_album_info", boom)
+    result = album_urls.parse_album_url("https://music.amazon.co.uk/albums/B00136RSDG")
+    assert result is not None
+    assert result["service"] == "amazon"
+    assert result["artist"] is None and result["album"] is None
+
+
+@pytest.mark.parametrize("title,expected", [
+    ("Play The Art of Loving by Olivia Dean on Amazon Music Unlimited",
+     ("Olivia Dean", "The Art of Loving")),
+    ("Play Dai Dai by Shakira & Burna Boy on Amazon Music Unlimited",
+     ("Shakira & Burna Boy", "Dai Dai")),
+    ("Play Boston by STELLA LEFTY on Amazon Music Unlimited",
+     ("STELLA LEFTY", "Boston")),
+    # Some storefronts drop "Unlimited".
+    ("Play The Romantic by Bruno Mars on Amazon Music",
+     ("Bruno Mars", "The Romantic")),
+    # An album title containing " by " must split on the LAST one, or the
+    # record loses half its name and the artist gains a preposition.
+    ("Play Poems by Heart by Olivia Dean on Amazon Music Unlimited",
+     ("Olivia Dean", "Poems by Heart")),
+    # The generic title is what a dead or region-locked ASIN leaves behind.
+    ("Amazon Music | Listen to songs, podcasts, & more", (None, None)),
+    ("", (None, None)),
+])
+def test_amazon_album_title_parsing(title, expected):
+    amazonalbum = pytest.importorskip("amazonalbum")
+    assert amazonalbum.parse_album_title(title) == expected
 
 
 # ---------------------------------------------------------------------------
