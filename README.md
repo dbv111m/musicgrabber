@@ -57,7 +57,7 @@ MusicGrabber is intentionally narrow. It is **not**:
 - **Synced lyrics:** automatic lyrics fetching from LRClib, saved as `.lrc` files
 - **Auto-organise:** `Singles/Artist/Title.flac` (or flat `Singles/Artist - Title.flac` with "Organise by Artist" off). Optional track-number filenames produce `Singles/Artist/1 - Title.flac` when metadata includes a track number. Album mode uses `Albums/Artist/Album/Track.flac`
 - **Duplicate detection:** local filesystem check plus optional Navidrome Subsonic API check
-- **Trash bin:** deleted files move to `/data/.trash/` instead of being permanently removed; restore with one click to skip re-downloading. Files that fail mismatch or duration checks also land in the trash so you can listen before they vanish
+- **Trash bin:** deleted files move to `/data/.trash/` instead of being permanently removed; restore with one click to skip re-downloading. Restoring a rejected download also marks its failed Queue row completed, because you have chosen that version after all. Files that fail mismatch or duration checks also land in the trash so you can listen before they vanish
 - **In-queue playback:** play button on completed queue cards and trashed files for instant preview without leaving the tab
 - **Job queue:** track progress, retry failures, re-download or delete files, see metadata provenance, and sort finished history by outcome while live work stays at the top
 - **Statistics dashboard:** download counts, success rate, daily chart, top artists, search analytics
@@ -761,12 +761,17 @@ another peer for the same recording before admitting defeat.
 
 Each watched playlist can also:
 - Use Append or Mirror sync for its M3U
+- Choose its own missing-file policy: inherit the global **Re-download Missing Files** setting, re-download vanished files, or leave previously downloaded tracks alone after an external organiser moves them
 - Limit allowed sources, useful when a SoundCloud set must stay on SoundCloud. The selection remains strict during automatic fallback and manual job retry; if every selected source is disabled or unavailable, the track fails instead of wandering off to another provider
 - Choose a preferred source as a same-quality tie-breaker. It never moves a lossy result ahead of an allowed, confident lossless candidate; if lossless sources are disabled or excluded, acquisition naturally starts at the best remaining lossy tier
 - Route downloads into the standard Playlists directory or a custom subfolder under your music root
 - Show missing tracks, candidate search results, and manual retry controls when the automatic match is not good enough
 
 Artist guest lists are not required to agree word-for-word across Spotify, Navidrome, Lidarr, and the file on disk. MusicGrabber tries the complete credit first, then falls back to the primary artist when a service has written `Primary Artist, Guest` or `Primary Artist feat. Guest`. If a manual Search download discovers that the primary-artist copy already exists, the watched row is reconciled too: it leaves Missing, gains the reusable path where available, and joins the next M3U rebuild. The guest artist has not been erased from history; the databases have merely stopped arguing over the seating plan.
+
+Filename matching is only the fast path. When that misses, MusicGrabber indexes the Artist and Title tags carried by audio anywhere beneath `music_dir`, excluding trash and system folders. A file renamed or rearranged by MusicBee, beets, or another organiser can therefore be found without downloading another copy. The index is cached for five minutes and refreshed immediately when a previously indexed path disappears.
+
+With missing-file re-downloads disabled, playlist and watched-artist cards show how many previously downloaded tracks are no longer findable. Append playlists include their retained historical tracks in that count, not just the tracks still present upstream; those departed tracks remain historical and are never re-queued automatically.
 
 **Configuration:**
 
@@ -875,7 +880,10 @@ Supports various dash formats: `-`, `–`, `--`
 - **Queue history is retained:** completed and failed rows remain available for
   inspection until someone deliberately uses **Clear Queue**. The browser asks
   for confirmation and the API independently requires `?confirm=true`, which
-  keeps an enthusiastic script or test run from erasing the lot by accident
+  keeps an enthusiastic script or test run from erasing the lot by accident.
+  Clearing history also removes its live links from watched-playlist tracks;
+  Replace uses the playlist track's own stable identity, so it still works after
+  the Queue row has gone
 
 ## File Structure
 
@@ -1164,6 +1172,7 @@ music.yourdomain.com {
 | `POST` | `/api/watched-playlists/{id}/refresh` | Check playlist for new tracks |
 | `GET` | `/api/watched-playlists/{id}/missing` | List tracks with no successful download |
 | `GET` | `/api/watched-playlists/{id}/tracks` | List all tracks with per-track status |
+| `DELETE` | `/api/watched-playlists/{id}/tracks/{track_hash}/file` | Move a watched track's file to trash and mark it missing, independently of disposable Queue history |
 | `GET` | `/api/watched-playlists/{id}/track-candidates` | Search top candidate matches for a missing watched-playlist track (`?artist=...&title=...&limit=4`) |
 | `POST` | `/api/watched-playlists/{id}/queue-track-candidate` | Queue a specific watched-playlist candidate (`{artist, title, video_id, source, source_url?, slskd_username?, slskd_filename?}`) |
 | `POST` | `/api/watched-playlists/{id}/retry-track` | Retry a specific missing track with the automatic watched-playlist search (`{artist, title}`) |

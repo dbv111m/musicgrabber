@@ -4567,7 +4567,7 @@ def process_slskd_download(job_id: str, username: str, filename: str, artist: st
             artist=artist, title=title,
             video_id=None, source="soulseek", user_id=user_id,
         ):
-            _update_job(job_id, status="failed", error="Rejected live version (AcoustID)", progress_stage=None, completed_at=datetime.now(timezone.utc).isoformat())
+            _update_job(job_id, status="failed", error="Rejected live version (AcoustID)", final_path=str(final_file), progress_stage=None, completed_at=datetime.now(timezone.utc).isoformat())
             return
 
         _apply_replaygain(final_file, user_id=user_id, job_id=job_id)
@@ -4594,7 +4594,7 @@ def process_slskd_download(job_id: str, username: str, filename: str, artist: st
             # Metadata came back as someone else entirely. Trash it so the user can listen
             # and decide, then fail so retry can have another go.
             move_to_trash(final_file, user_id=user_id)
-            _update_job(job_id, status="failed", progress_stage=None, completed_at=datetime.now(timezone.utc).isoformat())
+            _update_job(job_id, status="failed", final_path=str(final_file), progress_stage=None, completed_at=datetime.now(timezone.utc).isoformat())
             return
 
         print(f"slskd: Successfully downloaded {artist} - {title}")
@@ -5788,7 +5788,7 @@ def process_download(job_id: str, video_id: str, convert_audio: bool = True, sou
             artist=artist, title=title,
             video_id=video_id, source=source_label, user_id=user_id,
         ):
-            _update_job(job_id, status="failed", error="Rejected live version (AcoustID)", progress_stage=None, completed_at=datetime.now(timezone.utc).isoformat())
+            _update_job(job_id, status="failed", error="Rejected live version (AcoustID)", final_path=str(audio_file), progress_stage=None, completed_at=datetime.now(timezone.utc).isoformat())
             return
 
         _apply_replaygain(audio_file, user_id=user_id, job_id=job_id)
@@ -5826,7 +5826,7 @@ def process_download(job_id: str, video_id: str, convert_audio: bool = True, sou
             # Trash the file so the user can listen and decide; fail the job so watched
             # playlist retry can have another go.
             move_to_trash(audio_file, user_id=user_id)
-            _update_job(job_id, status="failed", progress_stage=None, completed_at=datetime.now(timezone.utc).isoformat())
+            _update_job(job_id, status="failed", final_path=str(audio_file), progress_stage=None, completed_at=datetime.now(timezone.utc).isoformat())
             return
 
         # Send notification for single track

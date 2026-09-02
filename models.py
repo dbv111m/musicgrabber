@@ -149,6 +149,7 @@ class WatchedPlaylistRequest(BaseModel):
     preferred_sources: str = "all"  # Comma-separated source IDs or "all"
     priority_source: Optional[str] = None  # Tie-breaker within the same automatic quality tier
     custom_subdir: Optional[str] = None  # Override destination folder (relative to music_dir)
+    redownload_missing_files: Optional[bool] = None  # None inherits the global setting
 
     _validate_custom_subdir = field_validator("custom_subdir")(_validate_subdir)
 
@@ -162,6 +163,7 @@ class WatchedPlaylistUpdate(BaseModel):
     preferred_sources: Optional[str] = None  # Comma-separated source IDs or "all"
     priority_source: Optional[str] = None  # Same-tier tie-breaker; empty string clears it
     custom_subdir: Optional[str] = None  # Override destination folder (relative to music_dir)
+    redownload_missing_files: Optional[bool] = None  # Explicit null restores global inheritance
 
     _validate_custom_subdir = field_validator("custom_subdir")(_validate_subdir)
 

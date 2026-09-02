@@ -106,6 +106,29 @@ def test_check_duplicate_falls_back_to_primary_credited_artist(tmp_path, monkeyp
     )
 
 
+def test_check_duplicate_finds_externally_renamed_file_by_tags(tmp_path, monkeypatch):
+    import metadata
+    import utils
+
+    music = tmp_path / "Music"
+    renamed = music / "Filed Elsewhere" / "001 completely renamed.flac"
+    renamed.parent.mkdir(parents=True)
+    renamed.write_bytes(b"tagged audio")
+
+    monkeypatch.setattr(utils, "get_setting", lambda *a, **kw: str(music))
+    monkeypatch.setattr(utils, "get_download_dir", lambda *a, **kw: music / "Singles" / "Missing")
+    monkeypatch.setattr(utils, "get_singles_dir", lambda *a, **kw: music / "Singles")
+    monkeypatch.setattr(utils, "get_albums_dir", lambda *a, **kw: music / "Albums")
+    monkeypatch.setattr(utils, "get_playlists_dir", lambda *a, **kw: music / "Playlists")
+    monkeypatch.setattr(
+        metadata, "read_artist_title",
+        lambda path: ("Blur", "Song 2") if path == renamed else (None, None),
+    )
+    utils._tag_index_cache.clear()
+
+    assert utils.check_duplicate("Blur", "Song 2", user_id="alice") == renamed
+
+
 # ---------------------------------------------------------------------------
 # Library scans must stay inside the library.
 #

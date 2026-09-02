@@ -323,6 +323,36 @@ def _reconcile_append_history(
     return healed
 
 
+def _count_unresolved_downloaded_history(
+    conn: sqlite3.Connection,
+    playlist: dict,
+    tracked: dict,
+    current_hashes: set[str],
+    lidarr_cache: dict | None = None,
+) -> int:
+    """Count retained append-history downloads whose files have wandered off.
+
+    These tracks are no longer upstream, so they must never be queued again.
+    When the missing-file policy says to leave downloads alone, they still belong
+    in the card's unresolved count because append mode deliberately retains them.
+    """
+    unresolved = 0
+    for track_hash, row in tracked.items():
+        if track_hash in current_hashes or not row["downloaded_at"]:
+            continue
+        found, local_file, artist, title = _resolve_unresolved_watched_track(
+            playlist, row, lidarr_cache=lidarr_cache
+        )
+        if not found:
+            unresolved += 1
+            continue
+        if local_file and str(local_file) != (row["resolved_path"] or ""):
+            _persist_healed_watched_track(
+                conn, playlist, track_hash, artist, title, local_file
+            )
+    return unresolved
+
+
 def _playlist_track_dir(playlist: dict) -> pathlib.Path | None:
     """The on-disk folder a watched playlist's tracks land in, or None if it hasn't one."""
     custom = (playlist.get("custom_subdir") or "").strip()
@@ -1396,7 +1426,13 @@ def refresh_watched_playlist(playlist_id: str) -> dict:
             # When this is off, a track downloaded once stays downloaded even if
             # we can no longer find the file. Stops the merry-go-round where an
             # external organiser moves files and we re-download them forever.
-            redownload_missing = get_setting_bool("redownload_missing_files", True)
+            global_redownload_missing = get_setting_bool("redownload_missing_files", True)
+            playlist_redownload_missing = playlist.get("redownload_missing_files")
+            redownload_missing = (
+                global_redownload_missing
+                if playlist_redownload_missing is None
+                else bool(playlist_redownload_missing)
+            )
 
             for position, (artist, title) in enumerate(tracks):
                 track_hash = hash_track(artist, title)
@@ -1493,6 +1529,11 @@ def refresh_watched_playlist(playlist_id: str) -> dict:
                     print(
                         f"Watched playlist '{playlist['name']}': "
                         f"healed {healed_history_count} historical track(s) from the local library"
+                    )
+                if not redownload_missing:
+                    unresolved_count += _count_unresolved_downloaded_history(
+                        conn, playlist, tracked, current_hashes,
+                        lidarr_cache=lidarr_refresh_cache,
                     )
 
             # Mark any tracked tracks that are no longer in the upstream playlist.

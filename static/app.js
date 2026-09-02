@@ -5646,7 +5646,7 @@
                     btn.dataset.playlistName || '',
                     btn.dataset.artist || '',
                     btn.dataset.title || '',
-                    btn.dataset.jobId || '',
+                    btn.dataset.trackHash || '',
                     btn.dataset.rowId || ''
                 );
                 return;
@@ -6940,6 +6940,14 @@
                                     <option value="mirror" ${p.sync_mode === 'mirror' ? 'selected' : ''}>Mirror</option>
                                 </select>
                             </label>
+                            <label class="watched-card-toggle" title="Choose whether this playlist inherits the global missing-file policy, re-downloads vanished files, or leaves downloads alone after an external organiser moves them.">
+                                Missing files
+                                <select onchange="updateWatchedPlaylistRedownloadMissing('${p.id}', this.value)" class="watched-card-select">
+                                    <option value="inherit" ${p.redownload_missing_files == null ? 'selected' : ''}>Global setting</option>
+                                    <option value="true" ${p.redownload_missing_files === 1 || p.redownload_missing_files === true ? 'selected' : ''}>Re-download</option>
+                                    <option value="false" ${p.redownload_missing_files === 0 || p.redownload_missing_files === false ? 'selected' : ''}>Leave alone</option>
+                                </select>
+                            </label>
                             <label class="watched-card-toggle" title="Which search sources to use when downloading new tracks for this playlist. Deselect all to search everything.">
                                 Sources
                                 <div class="watched-sources-chips" data-playlist-id="${p.id}" data-preferred="${escapeAttr(p.preferred_sources || 'all')}">
@@ -6956,7 +6964,7 @@
                         ${p.unresolved_tracks > 0 ? `
                         <div class="watched-card-stale-warning">
                             <i class="fa-solid fa-circle-info"></i>
-                            <span><strong>${p.unresolved_tracks} downloaded track${p.unresolved_tracks === 1 ? '' : 's'}</strong> can no longer be found on disk. Because <strong>Re-download Missing Files</strong> is off, they are being left alone rather than fetched again, so they will not appear in the M3U. This is what you want if another tool has moved or renamed them; if you deleted them on purpose, use the Missing panel's Retry to fetch one back.</span>
+                            <span><strong>${p.unresolved_tracks} downloaded track${p.unresolved_tracks === 1 ? '' : 's'}</strong> can no longer be found on disk. This playlist's missing-file policy is leaving them alone rather than fetching duplicates, so they will not appear in the M3U. This is what you want if another tool has moved or renamed them; if you deleted them on purpose, use the Missing panel's Retry to fetch one back.</span>
                         </div>` : ''}
                         ${p.stale_navidrome_paths > 0 ? `
                         <div class="watched-card-stale-warning">
@@ -7409,6 +7417,25 @@
             }
         }
 
+        async function updateWatchedPlaylistRedownloadMissing(playlistId, value) {
+            const setting = value === 'inherit' ? null : value === 'true';
+            try {
+                const response = await apiFetch(`/api/watched-playlists/${playlistId}`, {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ redownload_missing_files: setting })
+                });
+                if (!response.ok) throw new Error('Update failed');
+                showToast(value === 'inherit'
+                    ? 'Missing files now follow the global setting'
+                    : setting ? 'Missing files will be re-downloaded' : 'Missing files will be left alone');
+                loadWatchedPlaylists(false);
+            } catch (error) {
+                showToast('Failed to update missing-file setting', true);
+                loadWatchedPlaylists();
+            }
+        }
+
         async function toggleMissingTracks(playlistId) {
             const panel = document.getElementById(`missing-${playlistId}`);
             if (!panel) return;
@@ -7580,7 +7607,7 @@
                              data-playlist-name="${escapeAttr(data.playlist_name)}"
                              data-artist="${escapeAttr(t.artist)}"
                              data-title="${escapeAttr(t.title)}"
-                             data-job-id="${escapeAttr(t.job_id || '')}"
+                             data-track-hash="${escapeAttr(t.track_hash)}"
                              data-row-id="${escapeAttr(rowId)}"
                              class="track-replace-btn" title="Delete this file and search for the correct version">Replace</button>`
                     )).join('');
@@ -7639,14 +7666,17 @@
             }
         }
 
-        async function replaceTrack(playlistId, playlistName, artist, title, jobId, rowId) {
+        async function replaceTrack(playlistId, playlistName, artist, title, trackHash, rowId) {
             const row = document.getElementById(rowId);
             const btn = row?.querySelector('.track-replace-btn');
             if (btn) { btn.disabled = true; btn.textContent = 'Trashing...'; }
 
             try {
                 // Trash (or unlink from playlist) the bad file and clear downloaded_at
-                const resp = await apiFetch(`/api/jobs/${jobId}/file`, { method: 'DELETE' });
+                const resp = await apiFetch(
+                    `/api/watched-playlists/${encodeURIComponent(playlistId)}/tracks/${encodeURIComponent(trackHash)}/file`,
+                    { method: 'DELETE' }
+                );
                 if (!resp.ok) {
                     // A generic "Failed to trash file" told nobody anything. Pass on
                     // whatever the backend actually said instead.
@@ -9249,6 +9279,11 @@
                             : 'Albums only &middot; '}${intervalLabel} &middot; ${lastChecked}
                     </div>
                     ${isError ? `<div class="watched-card-refresh-error"><i class="fa-solid fa-circle-exclamation"></i><span>${escapeHtml(artist.refresh_error || 'Refresh failed')}</span></div>` : ''}
+                    ${artist.unresolved_tracks > 0 ? `
+                    <div class="watched-card-stale-warning">
+                        <i class="fa-solid fa-circle-info"></i>
+                        <span><strong>${artist.unresolved_tracks} downloaded single${artist.unresolved_tracks === 1 ? '' : 's'}</strong> can no longer be found on disk. Re-download Missing Files is off, so ${artist.unresolved_tracks === 1 ? 'it is' : 'they are'} being left alone instead of fetched again.</span>
+                    </div>` : ''}
                     <div class="watched-card-settings">
                         <label class="watched-card-toggle" title="Follow this artist's new singles. Switch off to keep them as an albums-only follow.">
                             Singles

@@ -15,7 +15,7 @@ from db import db_conn
 from bulk_import import start_bulk_import_for_tracks
 from metadata import fetch_artist_singles, fetch_artist_albums, MusicBrainzUnavailable
 from settings import get_setting_bool
-from utils import hash_track, spawn_daemon_thread, check_duplicate
+from utils import authoritative_audio_file, hash_track, spawn_daemon_thread, check_duplicate
 
 
 _scheduler_running = False
@@ -319,6 +319,7 @@ def refresh_watched_artist(artist_id: str) -> dict:
             from_date = artist.get("from_date") or ""
             tracks_to_import: list[tuple[str, str]] = []
             new_count = 0
+            unresolved_count = 0
             # Same bargain as watched playlists: off means a track we downloaded
             # once is never chased again, however far its file has wandered.
             redownload_missing = get_setting_bool("redownload_missing_files", True)
@@ -376,21 +377,32 @@ def refresh_watched_artist(artist_id: str) -> dict:
 
                 # Already tracked  -  check if file went missing
                 if existing.get("downloaded_at"):
-                    if not redownload_missing:
-                        continue  # Downloaded once is downloaded for good
-                    if not check_duplicate(
+                    existing_file = authoritative_audio_file(
+                        existing.get("resolved_path"), user_id=user_id
+                    ) or check_duplicate(
                         existing.get("artist") or track_artist,
                         existing.get("title") or track_title,
                         user_id=user_id,
-                    ):
-                        # File has vanished  -  clear downloaded_at so it re-queues
-                        pending_writes.append((
-                            """UPDATE watched_artist_tracks
-                               SET downloaded_at = NULL, resolved_path = NULL
-                               WHERE artist_id = ? AND track_hash = ?""",
-                            (artist_id, track_hash)
-                        ))
-                        tracks_to_import.append((track_artist, track_title))
+                    )
+                    if existing_file:
+                        if str(existing_file) != (existing.get("resolved_path") or ""):
+                            pending_writes.append((
+                                """UPDATE watched_artist_tracks SET resolved_path = ?
+                                   WHERE artist_id = ? AND track_hash = ?""",
+                                (str(existing_file), artist_id, track_hash),
+                            ))
+                        continue
+                    if not redownload_missing:
+                        unresolved_count += 1
+                        continue  # Downloaded once is downloaded for good
+                    # File has vanished  -  clear downloaded_at so it re-queues
+                    pending_writes.append((
+                        """UPDATE watched_artist_tracks
+                           SET downloaded_at = NULL, resolved_path = NULL
+                           WHERE artist_id = ? AND track_hash = ?""",
+                        (artist_id, track_hash)
+                    ))
+                    tracks_to_import.append((track_artist, track_title))
                     continue
 
                 # Not downloaded  -  check disk in case the file arrived via another route
@@ -458,9 +470,10 @@ def refresh_watched_artist(artist_id: str) -> dict:
             conn.execute(
                 """UPDATE watched_artists
                    SET last_checked = datetime('now'),
-                       last_track_count = ?
+                       last_track_count = ?,
+                       unresolved_tracks = ?
                    WHERE id = ?""",
-                (total_tracked, artist_id)
+                (total_tracked, unresolved_count, artist_id)
             )
             conn.commit()
 
@@ -473,6 +486,7 @@ def refresh_watched_artist(artist_id: str) -> dict:
                 "new_tracks": new_count,
                 "queued": len(tracks_to_import),
                 "total_tracked": total_tracked,
+                "unresolved_tracks": unresolved_count,
                 "import_id": import_id,
                 "new_albums": album_result["new_albums"],
                 "albums_queued": album_result["queued"],

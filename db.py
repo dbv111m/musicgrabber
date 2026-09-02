@@ -478,6 +478,7 @@ def init_db():
             sync_mode TEXT DEFAULT 'append',
             stale_navidrome_paths INTEGER DEFAULT 0,
             unresolved_tracks INTEGER DEFAULT 0,
+            redownload_missing_files INTEGER DEFAULT NULL,
             preferred_sources TEXT DEFAULT 'all',
             priority_source TEXT,
             lb_username TEXT,
@@ -513,6 +514,15 @@ def init_db():
     """)
 
         conn.execute("CREATE INDEX IF NOT EXISTS idx_watched_tracks_playlist ON watched_playlist_tracks(playlist_id)")
+        conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS clear_watched_playlist_track_job_after_delete
+        AFTER DELETE ON jobs
+        BEGIN
+            UPDATE watched_playlist_tracks
+            SET job_id = NULL
+            WHERE job_id = OLD.id;
+        END
+        """)
         try:
             conn.execute("ALTER TABLE watched_playlist_tracks ADD COLUMN original_youtube_video_id TEXT")
         except sqlite3.OperationalError:
@@ -833,6 +843,7 @@ def init_db():
             refresh_error TEXT,
             refresh_import_id TEXT,
             auto_add_albums INTEGER DEFAULT 0,
+            unresolved_tracks INTEGER DEFAULT 0,
             -- Singles and albums are independent switches. Defaults to 1 because
             -- watching an artist has always meant singles; an albums-only follow
             -- turns this off so the refresh doesn't go hunting singles nobody asked for.
@@ -1604,6 +1615,49 @@ def init_db():
                 "INSERT OR REPLACE INTO settings (key, value) VALUES ('db_version', '15')"
             )
             print("DB migrated to version 15: watched playlists can now count tracks they have stopped chasing")
+
+        # v16: a playlist can override the global missing-file policy, while
+        # watched artists expose the same unresolved count playlists already had.
+        if db_version < 16:
+            try:
+                conn.execute("ALTER TABLE watched_playlists ADD COLUMN redownload_missing_files INTEGER DEFAULT NULL")
+            except sqlite3.OperationalError:
+                pass
+            try:
+                conn.execute("ALTER TABLE watched_artists ADD COLUMN unresolved_tracks INTEGER DEFAULT 0")
+            except sqlite3.OperationalError:
+                pass
+            conn.execute(
+                "INSERT OR REPLACE INTO settings (key, value) VALUES ('db_version', '16')"
+            )
+            print("DB migrated to version 16: playlists gain missing-file overrides and artists gain unresolved counts")
+
+        # v17: job_id is a live relationship, not permanent track identity. The
+        # playlist track has its own stable (playlist_id, track_hash) key, so clear
+        # links whenever Queue history is deleted and tidy links left by older
+        # releases. The trigger covers every deletion path, including future ones.
+        if db_version < 17:
+            conn.execute(
+                """UPDATE watched_playlist_tracks
+                   SET job_id = NULL
+                   WHERE job_id IS NOT NULL
+                     AND NOT EXISTS (
+                         SELECT 1 FROM jobs WHERE jobs.id = watched_playlist_tracks.job_id
+                     )"""
+            )
+            conn.execute(
+                """CREATE TRIGGER IF NOT EXISTS clear_watched_playlist_track_job_after_delete
+                   AFTER DELETE ON jobs
+                   BEGIN
+                       UPDATE watched_playlist_tracks
+                       SET job_id = NULL
+                       WHERE job_id = OLD.id;
+                   END"""
+            )
+            conn.execute(
+                "INSERT OR REPLACE INTO settings (key, value) VALUES ('db_version', '17')"
+            )
+            print("DB migrated to version 17: cleared stale watched-playlist job links")
 
         # Defensive backstop: early dev builds of v1 silently dropped custom_subdir
         # when recreating watched_playlists. Re-add it for any DB that already

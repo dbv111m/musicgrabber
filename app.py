@@ -3423,40 +3423,6 @@ def force_accept_job(job_id: str, http_request: Request):
     return retry_job(job_id, http_request)
 
 
-def _watched_track_as_job(job_id: str, user_id: str | None, is_admin: bool) -> dict | None:
-    """Rebuild the bare bones of a vanished job from its watched playlist track.
-
-    "Clear completed" bins the jobs row but leaves watched_playlist_tracks pointing
-    at it, so Replace used to 404 on a file that was sitting right there on disk,
-    smugly. The watched row still knows the artist, the title and where the file
-    landed, which is everything the delete actually needs. Returns None when no
-    watched track claims this job.
-    """
-    with db_conn() as conn:
-        conn.row_factory = sqlite3.Row
-        if is_admin:
-            scope_sql, scope_params = "(wp.user_id = ? OR wp.user_id IS NULL)", (user_id,)
-        else:
-            scope_sql, scope_params = "wp.user_id = ?", (user_id,)
-        row = conn.execute(
-            f"""SELECT wpt.artist, wpt.title, wpt.resolved_path
-                FROM watched_playlist_tracks wpt
-                JOIN watched_playlists wp ON wp.id = wpt.playlist_id
-                WHERE wpt.job_id = ? AND {scope_sql}
-                LIMIT 1""",
-            (job_id, *scope_params),
-        ).fetchone()
-
-    if not row:
-        return None
-    return {
-        "status": "completed",
-        "artist": row["artist"],
-        "title": row["title"],
-        "final_path": row["resolved_path"],
-    }
-
-
 @app.delete("/api/jobs/{job_id}/file")
 def delete_job_file(job_id: str, http_request: Request):
     """Delete the downloaded audio file (and lyrics) for a completed job."""
@@ -3471,15 +3437,11 @@ def delete_job_file(job_id: str, http_request: Request):
         )
         row = cursor.fetchone()
 
-    if row:
-        job = dict(row)
-        if job["status"] not in ("completed", "completed_with_errors"):
-            raise HTTPException(status_code=400, detail="Only completed jobs have files to delete")
-    else:
-        # No job row, but a watched playlist may still remember this download.
-        job = _watched_track_as_job(job_id, user_id, is_admin)
-        if job is None:
-            raise HTTPException(status_code=404, detail="Job not found")
+    if not row:
+        raise HTTPException(status_code=404, detail="Job not found")
+    job = dict(row)
+    if job["status"] not in ("completed", "completed_with_errors"):
+        raise HTTPException(status_code=400, detail="Only completed jobs have files to delete")
 
     artist = job.get("artist")
     title = job.get("title")
@@ -3896,6 +3858,48 @@ def stream_trash_file(http_request: Request, path: str = ""):
     return FileResponse(path=str(trash_path), media_type=mime)
 
 
+def _complete_restored_failed_job(
+    restored: Path, user_id: str | None, is_admin: bool, artist: str, title: str
+) -> str | None:
+    """Mark the one failed Queue job represented by a restored audio file complete.
+
+    Newer rejected downloads keep their intended final path, which is an exact
+    match after Restore. Older rows did not record that path, so they get a
+    conservative artist/title fallback only when it identifies one job.
+    """
+    with db_conn() as conn:
+        conn.row_factory = sqlite3.Row
+        scope_frag, scope_params = _user_scope(user_id, is_admin)
+        rows = conn.execute(
+            f"""SELECT id FROM jobs
+                WHERE status = 'failed' AND final_path = ? AND {scope_frag}""",
+            (str(restored), *scope_params),
+        ).fetchall()
+        if not rows and artist and title:
+            rows = conn.execute(
+                f"""SELECT id FROM jobs
+                    WHERE status = 'failed'
+                      AND (final_path IS NULL OR final_path = '')
+                      AND artist = ? COLLATE NOCASE
+                      AND title = ? COLLATE NOCASE
+                      AND {scope_frag}
+                    LIMIT 2""",
+                (artist, title, *scope_params),
+            ).fetchall()
+        if len(rows) != 1:
+            return None
+        job_id = rows[0]["id"]
+        conn.execute(
+            """UPDATE jobs
+               SET status = 'completed', error = NULL, final_path = ?,
+                   file_deleted = 0, progress_stage = NULL, completed_at = datetime('now')
+               WHERE id = ?""",
+            (str(restored), job_id),
+        )
+        conn.commit()
+    return job_id
+
+
 @app.post("/api/trash/restore")
 def restore_trash_file(http_request: Request, path: str = ""):
     """Restore a specific file from the trash to its original library location."""
@@ -3921,20 +3925,38 @@ def restore_trash_file(http_request: Request, path: str = ""):
     if not restored:
         raise HTTPException(status_code=500, detail="Failed to restore file")
 
+    # A restored rejected download is a deliberate acceptance of that version.
+    # Keep the Queue and watched-track state honest instead of leaving a red failed
+    # card behind for a file the user has explicitly put back in their library.
+    restored_job_id = None
+    restored_artist = restored_title = ""
+    try:
+        from metadata import read_artist_title
+        restored_artist, restored_title = read_artist_title(restored)
+        restored_job_id = _complete_restored_failed_job(
+            restored, user_id, False, restored_artist, restored_title
+        )
+        if restored_job_id:
+            from downloads import _mark_watched_track_downloaded, _mark_watched_artist_track_downloaded
+            _mark_watched_track_downloaded(restored_job_id, resolved_path=restored, skip_mismatch=True)
+            _mark_watched_artist_track_downloaded(restored_job_id, resolved_path=restored)
+    except Exception as e:
+        # The restore itself already succeeded. A queue-reconciliation hiccup must
+        # not pretend otherwise or trap the file in the bin.
+        print(f"Restore Queue reconciliation failed for {restored}: {e}")
+
     # Re-stamp the playlist COMMENT tag: a restore just moves the file back, so a
     # track that was wrongly binned would otherwise come back untagged until the
     # next manual playlist refresh. Read the artist/title off the file and let the
     # shared helper (a no-op when the setting's off) put the playlist names back.
     try:
-        from metadata import read_artist_title
         from downloads import _tag_track_comment
-        r_artist, r_title = read_artist_title(restored)
-        if r_artist and r_title:
-            _tag_track_comment(restored, r_artist, r_title)
+        if restored_artist and restored_title:
+            _tag_track_comment(restored, restored_artist, restored_title)
     except Exception as e:
         print(f"Restore COMMENT re-tag failed for {restored}: {e}")
 
-    return {"restored": str(restored.name), "path": str(restored)}
+    return {"restored": str(restored.name), "path": str(restored), "job_id": restored_job_id}
 
 
 @app.delete("/api/trash")
@@ -4479,13 +4501,14 @@ def add_watched_playlist(body: WatchedPlaylistRequest, http_request: Request):
                     _lb_priority = None
                 conn.execute("""
                     INSERT INTO watched_playlists
-                    (id, url, name, platform, refresh_interval_hours, last_checked, convert_audio, make_m3u, use_playlists_dir, sync_mode, last_track_count, user_id, preferred_sources, priority_source, lb_username, custom_subdir)
-                    VALUES (?, ?, ?, ?, ?, datetime('now'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    (id, url, name, platform, refresh_interval_hours, last_checked, convert_audio, make_m3u, use_playlists_dir, sync_mode, last_track_count, user_id, preferred_sources, priority_source, lb_username, custom_subdir, redownload_missing_files)
+                    VALUES (?, ?, ?, ?, ?, datetime('now'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """, (playlist_id, lb["playlist_url"], lb["name"], "listenbrainz",
                       refresh_hours, int(body.convert_audio),
                       int(body.make_m3u), int(body.use_playlists_dir), sync_mode, len(lb["tracks"]), user_id,
                       body.preferred_sources or "all", _lb_priority, platform_id,
-                      (body.custom_subdir or "").strip() or None))
+                      (body.custom_subdir or "").strip() or None,
+                      None if body.redownload_missing_files is None else int(body.redownload_missing_files)))
 
                 for artist, title in lb["tracks"]:
                     track_hash = hash_track(artist, title)
@@ -4563,14 +4586,15 @@ def add_watched_playlist(body: WatchedPlaylistRequest, http_request: Request):
         )
         conn.execute("""
             INSERT INTO watched_playlists
-            (id, url, name, platform, refresh_interval_hours, last_checked, convert_audio, make_m3u, use_playlists_dir, sync_mode, last_track_count, user_id, preferred_sources, priority_source, custom_subdir)
-            VALUES (?, ?, ?, ?, ?, datetime('now'), ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            (id, url, name, platform, refresh_interval_hours, last_checked, convert_audio, make_m3u, use_playlists_dir, sync_mode, last_track_count, user_id, preferred_sources, priority_source, custom_subdir, redownload_missing_files)
+            VALUES (?, ?, ?, ?, ?, datetime('now'), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (playlist_id, body.url, playlist_name, platform,
               body.refresh_interval_hours, int(body.convert_audio),
               int(body.make_m3u), int(body.use_playlists_dir), sync_mode, len(tracks), user_id,
               _new_preferred_sources,
               _new_priority,
-              (body.custom_subdir or "").strip() or None))
+              (body.custom_subdir or "").strip() or None,
+              None if body.redownload_missing_files is None else int(body.redownload_missing_files)))
 
         # Insert all current tracks as "seen"
         for index, (artist, title) in enumerate(tracks):
@@ -4794,6 +4818,13 @@ def update_watched_playlist(playlist_id: str, request: WatchedPlaylistUpdate, ht
             updates.append("custom_subdir = ?")
             params.append((request.custom_subdir or "").strip() or None)
 
+        if "redownload_missing_files" in request.model_fields_set:
+            updates.append("redownload_missing_files = ?")
+            params.append(
+                None if request.redownload_missing_files is None
+                else int(request.redownload_missing_files)
+            )
+
         if updates:
             params.append(playlist_id)
             conn.execute(
@@ -4923,7 +4954,7 @@ def get_watched_playlist_tracks(playlist_id: str, http_request: Request):
             raise HTTPException(status_code=404, detail="Watched playlist not found")
 
         rows = conn.execute(
-            """SELECT wpt.artist, wpt.title, wpt.downloaded_at, wpt.job_id,
+            """SELECT wpt.track_hash, wpt.artist, wpt.title, wpt.downloaded_at, wpt.job_id,
                       wpt.first_seen, wpt.removed_at,
                       j.status as job_status, j.error as job_error
                FROM watched_playlist_tracks wpt
@@ -4948,6 +4979,101 @@ def get_watched_playlist_tracks(playlist_id: str, http_request: Request):
         "failed": failed,
         "pending": pending,
         "departed": len(tracks) - len(current),
+    }
+
+
+@app.delete("/api/watched-playlists/{playlist_id}/tracks/{track_hash}/file")
+def delete_watched_playlist_track_file(
+    playlist_id: str,
+    track_hash: str,
+    http_request: Request,
+):
+    """Trash a watched track by its stable playlist identity.
+
+    Queue rows are disposable history. A playlist track is not, so Replace must
+    not depend on the job which happened to download its current file.
+    """
+    user_id = http_request.state.user_id
+    is_admin = http_request.state.is_admin
+    with db_conn() as conn:
+        conn.row_factory = sqlite3.Row
+        _scope_frag, _scope_params = _user_scope(user_id, is_admin)
+        track = conn.execute(
+            f"""SELECT wpt.artist, wpt.title, wpt.resolved_path, wpt.job_id,
+                       wp.id, wp.name, wp.make_m3u, wp.use_playlists_dir,
+                       wp.sync_mode, wp.custom_subdir, wp.user_id
+                FROM watched_playlist_tracks wpt
+                JOIN watched_playlists wp ON wp.id = wpt.playlist_id
+                WHERE wpt.playlist_id = ? AND wpt.track_hash = ?
+                  AND {_scope_frag}""",
+            (playlist_id, track_hash, *_scope_params),
+        ).fetchone()
+
+    if not track:
+        raise HTTPException(status_code=404, detail="Watched playlist track not found")
+
+    artist = track["artist"] or ""
+    title = track["title"] or ""
+    if not artist or not title:
+        raise HTTPException(status_code=400, detail="Track has no artist/title metadata")
+
+    from utils import check_duplicate, move_to_trash
+
+    existing = authoritative_audio_file(track["resolved_path"], user_id)
+    if existing is None:
+        existing = check_duplicate(artist, title, user_id=user_id)
+
+    trashed_files = []
+    if existing:
+        trash_result = move_to_trash(existing, user_id=user_id)
+        if trash_result:
+            trashed_files.append(existing.name)
+            lrc_trash = trash_result.with_suffix(".lrc")
+            if lrc_trash.exists():
+                trashed_files.append(lrc_trash.name)
+        else:
+            try:
+                existing.unlink()
+                trashed_files.append(existing.name)
+                lrc_file = existing.with_suffix(".lrc")
+                if lrc_file.exists():
+                    lrc_file.unlink()
+                    trashed_files.append(lrc_file.name)
+                track_dir = existing.parent
+                if track_dir.exists() and not any(track_dir.iterdir()):
+                    track_dir.rmdir()
+            except OSError as e:
+                raise HTTPException(status_code=500, detail=f"Failed to delete: {e}")
+
+    with db_conn() as conn:
+        if track["job_id"]:
+            _scope_frag, _scope_params = _user_scope(user_id, is_admin)
+            conn.execute(
+                f"UPDATE jobs SET file_deleted = 1 WHERE id = ? AND {_scope_frag}",
+                (track["job_id"], *_scope_params),
+            )
+        conn.execute(
+            """UPDATE watched_playlist_tracks
+               SET downloaded_at = NULL, resolved_path = NULL, job_id = NULL
+               WHERE playlist_id = ? AND track_hash = ?""",
+            (playlist_id, track_hash),
+        )
+        conn.commit()
+
+    if track["make_m3u"]:
+        rebuild_watched_playlist_m3u(
+            track["id"], track["name"],
+            use_playlists_dir=bool(track["use_playlists_dir"]),
+            sync_mode=track["sync_mode"] or "append",
+            user_id=track["user_id"],
+            custom_subdir=track["custom_subdir"] or None,
+        )
+
+    return {
+        "deleted": trashed_files,
+        "playlist_id": playlist_id,
+        "track_hash": track_hash,
+        "trashed": bool(trashed_files),
     }
 
 

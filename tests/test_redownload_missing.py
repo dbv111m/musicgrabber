@@ -162,6 +162,55 @@ def test_disabling_does_not_block_genuinely_new_tracks(fresh_db, monkeypatch, re
     assert queued == [newcomer], f"expected only the new track, got {queued}"
 
 
+def test_playlist_can_override_global_redownload_policy(fresh_db, monkeypatch, redownload_setting):
+    redownload_setting(True)
+    _seed_playlist(fresh_db)
+    with fresh_db() as conn:
+        conn.execute(
+            "UPDATE watched_playlists SET redownload_missing_files = 0 WHERE id = 'pl1'"
+        )
+        conn.commit()
+
+    result, queued = _refresh_playlist(monkeypatch, found=False)
+
+    assert queued == []
+    assert result["unresolved_tracks"] == len(UPSTREAM)
+
+
+def test_playlist_can_opt_back_into_redownloads(fresh_db, monkeypatch, redownload_setting):
+    redownload_setting(False)
+    _seed_playlist(fresh_db)
+    with fresh_db() as conn:
+        conn.execute(
+            "UPDATE watched_playlists SET redownload_missing_files = 1 WHERE id = 'pl1'"
+        )
+        conn.commit()
+
+    result, queued = _refresh_playlist(monkeypatch, found=False)
+
+    assert sorted(queued) == sorted(UPSTREAM)
+    assert result["unresolved_tracks"] == 0
+
+
+def test_append_history_is_included_in_unresolved_count(fresh_db, monkeypatch, redownload_setting):
+    redownload_setting(False)
+    _seed_playlist(fresh_db)
+    import watched_playlists as wp
+    with fresh_db() as conn:
+        conn.execute(
+            """INSERT INTO watched_playlist_tracks
+               (playlist_id, track_hash, artist, title, downloaded_at, resolved_path, removed_at)
+               VALUES ('pl1', ?, 'Suede', 'Animal Nitrate', datetime('now'), ?, datetime('now'))""",
+            (wp.hash_track("Suede", "Animal Nitrate"), "/music/renamed.flac"),
+        )
+        conn.commit()
+
+    result, queued = _refresh_playlist(monkeypatch, found=False)
+
+    assert queued == []
+    assert result["unresolved_tracks"] == len(UPSTREAM) + 1
+
+
 # ------------------------------------------------------------------ artists
 
 
@@ -212,3 +261,6 @@ def test_artist_leaves_moved_files_alone_when_disabled(fresh_db, monkeypatch, re
         assert conn.execute(
             "SELECT downloaded_at FROM watched_artist_tracks WHERE artist_id = 'ar1'"
         ).fetchall()[0][0] is not None
+        assert conn.execute(
+            "SELECT unresolved_tracks FROM watched_artists WHERE id = 'ar1'"
+        ).fetchall()[0][0] == 1

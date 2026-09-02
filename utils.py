@@ -9,6 +9,7 @@ import os
 import re
 import secrets
 import threading
+import time
 from pathlib import Path
 from typing import Optional
 from urllib.parse import parse_qs, unquote, urlparse
@@ -445,6 +446,71 @@ def authoritative_audio_file(raw_path: str | None, user_id: str | None = None) -
     return candidate
 
 
+_TAG_INDEX_TTL_SECONDS = 300
+_tag_index_lock = threading.Lock()
+_tag_index_cache: dict[tuple[str, str], tuple[float, dict[tuple[str, str], Path]]] = {}
+
+
+def _tag_identity(artist: str, title: str) -> tuple[str, str]:
+    """Return a stable Artist/Title key for library metadata lookups."""
+    return (_normalise_duplicate_stem(artist), _normalise_duplicate_stem(title))
+
+
+def build_library_tag_index(user_id: str | None = None) -> dict[tuple[str, str], Path]:
+    """Index audio by the Artist and Title tags it carries through renames.
+
+    Filename checks remain the cheap first pass. This full-library fallback is
+    what lets MusicGrabber recognise a file after MusicBee, beets, or another
+    organiser has renamed and moved it somewhere unexpected inside music_dir.
+    """
+    from metadata import read_artist_title
+
+    music_root = Path(get_setting("music_dir", str(MUSIC_DIR), user_id=user_id))
+    index: dict[tuple[str, str], Path] = {}
+    for audio_file in iter_library_audio_files(music_root):
+        artist, title = read_artist_title(audio_file)
+        if not artist or not title:
+            continue
+        key = _tag_identity(artist, title)
+        if all(key):
+            # The walker is deterministic enough for this purpose, and retaining
+            # the first copy avoids an arbitrary later duplicate taking over.
+            index.setdefault(key, audio_file)
+    return index
+
+
+def _tagged_duplicate(artist: str, title: str, user_id: str | None = None) -> Optional[Path]:
+    """Find a metadata-tagged copy, refreshing the cached index when necessary."""
+    root = str(Path(get_setting("music_dir", str(MUSIC_DIR), user_id=user_id)))
+    cache_key = (user_id or "", root)
+    now = time.monotonic()
+    with _tag_index_lock:
+        cached = _tag_index_cache.get(cache_key)
+        cached_at, index = cached if cached is not None else (0.0, {})
+
+    wanted = [_tag_identity(a, title) for a in (artist_credit_lookup_variants(artist) or [artist])]
+    for key in wanted:
+        hit = index.get(key)
+        safe_hit = authoritative_audio_file(str(hit), user_id=user_id) if hit else None
+        if safe_hit:
+            return safe_hit
+
+    # A vanished cached hit proves an organiser has moved things since the last
+    # scan, so refresh immediately. Ordinary misses are bounded to one scan every
+    # five minutes, which keeps bulk imports from reading every tag per track.
+    stale_hit = any(key in index for key in wanted)
+    if cached is None or stale_hit or now - cached_at >= _TAG_INDEX_TTL_SECONDS:
+        fresh = build_library_tag_index(user_id=user_id)
+        with _tag_index_lock:
+            _tag_index_cache[cache_key] = (now, fresh)
+        for key in wanted:
+            hit = fresh.get(key)
+            safe_hit = authoritative_audio_file(str(hit), user_id=user_id) if hit else None
+            if safe_hit:
+                return safe_hit
+    return None
+
+
 def check_duplicate(artist: str, title: str, user_id: str | None = None) -> Optional[Path]:
     """Check if a track already exists anywhere in the local library.
 
@@ -521,7 +587,10 @@ def check_duplicate(artist: str, title: str, user_id: str | None = None) -> Opti
                 if match:
                     return match
 
-        return None
+        # Last resort: filenames are labels, not identity. Read the Artist and
+        # Title tags across the library so external renames do not manufacture a
+        # duplicate download loop.
+        return _tagged_duplicate(artist, title, user_id=user_id)
     except Exception:
         return None
 

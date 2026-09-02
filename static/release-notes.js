@@ -18,6 +18,20 @@ const RELEASE_NOTES = {
                 ]
             },
             {
+                heading: "Restore now tidies the Queue too",
+                items: [
+                    "If you restore a rejected download from the Trash Bin, its Queue entry now changes from failed to completed. You picked that version after all, so the Queue no longer argues with you about it.",
+                ]
+            },
+            {
+                heading: "External organisers can rename things safely",
+                items: [
+                    "MusicGrabber now finds tracks by their embedded Artist and Title tags when the filename no longer matches. MusicBee, beets and friends may rearrange the shelves without triggering another download.",
+                    "Each watched playlist can follow the global missing-file setting, re-download vanished files, or leave them alone.",
+                    "Watched Artist cards now show moved or missing singles too, and append-playlist counts include tracks retained from earlier versions of the playlist.",
+                ]
+            },
+            {
                 heading: "Amazon Music album links work now",
                 items: [
                     "Paste an Amazon Music album link into Bulk Import's Fetch box and it downloads as a proper album, with cover art and track numbers, the same as Spotify, Apple Music, YouTube Music, Beatport and Tidal already did.",
@@ -37,6 +51,14 @@ const RELEASE_NOTES = {
                 heading: "Manually searched tracks link to their watched playlist right away",
                 items: [
                     "Search for a track by hand and route it into a watched playlist, and Retry or Replace on it now work immediately, rather than only after the download finished.",
+                ]
+            },
+            {
+                heading: "Cleared Queue rows no longer leave stale playlist links",
+                items: [
+                    "Clearing Queue history now removes its job links from watched-playlist tracks too, including dangling links left by older releases.",
+                    "Replace now identifies the playlist track directly, so it still trashes the right file and rebuilds the M3U after the old Queue row has gone.",
+                    "The track stays marked downloaded when history alone is cleared. Only Replace or a real missing-file check changes that state.",
                 ]
             },
         ]
