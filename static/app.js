@@ -1906,6 +1906,13 @@
             return _randomQuip(pool, 'Still going, hang on');
         }
 
+        // One dig at MusicBrainz's expense per Albums-browser loading state. No
+        // queue-style rotation here: a single lookup has no state changes to key
+        // a swap off, so we just pick once and let it stand.
+        function _musicbrainzQuip() {
+            return _randomQuip(typeof MUSICBRAINZ_QUIPS !== 'undefined' ? MUSICBRAINZ_QUIPS : null, 'Loading');
+        }
+
         // If a source is still searching long after its mates finished, swap its
         // line for a "taking a while" quip (Soulseek's retry is the usual culprit).
         function _startRowSlowTimer(source) {
@@ -4948,7 +4955,7 @@
                 const q = els.artistInput ? els.artistInput.value.trim() : '';
                 if (!q || !els.artistResults) return;
 
-                els.artistResults.innerHTML = '<p class="bulk-intro-text">Searching…</p>';
+                els.artistResults.innerHTML = `<p class="bulk-intro-text">${escapeHtml(_musicbrainzQuip())}…</p>`;
                 els.artistResults.style.display = '';
                 if (els.listSection) els.listSection.style.display = 'none';
                 if (els.tracklistSection) els.tracklistSection.style.display = 'none';
@@ -5047,7 +5054,7 @@
                 if (els.tracklistSection) els.tracklistSection.style.display = 'none';
                 setResetVisible(false);
                 if (els.listHeading) els.listHeading.textContent = `Albums by ${a.name}`;
-                if (els.list) els.list.innerHTML = '<p class="bulk-intro-text">Loading albums…</p>';
+                if (els.list) els.list.innerHTML = `<p class="bulk-intro-text">${escapeHtml(_musicbrainzQuip())}…</p>`;
 
                 await loadAlbums(a);
             }
@@ -5311,13 +5318,13 @@
                         }
                         if (els.listSection) els.listSection.style.display = 'block';
                         if (els.listHeading) els.listHeading.textContent = `Albums by ${opts.artistName}`;
-                        if (els.list) els.list.innerHTML = '<p class="bulk-intro-text">Loading albums…</p>';
+                        if (els.list) els.list.innerHTML = `<p class="bulk-intro-text">${escapeHtml(_musicbrainzQuip())}…</p>`;
                         await loadAlbums(state.selectedArtist, opts.releaseMbid);
                     } else {
                         // Slow path: look up the artist, then fuzzy-match the album title
                         if (els.artistResults) {
                             els.artistResults.style.display = '';
-                            els.artistResults.innerHTML = '<p class="bulk-intro-text">Searching for artist…</p>';
+                            els.artistResults.innerHTML = `<p class="bulk-intro-text">${escapeHtml(_musicbrainzQuip())}…</p>`;
                         }
                         try {
                             const artistResp = await apiFetch(`/api/albums/search-artist?q=${encodeURIComponent(opts.artistName)}`);
@@ -5344,7 +5351,7 @@
                             }
                             if (els.listSection) els.listSection.style.display = 'block';
                             if (els.listHeading) els.listHeading.textContent = `Albums by ${bestArtist.name}`;
-                            if (els.list) els.list.innerHTML = '<p class="bulk-intro-text">Loading albums…</p>';
+                            if (els.list) els.list.innerHTML = `<p class="bulk-intro-text">${escapeHtml(_musicbrainzQuip())}…</p>`;
 
                             const albums = await loadAlbums(bestArtist) || [];
                             if (!albums.length) return;

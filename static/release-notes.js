@@ -16,6 +16,7 @@ const RELEASE_NOTES = {
                     "Browsing an artist's albums now shows a little cover thumbnail next to each one, not just a wall of text.",
                     "The album names still pop up straight away; the artwork fills in behind them a moment later, so you're never sat waiting on a cover before you can start reading.",
                     "A few proper rarities have no official art anywhere online, so those just keep a blank square rather than us making something up.",
+                    "The old \"Searching…\" and \"Loading albums…\" messages have also been retired in favour of a couple of dozen gentle digs at MusicBrainz for taking its time.",
                 ]
             },
             {
