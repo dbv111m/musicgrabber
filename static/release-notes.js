@@ -11,6 +11,14 @@ const RELEASE_NOTES = {
         title: "What's New in v4.1.0",
         sections: [
             {
+                heading: "The album browser finally has pictures",
+                items: [
+                    "Browsing an artist's albums now shows a little cover thumbnail next to each one, not just a wall of text.",
+                    "The album names still pop up straight away; the artwork fills in behind them a moment later, so you're never sat waiting on a cover before you can start reading.",
+                    "A few proper rarities have no official art anywhere online, so those just keep a blank square rather than us making something up.",
+                ]
+            },
+            {
                 heading: "Queue history is easier to sift through",
                 items: [
                     "The Queue now has a History picker for Failed first, Completed first, or Needs attention first.",

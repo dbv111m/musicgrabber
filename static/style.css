@@ -3709,6 +3709,9 @@ h1 {
 }
 
 .album-list-btn {
+    display: flex;
+    align-items: center;
+    gap: 10px;
     background: var(--card-bg);
     border: 1px solid var(--border);
     border-radius: 8px;
@@ -3725,6 +3728,15 @@ h1 {
 .album-list-btn.selected {
     border-color: var(--accent);
     background: var(--hover-bg);
+}
+
+.album-list-thumb {
+    width: 36px;
+    height: 36px;
+    border-radius: 6px;
+    object-fit: cover;
+    background: var(--bg-tertiary);
+    flex-shrink: 0;
 }
 
 .album-list-title {

@@ -2181,6 +2181,57 @@
             if (searchToken === currentSearchToken) applyCachedAlbumArtwork();
         }
 
+        // ----- Album browser cover art (Albums tab / Bulk Import artist view) -----
+        // Same cache and courtesy cap as the search-result covers above, just aimed
+        // at a discography list instead of a page of search hits. A prolific artist
+        // can easily clear ALBUM_ARTWORK_MAX_LOOKUPS, so this works through the list
+        // in batches rather than giving up after the first one.
+        function _albumListThumbImage(url) {
+            const img = document.createElement('img');
+            img.className = 'album-list-thumb has-artwork';
+            img.src = url;
+            img.alt = '';
+            img.loading = 'lazy';
+            return img;
+        }
+
+        async function fetchAlbumListArtwork(targets, artistName) {
+            if (!artistName || !targets || !targets.length) return;
+
+            const lookups = [];
+            for (const t of targets) {
+                if (!t.title) continue;
+                const key = albumArtworkKey(artistName, t.title);
+                const cached = albumArtworkCache.get(key);
+                if (cached) {
+                    if (t.thumbEl && t.thumbEl.isConnected) t.thumbEl.replaceWith(_albumListThumbImage(cached));
+                    continue;
+                }
+                lookups.push({ thumbEl: t.thumbEl, title: t.title, key });
+            }
+
+            for (let i = 0; i < lookups.length; i += ALBUM_ARTWORK_MAX_LOOKUPS) {
+                const batch = lookups.slice(i, i + ALBUM_ARTWORK_MAX_LOOKUPS);
+                await Promise.all(batch.map(async ({ thumbEl, title, key }) => {
+                    try {
+                        const resp = await apiFetch(
+                            `/api/search/artwork?artist=${encodeURIComponent(artistName)}&album=${encodeURIComponent(title)}`
+                        );
+                        if (!resp.ok) return;
+                        const data = await resp.json();
+                        if (!data.url) return;
+                        albumArtworkCache.set(key, data.url);
+                        // The row may have been rebuilt (new artist picked, list
+                        // reloaded) while this was in flight; a detached element
+                        // just quietly drops the swap.
+                        if (thumbEl && thumbEl.isConnected) thumbEl.replaceWith(_albumListThumbImage(data.url));
+                    } catch (e) {
+                        // Covers are decoration; a missing one never blocks the album list
+                    }
+                }));
+            }
+        }
+
         // Show related search suggestions based on artists, plus album suggestion if available
         function showRelatedSuggestions(results, albumSuggestion) {
             if (!results || results.length === 0) return;
@@ -4953,6 +5004,7 @@
                     }
                     els.list.innerHTML = '';
                     let preselectBtn = null;
+                    const artworkTargets = [];
                     for (const album of albums) {
                         const albumBtn = document.createElement('button');
                         albumBtn.className = 'album-list-btn';
@@ -4963,16 +5015,21 @@
                         // EPs sit in this list alongside albums, so say so; some
                         // artists are basically all EPs and an untagged list of
                         // six identical-looking entries helps nobody.
-                        albumBtn.innerHTML = `<span class="album-list-title">${escapeHtml(album.title)}</span>`
+                        albumBtn.innerHTML = '<div class="album-list-thumb"></div>'
+                            + `<span class="album-list-title">${escapeHtml(album.title)}</span>`
                             + (album.year ? ` <span class="album-list-year">${escapeHtml(album.year)}</span>` : '')
                             + (album.primary_type === 'EP' ? ' <span class="album-list-year">(EP)</span>' : '');
                         albumBtn.addEventListener('click', () => selectAlbum(album, albumBtn));
                         els.list.appendChild(albumBtn);
+                        artworkTargets.push({ thumbEl: albumBtn.querySelector('.album-list-thumb'), title: album.title });
                     }
                     if (preselectReleaseMbid) {
                         const target = albums.find(al => al.release_mbid === preselectReleaseMbid);
                         if (target) await selectAlbum(target, preselectBtn);
                     }
+                    // Text is on screen already; covers trickle in behind it so a
+                    // slow iTunes/Deezer lookup never holds up the album list.
+                    fetchAlbumListArtwork(artworkTargets, a.name);
                     return albums;
                 } catch (e) {
                     _renderRetryError(els.list, `Failed to load albums: ${e.message}`, () => loadAlbums(a, preselectReleaseMbid));
