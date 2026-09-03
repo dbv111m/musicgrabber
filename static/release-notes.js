@@ -11,10 +11,10 @@ const RELEASE_NOTES = {
         title: "What's New in v4.1.0",
         sections: [
             {
-                heading: "The album browser finally has pictures",
+                heading: "The album browser is faster, and finally has pictures",
                 items: [
-                    "Browsing an artist's albums now shows a little cover thumbnail next to each one, not just a wall of text.",
-                    "The album names still pop up straight away; the artwork fills in behind them a moment later, so you're never sat waiting on a cover before you can start reading.",
+                    "Browsing an artist's albums is now dramatically quicker for most artists, sometimes going from several seconds down to about one. Prolific, heavily-bootlegged artists (looking at you, Radiohead) will still take a few seconds.",
+                    "Each album now shows a little cover thumbnail next to it, not just a wall of text. The album names still pop up straight away; the artwork fills in behind them a moment later.",
                     "A few proper rarities have no official art anywhere online, so those just keep a blank square rather than us making something up.",
                     "The old \"Searching…\" and \"Loading albums…\" messages have also been retired in favour of a couple of dozen gentle digs at MusicBrainz for taking its time.",
                 ]

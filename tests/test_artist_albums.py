@@ -275,6 +275,97 @@ def test_refresh_watched_artist_wires_in_album_refresh(fresh_db, monkeypatch):
     assert row[0] == "idle"  # refresh completed cleanly, not stuck 'running' or 'error'
 
 
+def test_seeding_tolerates_an_unresolved_release_mbid(fresh_db, monkeypatch):
+    """fetch_artist_albums now lists release-groups without a resolved release
+    (see metadata.fetch_artist_albums); seeding must not silently drop every
+    album just because release_mbid came back empty, or the very next refresh
+    would see the whole back catalogue as new and try to queue it all."""
+    import watched_artists as wa
+
+    _seed_artist(fresh_db, "a1", "Radiohead", "mbid-1")
+    monkeypatch.setattr(wa, "fetch_artist_albums", lambda mbid: [
+        {"title": "OK Computer", "year": "1997", "release_mbid": "",
+         "release_group_mbid": "rg-okc"},
+        {"title": "Kid A", "year": "2000", "release_mbid": "",
+         "release_group_mbid": "rg-kida"},
+    ])
+    monkeypatch.setattr(
+        wa.albums, "queue_album_download",
+        lambda *a, **kw: pytest.fail("seeding must never queue"),
+    )
+
+    seeded = wa.seed_artist_albums("a1", "mbid-1")
+
+    assert seeded == 2
+    with fresh_db() as conn:
+        conn.row_factory = sqlite3.Row
+        rows = {r["release_group_mbid"]: dict(r) for r in conn.execute(
+            "SELECT * FROM watched_artist_albums WHERE artist_id = 'a1'"
+        ).fetchall()}
+    assert set(rows) == {"rg-okc", "rg-kida"}
+    assert all(r["status"] == "seen" for r in rows.values())
+
+
+def test_refresh_resolves_an_unresolved_release_mbid_before_queueing(fresh_db, monkeypatch):
+    """A genuinely new album with no release_mbid yet must be resolved via
+    resolve_album_release before it can be queued -- one MusicBrainz request
+    for the one new album, not for the whole discography up front."""
+    import watched_artists as wa
+
+    _seed_artist(fresh_db, "a1", "Radiohead", "mbid-1", auto_add_albums=1)
+    monkeypatch.setattr(wa, "fetch_artist_albums", lambda mbid: [
+        {"title": "Kid A", "year": "2000", "release_mbid": "",
+         "release_group_mbid": "rg-kida"},
+    ])
+    resolve_calls = []
+
+    def fake_resolve(group_mbid):
+        resolve_calls.append(group_mbid)
+        return "rel-resolved"
+
+    monkeypatch.setattr(wa, "resolve_album_release", fake_resolve)
+    queue_calls = []
+
+    def fake_queue(artist, title, release_mbid, **kw):
+        queue_calls.append(release_mbid)
+        return {"import_id": "imp-1"}
+
+    monkeypatch.setattr(wa.albums, "queue_album_download", fake_queue)
+    artist = {"mbid": "mbid-1", "name": "Radiohead", "convert_audio": 1}
+
+    with fresh_db() as conn:
+        result = wa._refresh_artist_albums(conn, artist, "a1", None)
+
+    assert result == {"new_albums": 1, "queued": 1, "failed": 0}
+    assert resolve_calls == ["rg-kida"]
+    assert queue_calls == ["rel-resolved"]
+    rows = _album_rows(fresh_db)
+    assert rows["rel-resolved"]["status"] == "queued"
+
+
+def test_refresh_skips_an_album_that_cannot_be_resolved(fresh_db, monkeypatch):
+    """MusicBrainz sometimes has nothing playable for a release-group. That
+    should be a quiet skip, not a crash, and not a queue call with an empty id."""
+    import watched_artists as wa
+
+    _seed_artist(fresh_db, "a1", "Radiohead", "mbid-1", auto_add_albums=1)
+    monkeypatch.setattr(wa, "fetch_artist_albums", lambda mbid: [
+        {"title": "Kid A", "year": "2000", "release_mbid": "",
+         "release_group_mbid": "rg-kida"},
+    ])
+    monkeypatch.setattr(wa, "resolve_album_release", lambda group_mbid: None)
+    monkeypatch.setattr(
+        wa.albums, "queue_album_download",
+        lambda *a, **kw: pytest.fail("must not queue an unresolved release"),
+    )
+    artist = {"mbid": "mbid-1", "name": "Radiohead", "convert_audio": 1}
+
+    with fresh_db() as conn:
+        result = wa._refresh_artist_albums(conn, artist, "a1", None)
+
+    assert result == {"new_albums": 0, "queued": 0, "failed": 0}
+
+
 def test_refresh_skips_album_diff_when_toggle_is_off(fresh_db, monkeypatch):
     """Artists without auto_add_albums must never touch the album pipeline."""
     import watched_artists as wa

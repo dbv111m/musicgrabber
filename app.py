@@ -127,8 +127,8 @@ from audio_provenance import (
     start_audit_scan,
 )
 from metadata import (
-    search_artist_mbid, fetch_artist_albums, fetch_album_tracks, apply_metadata_to_file,
-    guess_musicbrainz_tags, MusicBrainzUnavailable,
+    search_artist_mbid, fetch_artist_albums, fetch_album_tracks, resolve_album_release,
+    apply_metadata_to_file, guess_musicbrainz_tags, MusicBrainzUnavailable,
     parse_musicbrainz_release_url, fetch_release_summary, search_release_groups,
 )
 from album_urls import resolve_album_url
@@ -6259,6 +6259,35 @@ def albums_get_tracklist(release_mbid: str):
     if not tracks:
         raise HTTPException(status_code=404, detail="No tracks found for this release")
     return {"tracks": tracks}
+
+
+@app.get("/api/albums/release-group/{release_group_mbid}/tracks")
+def albums_get_tracklist_by_group(release_group_mbid: str):
+    """Resolve a release-group MBID to a representative release, then fetch its tracklist.
+
+    The Albums browser lists release-groups now (see fetch_artist_albums), so
+    it doesn't know which pressing to download until an album is actually
+    opened. This does that resolution here, once, for the one album clicked,
+    rather than for the whole list up front at one MusicBrainz request per
+    second. Returns {release_mbid, tracks: [{position, title}, ...]} so the
+    frontend can remember the resolved release for the rest of the session.
+    503 on MB unavailable, 404 if nothing could be resolved.
+    """
+    if not release_group_mbid or not release_group_mbid.strip():
+        raise HTTPException(status_code=400, detail="Release group MBID is required")
+    try:
+        release_mbid = resolve_album_release(release_group_mbid.strip())
+    except MusicBrainzUnavailable as exc:
+        raise HTTPException(status_code=503, detail=f"MusicBrainz unreachable: {exc}. Try again in a moment.")
+    if not release_mbid:
+        raise HTTPException(status_code=404, detail="Could not find a release to download for this album")
+    try:
+        tracks = fetch_album_tracks(release_mbid)
+    except MusicBrainzUnavailable as exc:
+        raise HTTPException(status_code=503, detail=f"MusicBrainz unreachable: {exc}. Try again in a moment.")
+    if not tracks:
+        raise HTTPException(status_code=404, detail="No tracks found for this release")
+    return {"release_mbid": release_mbid, "tracks": tracks}
 
 
 # _album_track_stem, album_track_status (formerly _album_track_status) and

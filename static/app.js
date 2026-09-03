@@ -4994,12 +4994,12 @@
                 }
             }
 
-            async function loadAlbums(a, preselectReleaseMbid = null) {
+            async function loadAlbums(a) {
                 try {
                     const resp = await apiFetch(`/api/albums/artist/${encodeURIComponent(a.mbid)}/albums`);
                     if (!resp.ok) {
                         const detail = await _readApiErrorDetail(resp);
-                        _renderRetryError(els.list, `Failed to load albums: ${detail}`, () => loadAlbums(a, preselectReleaseMbid));
+                        _renderRetryError(els.list, `Failed to load albums: ${detail}`, () => loadAlbums(a));
                         return;
                     }
                     const data = await resp.json();
@@ -5010,15 +5010,10 @@
                         return albums;
                     }
                     els.list.innerHTML = '';
-                    let preselectBtn = null;
                     const artworkTargets = [];
                     for (const album of albums) {
                         const albumBtn = document.createElement('button');
                         albumBtn.className = 'album-list-btn';
-                        if (preselectReleaseMbid && album.release_mbid === preselectReleaseMbid) {
-                            albumBtn.classList.add('selected');
-                            preselectBtn = albumBtn;
-                        }
                         // EPs sit in this list alongside albums, so say so; some
                         // artists are basically all EPs and an untagged list of
                         // six identical-looking entries helps nobody.
@@ -5030,16 +5025,12 @@
                         els.list.appendChild(albumBtn);
                         artworkTargets.push({ thumbEl: albumBtn.querySelector('.album-list-thumb'), title: album.title });
                     }
-                    if (preselectReleaseMbid) {
-                        const target = albums.find(al => al.release_mbid === preselectReleaseMbid);
-                        if (target) await selectAlbum(target, preselectBtn);
-                    }
                     // Text is on screen already; covers trickle in behind it so a
                     // slow iTunes/Deezer lookup never holds up the album list.
                     fetchAlbumListArtwork(artworkTargets, a.name);
                     return albums;
                 } catch (e) {
-                    _renderRetryError(els.list, `Failed to load albums: ${e.message}`, () => loadAlbums(a, preselectReleaseMbid));
+                    _renderRetryError(els.list, `Failed to load albums: ${e.message}`, () => loadAlbums(a));
                 }
             }
 
@@ -5077,13 +5068,19 @@
                 if (els.downloadBtn) els.downloadBtn.disabled = true;
 
                 try {
-                    const resp = await apiFetch(`/api/albums/release/${encodeURIComponent(album.release_mbid)}/tracks`);
+                    // The list only knows the release-group; the specific pressing
+                    // to download is resolved here, lazily, for the one album the
+                    // user actually opened (see fetch_artist_albums for why).
+                    const resp = album.release_mbid
+                        ? await apiFetch(`/api/albums/release/${encodeURIComponent(album.release_mbid)}/tracks`)
+                        : await apiFetch(`/api/albums/release-group/${encodeURIComponent(album.release_group_mbid)}/tracks`);
                     if (!resp.ok) {
                         const detail = await _readApiErrorDetail(resp);
                         _renderRetryError(els.tracklist, `Failed to load tracklist: ${detail}`, () => selectAlbum(album, btn), true);
                         return;
                     }
                     const data = await resp.json();
+                    if (!album.release_mbid && data.release_mbid) album.release_mbid = data.release_mbid;
                     const tracks = data.tracks || [];
                     if (!els.tracklist) return;
                     if (!tracks.length) {
@@ -5319,7 +5316,16 @@
                         if (els.listSection) els.listSection.style.display = 'block';
                         if (els.listHeading) els.listHeading.textContent = `Albums by ${opts.artistName}`;
                         if (els.list) els.list.innerHTML = `<p class="bulk-intro-text">${escapeHtml(_musicbrainzQuip())}…</p>`;
-                        await loadAlbums(state.selectedArtist, opts.releaseMbid);
+                        const albums = await loadAlbums(state.selectedArtist) || [];
+                        // The list only carries a release-group id, not the caller's
+                        // specific release MBID, so preselect by title the same way
+                        // the slow path below already does.
+                        const matchedAlbum = findMatchingAlbum(albums, opts.albumTitle);
+                        if (matchedAlbum) {
+                            const matchedBtn = Array.from(els.list?.querySelectorAll('.album-list-btn') || [])
+                                .find(b => b.querySelector('.album-list-title')?.textContent === matchedAlbum.title);
+                            await selectAlbum(matchedAlbum, matchedBtn);
+                        }
                     } else {
                         // Slow path: look up the artist, then fuzzy-match the album title
                         if (els.artistResults) {
@@ -8477,13 +8483,27 @@
                 const album = picked[i];
                 if (progressEl) progressEl.textContent = `Queueing ${i + 1} of ${picked.length}: ${album.title}…`;
                 try {
+                    let releaseMbid = album.release_mbid;
+                    if (!releaseMbid && album.release_group_mbid) {
+                        // The list only carries a release-group id now; resolve the
+                        // actual pressing here, one album at a time, same pacing
+                        // this loop already uses for MusicBrainz.
+                        const resolveRes = await apiFetch('/api/albums/resolve-release-group', {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({ release_group_mbid: album.release_group_mbid }),
+                        });
+                        const resolveData = await resolveRes.json().catch(() => ({}));
+                        if (!resolveRes.ok) throw new Error(resolveData.detail || 'Could not resolve a release for this album');
+                        releaseMbid = resolveData.release_mbid;
+                    }
                     const res = await apiFetch('/api/albums/download', {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},
                         body: JSON.stringify({
                             artist: selectedArtistName,
                             album_title: album.title,
-                            release_mbid: album.release_mbid,
+                            release_mbid: releaseMbid,
                             release_group_mbid: album.release_group_mbid || '',
                             convert_audio: convertAudio,
                             watch_artist_id: watchArtistId || undefined,
