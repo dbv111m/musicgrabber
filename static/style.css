@@ -3737,6 +3737,13 @@ h1 {
     object-fit: cover;
     background: var(--bg-tertiary);
     flex-shrink: 0;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.album-list-thumb.has-artwork:hover {
+    transform: scale(2.4);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+    z-index: 5;
 }
 
 .album-list-title {
