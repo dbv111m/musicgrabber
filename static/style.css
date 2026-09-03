@@ -1592,6 +1592,7 @@ h1 {
     border-radius: 12px;
     position: relative;
     overflow: hidden;
+    transition: border-color 0.3s ease, box-shadow 0.3s ease;
 }
 
 .job-status {
@@ -1704,6 +1705,20 @@ h1 {
 
 .job-item.expanded {
     background: var(--bg-hover, rgba(255,255,255,0.05));
+}
+
+.job-item.job-jump-highlight {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent);
+}
+
+.job-superseded-note {
+    color: var(--accent);
+}
+
+.job-superseded-note a {
+    color: inherit;
+    text-decoration: underline;
 }
 
 .job-details {
@@ -3737,6 +3752,13 @@ h1 {
     object-fit: cover;
     background: var(--bg-tertiary);
     flex-shrink: 0;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.album-list-thumb.has-artwork:hover {
+    transform: scale(2.4);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+    z-index: 5;
 }
 
 .album-list-title {

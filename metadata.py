@@ -2318,7 +2318,7 @@ def fetch_artist_albums(mbid: str) -> list[dict]:
     """Fetch studio albums and EPs for an artist from MusicBrainz.
 
     Returns [{title, year, release_mbid, release_group_mbid, primary_type}, ...]
-    sorted by year ascending.
+    sorted by year ascending. `release_mbid` comes back empty; see below.
     Filters out compilations, live albums, soundtracks and other non-studio releases.
 
     EPs count. Ask MusicBrainz for `type=album` alone and Knife Party's entire
@@ -2327,10 +2327,26 @@ def fetch_artist_albums(mbid: str) -> list[dict]:
     released anything. Singles stay out, or a prolific artist's list becomes a
     hundred one-track entries you have to scroll past.
 
-    Paginates automatically; sleeps 1 second between pages to respect rate limits.
-    Raises MusicBrainzUnavailable when MB is unreachable on the very first page
-    (so the UI can show a retry prompt). If MB dies partway through pagination
-    we keep whatever we already collected -- a partial list beats nothing.
+    Browses release-groups (distinct albums), not raw releases. The previous
+    approach paginated over every pressing, remaster and regional reissue
+    MusicBrainz has ever catalogued for the artist -- a back catalogue with
+    heavy fan documentation could run to hundreds of raw releases behind a
+    couple of dozen actual albums, turning "load the list" into several
+    seconds of enforced one-request-per-second pagination before a single
+    title appeared. Browsing release-groups instead asks for the albums
+    directly, so most artists fit in a single request.
+
+    The trade-off: a release-group has no release MBID of its own, so we no
+    longer know which specific pressing to download at list time. That gets
+    resolved lazily, one album at a time, only once a user actually opens it
+    (see `resolve_album_release`) -- resolving it here for the whole list
+    would just relocate the rate limit rather than avoid it.
+
+    Paginates automatically (rare in practice; MusicBrainz caps browses at 100
+    per page); sleeps 1 second between pages to respect rate limits. Raises
+    MusicBrainzUnavailable when MB is unreachable on the very first page (so
+    the UI can show a retry prompt). If MB dies partway through pagination we
+    keep whatever we already collected -- a partial list beats nothing.
     """
     import time as _time
     headers = {"User-Agent": f"MusicGrabber/{VERSION} (https://gitlab.com/g33kphr33k/musicgrabber)"}
@@ -2338,8 +2354,6 @@ def fetch_artist_albums(mbid: str) -> list[dict]:
     offset = 0
     limit = 100
     total = None
-    releases_by_group: dict[str, list[dict]] = {}
-    group_metadata: dict[str, dict] = {}
 
     _EXCLUDED_SECONDARY_TYPES = {
         "Compilation", "Live", "Remix", "Soundtrack", "Interview",
@@ -2353,15 +2367,11 @@ def fetch_artist_albums(mbid: str) -> list[dict]:
             "type": "album|ep",
             "limit": limit,
             "offset": offset,
-            # Media counts let the representative-release policy distinguish a
-            # complete two-disc issue from a one-disc fragment of the same
-            # release group. Status is part of the base release payload.
-            "inc": "release-groups media",
             "fmt": "json",
         }
         try:
             response = _mb_get_with_retry(
-                "https://musicbrainz.org/ws/2/release",
+                "https://musicbrainz.org/ws/2/release-group",
                 params=params, headers=headers, timeout=TIMEOUT_MUSICBRAINZ_ARTIST,
             )
         except MusicBrainzUnavailable:
@@ -2380,52 +2390,46 @@ def fetch_artist_albums(mbid: str) -> list[dict]:
             print(f"MusicBrainz albums fetch parse error for {mbid}: {e}")
             break
         if total is None:
-            total = data.get("release-count", 0)
-        releases = data.get("releases", [])
-        if not releases:
+            total = data.get("release-group-count", 0)
+        groups = data.get("release-groups", [])
+        if not groups:
             break
 
-        for release in releases:
-            rg = release.get("release-group") or {}
-            rg_id = rg.get("id", "")
+        for rg in groups:
             secondary_types = rg.get("secondary-types") or []
             if any(t in _EXCLUDED_SECONDARY_TYPES for t in secondary_types):
                 continue
-            # Collect the entire group across every page before choosing. Taking
-            # the first row here silently selected partial releases whenever an
-            # early one-disc issue happened to precede the complete edition.
-            identity = rg_id or f"release:{release.get('id', '')}"
-            releases_by_group.setdefault(identity, []).append(release)
-            group_metadata[identity] = rg
+            title = (rg.get("title") or "").strip()
+            if not title:
+                continue
+            date = rg.get("first-release-date") or ""
+            albums.append({
+                "title": title,
+                "year": date[:4] if date else "",
+                "release_mbid": "",
+                "release_group_mbid": rg.get("id", ""),
+                "primary_type": rg.get("primary-type") or "",
+            })
 
-        offset += len(releases)
+        offset += len(groups)
         if offset >= total:
             break
         _time.sleep(1)  # MusicBrainz rate limit: 1 req/sec
 
-    for identity, releases in releases_by_group.items():
-        release = _pick_release_from_group(releases)
-        if not release:
-            continue
-        rg = group_metadata.get(identity) or {}
-        rg_id = rg.get("id", "")
-        # Release-group title is canonical and avoids pressing/disc decoration.
-        title = (rg.get("title") or release.get("title") or "").strip()
-        date = release.get("date") or release.get("first-release-date") or ""
-        if title:
-            albums.append({
-                "title": title,
-                "year": date[:4] if date else "",
-                "release_mbid": release.get("id", ""),
-                # The release-group is the album's stable identity. Anything
-                # remembering "have I seen this album before?" wants this one,
-                # not whichever representative pressing currently wins.
-                "release_group_mbid": rg_id,
-                "primary_type": rg.get("primary-type") or "",
-            })
-
     albums.sort(key=lambda a: a["year"] or "9999")
     return albums
+
+
+def resolve_album_release(release_group_mbid: str) -> str | None:
+    """Resolve a release-group MBID to one representative release MBID.
+
+    `fetch_artist_albums` now lists release-groups without a specific pressing
+    attached (see its docstring for why); this is where that gets decided,
+    on demand, for the one album a user actually opened. Reuses
+    `_resolve_representative_release`'s picking logic rather than reinventing it.
+    """
+    headers = {"User-Agent": f"MusicGrabber/{VERSION} (https://gitlab.com/g33kphr33k/musicgrabber)"}
+    return _resolve_representative_release(release_group_mbid, headers)
 
 
 def fetch_album_release(release_mbid: str) -> dict:

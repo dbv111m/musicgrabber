@@ -346,3 +346,38 @@ const QUEUE_QUIPS = {
         "Your music is still here. Novel idea, apparently.",
     ],
 };
+
+// =============================================================================
+// MusicBrainz lookup quips
+// =============================================================================
+// Shown while the Albums browser waits on a MusicBrainz artist search or
+// album listing. Flat pool, one picked at random per loading state (same
+// spirit as SEARCH_QUIPS.searching: pick once, don't gabble on a timer).
+//
+// House style: British, light, no emdashes. Be cheeky about the wait, not
+// unkind about the volunteers who run the place.
+
+const MUSICBRAINZ_QUIPS = [
+    "Bothering MusicBrainz again, sorry MusicBrainz",
+    "Waiting for an unpaid volunteer to feel like it",
+    "A database run entirely on enthusiasm and mild guilt",
+    "Reading a disambiguation longer than the album itself",
+    "Untangling recordings, releases, release groups, and works, again",
+    "Working out which of four identical MBIDs actually means something",
+    "Being told off for asking more than once a second",
+    "Waiting on an edit nobody can be bothered to vote on",
+    "Checking this isn't secretly the tribute act's page",
+    "Cross-referencing three spellings nobody agreed on",
+    "Ignoring a bootleg someone lovingly catalogued in 2007",
+    "Praying the servers survive on donations alone",
+    "Consulting an encyclopaedia written by hobbyists with strong opinions",
+    "Checking whether 'Various Artists' has muscled in again",
+    "Reading an essay about a seven-inch single nobody bought",
+    "Asking which release counts as 'canonical' this week",
+    "Respecting a rate limit that assumes we have all day",
+    "Double-checking the UUID hasn't wandered off since Tuesday",
+    "Letting the volunteers work at their own, unhurried pace",
+    "Fetching metadata catalogued with faintly alarming dedication",
+    "Standing behind several thousand equally polite requests",
+    "Confirming the artist isn't quietly three different artists",
+];

@@ -13,7 +13,7 @@ import albums
 from constants import WATCHED_PLAYLIST_CHECK_HOURS, WATCHED_REFRESH_STALE_SECONDS
 from db import db_conn
 from bulk_import import start_bulk_import_for_tracks
-from metadata import fetch_artist_singles, fetch_artist_albums, MusicBrainzUnavailable
+from metadata import fetch_artist_singles, fetch_artist_albums, resolve_album_release, MusicBrainzUnavailable
 from settings import get_setting_bool
 from utils import authoritative_audio_file, hash_track, spawn_daemon_thread, check_duplicate
 
@@ -76,12 +76,15 @@ def seed_artist_albums(artist_id: str, mbid: str, user_id: str | None = None) ->
     with db_conn() as conn:
         for album in current_albums:
             release_mbid = (album.get("release_mbid") or "").strip()
-            if not release_mbid:
-                continue
             # The release-group MBID is the album's stable identity. Falling
             # back to release_mbid only matters for anything MusicBrainz hands
-            # back without a group, which is rare and harmless.
+            # back without a group, which is rare and harmless. A 'seen' row
+            # is never queued from, so an unresolved release_mbid (the album
+            # list now hands those back lazily, see fetch_artist_albums) is
+            # fine to seed as an empty string here; only the identity matters.
             group_mbid = (album.get("release_group_mbid") or "").strip() or release_mbid
+            if not group_mbid:
+                continue
             cur = conn.execute(
                 """INSERT OR IGNORE INTO watched_artist_albums
                    (artist_id, release_group_mbid, release_mbid, title, year, status)
@@ -131,8 +134,21 @@ def _refresh_artist_albums(conn, artist: dict, artist_id: str, user_id: str | No
     for album in current_albums:
         release_mbid = (album.get("release_mbid") or "").strip()
         group_mbid = (album.get("release_group_mbid") or "").strip() or release_mbid
-        if not release_mbid or group_mbid in known:
+        if not group_mbid or group_mbid in known:
             continue  # already seeded or successfully handed to the album queue
+
+        if not release_mbid:
+            # The album list only carries a release-group id now (see
+            # fetch_artist_albums); resolve the actual pressing here, for
+            # this one genuinely-new album, rather than for the whole
+            # discography up front at one MusicBrainz request a second.
+            try:
+                release_mbid = resolve_album_release(group_mbid) or ""
+            except MusicBrainzUnavailable as e:
+                print(f"Album auto-add resolve skipped for {artist.get('name', artist_id)} - '{album.get('title')}': {e}")
+                continue
+            if not release_mbid:
+                continue
 
         existing = conn.execute(
             """SELECT status FROM watched_artist_albums

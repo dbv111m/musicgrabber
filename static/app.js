@@ -1906,6 +1906,13 @@
             return _randomQuip(pool, 'Still going, hang on');
         }
 
+        // One dig at MusicBrainz's expense per Albums-browser loading state. No
+        // queue-style rotation here: a single lookup has no state changes to key
+        // a swap off, so we just pick once and let it stand.
+        function _musicbrainzQuip() {
+            return _randomQuip(typeof MUSICBRAINZ_QUIPS !== 'undefined' ? MUSICBRAINZ_QUIPS : null, 'Loading');
+        }
+
         // If a source is still searching long after its mates finished, swap its
         // line for a "taking a while" quip (Soulseek's retry is the usual culprit).
         function _startRowSlowTimer(source) {
@@ -3450,6 +3457,7 @@
                             ${journeyHtml ? `<div class="job-details-row job-journey"><span class="job-details-label">Journey:</span> ${journeyHtml}</div>` : ''}
                             ${job.acquisition_attempt_count ? `<div class="job-details-row"><span class="job-details-label">Acquisition:</span> ${escapeHtml(String(job.acquisition_cycle_count || 0))} cycle${Number(job.acquisition_cycle_count || 0) === 1 ? '' : 's'} · ${escapeHtml(String(job.acquisition_attempt_count))} source attempt${Number(job.acquisition_attempt_count) === 1 ? '' : 's'}${job.acquisition_last_attempt_at ? ` · last ${formatTime(job.acquisition_last_attempt_at)}` : ''}</div>` : ''}
                             ${attemptHistoryHtml}
+                            ${job.acquisition_superseded_by ? `<div class="job-details-row job-superseded-note"><i class="fa-solid fa-circle-check"></i> Later succeeded on retry — <a href="#" onclick="event.preventDefault(); event.stopPropagation(); jumpToJob('${escapeAttr(job.acquisition_superseded_by)}')">jump to completed entry</a></div>` : ''}
                             ${job.metadata_source ? `<div class="job-details-row"><span class="job-details-label">Metadata:</span> ${escapeHtml(formatMetadataSource(job.metadata_source))}</div>` : ''}
                             ${job.requested_video_fallback ? '<div class="job-details-row"><span class="job-details-label">Fallback:</span> Used the video from the original YouTube playlist after no confident alternative succeeded.</div>' : ''}
                             ${sourceUrl ? `<div class="job-details-row"><span class="job-details-label">URL:</span> ${isClickableUrl ? `<a href="${escapeHtml(sourceUrl)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${escapeHtml(sourceUrl)}</a>` : `<span class="job-details-url">${escapeHtml(sourceUrl)}</span>`}</div>` : ''}
@@ -3587,6 +3595,27 @@
                     else expandedJobIds.add(jobId);
                 }
             }
+        }
+
+        // Follows a "later succeeded on retry" pointer from an old failed card to
+        // the job that actually finished the download. Retries always land on a
+        // new Queue row, so this may be on a different page or sorted elsewhere.
+        function jumpToJob(jobId) {
+            const index = getSortedQueueJobs().findIndex(j => String(j.id) === String(jobId));
+            if (index === -1) {
+                showToast('That entry has dropped out of the loaded queue history', true);
+                return;
+            }
+            queuePage = Math.floor(index / QUEUE_PAGE_SIZE) + 1;
+            expandedJobIds.add(String(jobId));
+            renderQueuePage();
+            requestAnimationFrame(() => {
+                const el = queueTab.querySelector(`.job-item[data-job-id="${jobId}"]`);
+                if (!el) return;
+                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                el.classList.add('job-jump-highlight');
+                setTimeout(() => el.classList.remove('job-jump-highlight'), 1600);
+            });
         }
 
         // =============================================================================
@@ -3763,17 +3792,16 @@
         }
 
         function copyScoreRationale(jobId) {
-            const container = document.getElementById(`score-rationale-${jobId}`);
-            if (!container || container.dataset.loaded !== 'true') return;
-
-            // Re-fetch the data to build a clean text version
+            // Fetches fresh rather than relying on the "Why this result?" panel
+            // having been opened first; Copy used to silently do nothing if you
+            // reached for it before that click had populated the cache.
             apiFetch(`/api/jobs/${jobId}/score-rationale`)
                 .then(res => res.ok ? res.json() : null)
                 .then(data => {
-                    if (!data) return;
+                    if (!data) { showToast('No scoring rationale recorded for this job', true); return; }
                     const d = data.decision || {};
                     const sel = d.selected;
-                    if (!sel) return;
+                    if (!sel) { showToast('No scoring rationale recorded for this job', true); return; }
 
                     let text = '';
                     if (data.query) text += `Search: ${data.query}\n`;
@@ -3794,7 +3822,7 @@
                         showToast('Score rationale copied');
                     });
                 })
-                .catch(() => {});
+                .catch(() => showToast('Could not fetch scoring rationale', true));
         }
 
         function escapeHtmlText(value) {
@@ -4948,7 +4976,7 @@
                 const q = els.artistInput ? els.artistInput.value.trim() : '';
                 if (!q || !els.artistResults) return;
 
-                els.artistResults.innerHTML = '<p class="bulk-intro-text">Searching…</p>';
+                els.artistResults.innerHTML = `<p class="bulk-intro-text">${escapeHtml(_musicbrainzQuip())}…</p>`;
                 els.artistResults.style.display = '';
                 if (els.listSection) els.listSection.style.display = 'none';
                 if (els.tracklistSection) els.tracklistSection.style.display = 'none';
@@ -4987,12 +5015,12 @@
                 }
             }
 
-            async function loadAlbums(a, preselectReleaseMbid = null) {
+            async function loadAlbums(a) {
                 try {
                     const resp = await apiFetch(`/api/albums/artist/${encodeURIComponent(a.mbid)}/albums`);
                     if (!resp.ok) {
                         const detail = await _readApiErrorDetail(resp);
-                        _renderRetryError(els.list, `Failed to load albums: ${detail}`, () => loadAlbums(a, preselectReleaseMbid));
+                        _renderRetryError(els.list, `Failed to load albums: ${detail}`, () => loadAlbums(a));
                         return;
                     }
                     const data = await resp.json();
@@ -5003,15 +5031,10 @@
                         return albums;
                     }
                     els.list.innerHTML = '';
-                    let preselectBtn = null;
                     const artworkTargets = [];
                     for (const album of albums) {
                         const albumBtn = document.createElement('button');
                         albumBtn.className = 'album-list-btn';
-                        if (preselectReleaseMbid && album.release_mbid === preselectReleaseMbid) {
-                            albumBtn.classList.add('selected');
-                            preselectBtn = albumBtn;
-                        }
                         // EPs sit in this list alongside albums, so say so; some
                         // artists are basically all EPs and an untagged list of
                         // six identical-looking entries helps nobody.
@@ -5023,16 +5046,12 @@
                         els.list.appendChild(albumBtn);
                         artworkTargets.push({ thumbEl: albumBtn.querySelector('.album-list-thumb'), title: album.title });
                     }
-                    if (preselectReleaseMbid) {
-                        const target = albums.find(al => al.release_mbid === preselectReleaseMbid);
-                        if (target) await selectAlbum(target, preselectBtn);
-                    }
                     // Text is on screen already; covers trickle in behind it so a
                     // slow iTunes/Deezer lookup never holds up the album list.
                     fetchAlbumListArtwork(artworkTargets, a.name);
                     return albums;
                 } catch (e) {
-                    _renderRetryError(els.list, `Failed to load albums: ${e.message}`, () => loadAlbums(a, preselectReleaseMbid));
+                    _renderRetryError(els.list, `Failed to load albums: ${e.message}`, () => loadAlbums(a));
                 }
             }
 
@@ -5047,7 +5066,7 @@
                 if (els.tracklistSection) els.tracklistSection.style.display = 'none';
                 setResetVisible(false);
                 if (els.listHeading) els.listHeading.textContent = `Albums by ${a.name}`;
-                if (els.list) els.list.innerHTML = '<p class="bulk-intro-text">Loading albums…</p>';
+                if (els.list) els.list.innerHTML = `<p class="bulk-intro-text">${escapeHtml(_musicbrainzQuip())}…</p>`;
 
                 await loadAlbums(a);
             }
@@ -5070,13 +5089,19 @@
                 if (els.downloadBtn) els.downloadBtn.disabled = true;
 
                 try {
-                    const resp = await apiFetch(`/api/albums/release/${encodeURIComponent(album.release_mbid)}/tracks`);
+                    // The list only knows the release-group; the specific pressing
+                    // to download is resolved here, lazily, for the one album the
+                    // user actually opened (see fetch_artist_albums for why).
+                    const resp = album.release_mbid
+                        ? await apiFetch(`/api/albums/release/${encodeURIComponent(album.release_mbid)}/tracks`)
+                        : await apiFetch(`/api/albums/release-group/${encodeURIComponent(album.release_group_mbid)}/tracks`);
                     if (!resp.ok) {
                         const detail = await _readApiErrorDetail(resp);
                         _renderRetryError(els.tracklist, `Failed to load tracklist: ${detail}`, () => selectAlbum(album, btn), true);
                         return;
                     }
                     const data = await resp.json();
+                    if (!album.release_mbid && data.release_mbid) album.release_mbid = data.release_mbid;
                     const tracks = data.tracks || [];
                     if (!els.tracklist) return;
                     if (!tracks.length) {
@@ -5311,13 +5336,22 @@
                         }
                         if (els.listSection) els.listSection.style.display = 'block';
                         if (els.listHeading) els.listHeading.textContent = `Albums by ${opts.artistName}`;
-                        if (els.list) els.list.innerHTML = '<p class="bulk-intro-text">Loading albums…</p>';
-                        await loadAlbums(state.selectedArtist, opts.releaseMbid);
+                        if (els.list) els.list.innerHTML = `<p class="bulk-intro-text">${escapeHtml(_musicbrainzQuip())}…</p>`;
+                        const albums = await loadAlbums(state.selectedArtist) || [];
+                        // The list only carries a release-group id, not the caller's
+                        // specific release MBID, so preselect by title the same way
+                        // the slow path below already does.
+                        const matchedAlbum = findMatchingAlbum(albums, opts.albumTitle);
+                        if (matchedAlbum) {
+                            const matchedBtn = Array.from(els.list?.querySelectorAll('.album-list-btn') || [])
+                                .find(b => b.querySelector('.album-list-title')?.textContent === matchedAlbum.title);
+                            await selectAlbum(matchedAlbum, matchedBtn);
+                        }
                     } else {
                         // Slow path: look up the artist, then fuzzy-match the album title
                         if (els.artistResults) {
                             els.artistResults.style.display = '';
-                            els.artistResults.innerHTML = '<p class="bulk-intro-text">Searching for artist…</p>';
+                            els.artistResults.innerHTML = `<p class="bulk-intro-text">${escapeHtml(_musicbrainzQuip())}…</p>`;
                         }
                         try {
                             const artistResp = await apiFetch(`/api/albums/search-artist?q=${encodeURIComponent(opts.artistName)}`);
@@ -5344,7 +5378,7 @@
                             }
                             if (els.listSection) els.listSection.style.display = 'block';
                             if (els.listHeading) els.listHeading.textContent = `Albums by ${bestArtist.name}`;
-                            if (els.list) els.list.innerHTML = '<p class="bulk-intro-text">Loading albums…</p>';
+                            if (els.list) els.list.innerHTML = `<p class="bulk-intro-text">${escapeHtml(_musicbrainzQuip())}…</p>`;
 
                             const albums = await loadAlbums(bestArtist) || [];
                             if (!albums.length) return;
@@ -8470,13 +8504,27 @@
                 const album = picked[i];
                 if (progressEl) progressEl.textContent = `Queueing ${i + 1} of ${picked.length}: ${album.title}…`;
                 try {
+                    let releaseMbid = album.release_mbid;
+                    if (!releaseMbid && album.release_group_mbid) {
+                        // The list only carries a release-group id now; resolve the
+                        // actual pressing here, one album at a time, same pacing
+                        // this loop already uses for MusicBrainz.
+                        const resolveRes = await apiFetch('/api/albums/resolve-release-group', {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify({ release_group_mbid: album.release_group_mbid }),
+                        });
+                        const resolveData = await resolveRes.json().catch(() => ({}));
+                        if (!resolveRes.ok) throw new Error(resolveData.detail || 'Could not resolve a release for this album');
+                        releaseMbid = resolveData.release_mbid;
+                    }
                     const res = await apiFetch('/api/albums/download', {
                         method: 'POST',
                         headers: {'Content-Type': 'application/json'},
                         body: JSON.stringify({
                             artist: selectedArtistName,
                             album_title: album.title,
-                            release_mbid: album.release_mbid,
+                            release_mbid: releaseMbid,
                             release_group_mbid: album.release_group_mbid || '',
                             convert_audio: convertAudio,
                             watch_artist_id: watchArtistId || undefined,

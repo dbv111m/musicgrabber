@@ -127,8 +127,8 @@ from audio_provenance import (
     start_audit_scan,
 )
 from metadata import (
-    search_artist_mbid, fetch_artist_albums, fetch_album_tracks, apply_metadata_to_file,
-    guess_musicbrainz_tags, MusicBrainzUnavailable,
+    search_artist_mbid, fetch_artist_albums, fetch_album_tracks, resolve_album_release,
+    apply_metadata_to_file, guess_musicbrainz_tags, MusicBrainzUnavailable,
     parse_musicbrainz_release_url, fetch_release_summary, search_release_groups,
 )
 from album_urls import resolve_album_url
@@ -2567,7 +2567,17 @@ def _expose_conversion_intent(row: dict) -> dict:
 
 
 def _attach_acquisition_summaries(conn, jobs: list[dict]) -> None:
-    """Attach durable retry history without turning the Queue query into N+1 SQL."""
+    """Attach durable retry history without turning the Queue query into N+1 SQL.
+
+    A retry never resurrects a failed Queue row, it opens a new one for the next
+    cycle and leaves the failed row standing as a record of what happened (see
+    `_create_rescue_job`). Left unscoped, this function used to hand every job
+    sharing a target the *target's* whole saga, so an old failed card could show
+    a later cycle's "completed" line under its own permanently-red status, an
+    outright contradiction. Each job now only sees its own cycle and earlier;
+    if a later cycle for the same target went on to succeed, it gets a pointer
+    to that job instead of a share of its history.
+    """
     target_ids = sorted({
         job.get("acquisition_target_id") for job in jobs
         if job.get("acquisition_target_id")
@@ -2605,16 +2615,41 @@ def _attach_acquisition_summaries(conn, jobs: list[dict]) -> None:
     for row in attempt_rows:
         history = histories.setdefault(row["target_id"], [])
         history.append(dict(row))
+
+    # Later cycle, same target, actually landed: work out which job gets to
+    # claim the win, so an earlier failed job can point to it by ID.
+    completed_target_ids = [tid for tid, t in targets.items() if t["status"] == "completed"]
+    winning_job_of_target: dict[str, str] = {}
+    if completed_target_ids:
+        placeholders2 = ",".join("?" * len(completed_target_ids))
+        winner_rows = conn.execute(
+            f"""SELECT acquisition_target_id, id FROM jobs
+                WHERE acquisition_target_id IN ({placeholders2})
+                  AND status IN ('completed', 'completed_with_errors')
+                ORDER BY acquisition_cycle DESC""",
+            completed_target_ids,
+        ).fetchall()
+        for row in winner_rows:
+            winning_job_of_target.setdefault(row["acquisition_target_id"], row["id"])
+
     for job in jobs:
         target = targets.get(job.get("acquisition_target_id"))
         if not target:
             continue
-        history = histories.get(target["id"], [])
+        own_cycle = job.get("acquisition_cycle")
+        full_history = histories.get(target["id"], [])
+        history = (
+            [a for a in full_history if int(a.get("cycle_number") or 0) <= int(own_cycle)]
+            if own_cycle is not None else full_history
+        )
         job["acquisition_mode"] = target["mode"]
-        job["acquisition_cycle_count"] = int(target["cycle_count"] or 0)
-        job["acquisition_attempt_count"] = int(target["attempt_count"] or 0)
+        job["acquisition_cycle_count"] = int(own_cycle) if own_cycle is not None else int(target["cycle_count"] or 0)
+        job["acquisition_attempt_count"] = len(history)
         job["acquisition_status"] = target["status"]
-        job["acquisition_last_attempt_at"] = _ensure_utc_suffix(target["last_attempt_at"])
+        scoped_last_attempt = max(
+            (a.get("completed_at") or a.get("started_at") or "" for a in history), default=""
+        )
+        job["acquisition_last_attempt_at"] = _ensure_utc_suffix(scoped_last_attempt or target["last_attempt_at"])
         job["acquisition_last_error"] = target["last_error"]
         job["acquisition_attempts"] = [
             {
@@ -2624,6 +2659,13 @@ def _attach_acquisition_summaries(conn, jobs: list[dict]) -> None:
             }
             for attempt in history
         ]
+        winning_job_id = winning_job_of_target.get(target["id"])
+        if (
+            winning_job_id and winning_job_id != job["id"]
+            and job.get("status") == "failed"
+            and own_cycle is not None and int(own_cycle) < int(target["cycle_count"] or 0)
+        ):
+            job["acquisition_superseded_by"] = winning_job_id
 
 
 @app.get("/api/jobs")
@@ -6259,6 +6301,35 @@ def albums_get_tracklist(release_mbid: str):
     if not tracks:
         raise HTTPException(status_code=404, detail="No tracks found for this release")
     return {"tracks": tracks}
+
+
+@app.get("/api/albums/release-group/{release_group_mbid}/tracks")
+def albums_get_tracklist_by_group(release_group_mbid: str):
+    """Resolve a release-group MBID to a representative release, then fetch its tracklist.
+
+    The Albums browser lists release-groups now (see fetch_artist_albums), so
+    it doesn't know which pressing to download until an album is actually
+    opened. This does that resolution here, once, for the one album clicked,
+    rather than for the whole list up front at one MusicBrainz request per
+    second. Returns {release_mbid, tracks: [{position, title}, ...]} so the
+    frontend can remember the resolved release for the rest of the session.
+    503 on MB unavailable, 404 if nothing could be resolved.
+    """
+    if not release_group_mbid or not release_group_mbid.strip():
+        raise HTTPException(status_code=400, detail="Release group MBID is required")
+    try:
+        release_mbid = resolve_album_release(release_group_mbid.strip())
+    except MusicBrainzUnavailable as exc:
+        raise HTTPException(status_code=503, detail=f"MusicBrainz unreachable: {exc}. Try again in a moment.")
+    if not release_mbid:
+        raise HTTPException(status_code=404, detail="Could not find a release to download for this album")
+    try:
+        tracks = fetch_album_tracks(release_mbid)
+    except MusicBrainzUnavailable as exc:
+        raise HTTPException(status_code=503, detail=f"MusicBrainz unreachable: {exc}. Try again in a moment.")
+    if not tracks:
+        raise HTTPException(status_code=404, detail="No tracks found for this release")
+    return {"release_mbid": release_mbid, "tracks": tracks}
 
 
 # _album_track_stem, album_track_status (formerly _album_track_status) and
