@@ -1,6 +1,6 @@
 # Changelog
 
-## v4.1.0 (DEV)
+## v4.1.0 (2026-09-03)
 
 ### Added
 - **Renamed library files are now found by the metadata they carry**: filename matching remains the quick route, but a miss now builds a safe whole-library index from embedded Artist and Title tags. MusicBee, beets or another organiser can rename `Artist - Title.flac`, move it elsewhere beneath the music root, and MusicGrabber still recognises the recording instead of downloading a second copy. The index skips trash, NAS recycle bins and symlinks, is cached for five minutes, and refreshes immediately when an indexed file moves again.
