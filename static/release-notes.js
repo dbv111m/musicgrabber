@@ -28,6 +28,13 @@ const RELEASE_NOTES = {
                 ]
             },
             {
+                heading: "A failed download that succeeded on retry no longer argues with itself",
+                items: [
+                    "A retried download used to leave its old failed Queue card looking confused: still red and marked Failed, while its own details quietly admitted a later attempt had completed. The old card now tells its own story straight, and adds a \"Later succeeded on retry\" link straight to the one that made it.",
+                    "The Copy button next to \"Why this result?\" now works the first time you click it, rather than needing \"Why this result?\" clicked first.",
+                ]
+            },
+            {
                 heading: "Restore now tidies the Queue too",
                 items: [
                     "If you restore a rejected download from the Trash Bin, its Queue entry now changes from failed to completed. You picked that version after all, so the Queue no longer argues with you about it.",

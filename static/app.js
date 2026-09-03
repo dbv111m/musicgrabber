@@ -3457,6 +3457,7 @@
                             ${journeyHtml ? `<div class="job-details-row job-journey"><span class="job-details-label">Journey:</span> ${journeyHtml}</div>` : ''}
                             ${job.acquisition_attempt_count ? `<div class="job-details-row"><span class="job-details-label">Acquisition:</span> ${escapeHtml(String(job.acquisition_cycle_count || 0))} cycle${Number(job.acquisition_cycle_count || 0) === 1 ? '' : 's'} · ${escapeHtml(String(job.acquisition_attempt_count))} source attempt${Number(job.acquisition_attempt_count) === 1 ? '' : 's'}${job.acquisition_last_attempt_at ? ` · last ${formatTime(job.acquisition_last_attempt_at)}` : ''}</div>` : ''}
                             ${attemptHistoryHtml}
+                            ${job.acquisition_superseded_by ? `<div class="job-details-row job-superseded-note"><i class="fa-solid fa-circle-check"></i> Later succeeded on retry — <a href="#" onclick="event.preventDefault(); event.stopPropagation(); jumpToJob('${escapeAttr(job.acquisition_superseded_by)}')">jump to completed entry</a></div>` : ''}
                             ${job.metadata_source ? `<div class="job-details-row"><span class="job-details-label">Metadata:</span> ${escapeHtml(formatMetadataSource(job.metadata_source))}</div>` : ''}
                             ${job.requested_video_fallback ? '<div class="job-details-row"><span class="job-details-label">Fallback:</span> Used the video from the original YouTube playlist after no confident alternative succeeded.</div>' : ''}
                             ${sourceUrl ? `<div class="job-details-row"><span class="job-details-label">URL:</span> ${isClickableUrl ? `<a href="${escapeHtml(sourceUrl)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${escapeHtml(sourceUrl)}</a>` : `<span class="job-details-url">${escapeHtml(sourceUrl)}</span>`}</div>` : ''}
@@ -3594,6 +3595,27 @@
                     else expandedJobIds.add(jobId);
                 }
             }
+        }
+
+        // Follows a "later succeeded on retry" pointer from an old failed card to
+        // the job that actually finished the download. Retries always land on a
+        // new Queue row, so this may be on a different page or sorted elsewhere.
+        function jumpToJob(jobId) {
+            const index = getSortedQueueJobs().findIndex(j => String(j.id) === String(jobId));
+            if (index === -1) {
+                showToast('That entry has dropped out of the loaded queue history', true);
+                return;
+            }
+            queuePage = Math.floor(index / QUEUE_PAGE_SIZE) + 1;
+            expandedJobIds.add(String(jobId));
+            renderQueuePage();
+            requestAnimationFrame(() => {
+                const el = queueTab.querySelector(`.job-item[data-job-id="${jobId}"]`);
+                if (!el) return;
+                el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                el.classList.add('job-jump-highlight');
+                setTimeout(() => el.classList.remove('job-jump-highlight'), 1600);
+            });
         }
 
         // =============================================================================
@@ -3770,17 +3792,16 @@
         }
 
         function copyScoreRationale(jobId) {
-            const container = document.getElementById(`score-rationale-${jobId}`);
-            if (!container || container.dataset.loaded !== 'true') return;
-
-            // Re-fetch the data to build a clean text version
+            // Fetches fresh rather than relying on the "Why this result?" panel
+            // having been opened first; Copy used to silently do nothing if you
+            // reached for it before that click had populated the cache.
             apiFetch(`/api/jobs/${jobId}/score-rationale`)
                 .then(res => res.ok ? res.json() : null)
                 .then(data => {
-                    if (!data) return;
+                    if (!data) { showToast('No scoring rationale recorded for this job', true); return; }
                     const d = data.decision || {};
                     const sel = d.selected;
-                    if (!sel) return;
+                    if (!sel) { showToast('No scoring rationale recorded for this job', true); return; }
 
                     let text = '';
                     if (data.query) text += `Search: ${data.query}\n`;
@@ -3801,7 +3822,7 @@
                         showToast('Score rationale copied');
                     });
                 })
-                .catch(() => {});
+                .catch(() => showToast('Could not fetch scoring rationale', true));
         }
 
         function escapeHtmlText(value) {
