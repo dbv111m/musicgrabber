@@ -40,6 +40,40 @@ _TERMINAL = ("completed", "failed", "completed_with_errors")
 
 
 # ---------------------------------------------------------------------------
+# Fast: numbered filename padding (issue #86)
+# ---------------------------------------------------------------------------
+
+def test_numbered_output_stem_pads_to_two_digits_by_default():
+    # playlist_routed=True adds the "Artist - " prefix (same as _playlist_stem),
+    # which sidesteps the organise_by_artist DB lookup for this unit test.
+    import downloads
+
+    stem = downloads._numbered_output_stem(
+        "Artist", "Track", "fallback", track_number=1, playlist_routed=True,
+    )
+    assert stem == "Artist - 01 - Track"
+
+
+def test_numbered_output_stem_pads_to_ten_digit_track_when_ten_or_above():
+    import downloads
+
+    stem = downloads._numbered_output_stem(
+        "Artist", "Track", "fallback", track_number=10, playlist_routed=True,
+    )
+    assert stem == "Artist - 10 - Track"
+
+
+def test_numbered_output_stem_pads_wider_for_large_track_totals():
+    # A 120-track box set should get "007", not "07" lost among "112".
+    import downloads
+
+    stem = downloads._numbered_output_stem(
+        "Artist", "Track", "fallback", track_number=7, track_total=120, playlist_routed=True,
+    )
+    assert stem == "Artist - 007 - Track"
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 

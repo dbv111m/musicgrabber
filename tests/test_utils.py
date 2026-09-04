@@ -69,6 +69,18 @@ def test_sanitize_filename_caps_multibyte_to_byte_budget():
     assert len(out.encode("utf-8")) <= MAX_FILENAME_BYTES
 
 
+def test_sanitize_filename_folds_unicode_dashes_to_ascii_hyphen():
+    # Real-world bug (issue #87): MusicBrainz/YouTube titles carry "smart"
+    # hyphens that look identical in a terminal but come out as "?" on disk
+    # through some SFTP clients and non-UTF-8-locale tools.
+    from utils import sanitize_filename
+
+    assert sanitize_filename("alt‐J") == "alt-J"       # hyphen
+    assert sanitize_filename("alt‑J") == "alt-J"       # non-breaking hyphen
+    assert sanitize_filename("Song – Remix") == "Song - Remix"  # en dash
+    assert sanitize_filename("Song — Remix") == "Song - Remix"  # em dash
+
+
 def test_artist_credit_lookup_variants_include_primary_artist():
     from utils import artist_credit_lookup_variants, artist_credits_match
 

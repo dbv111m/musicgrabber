@@ -198,6 +198,7 @@ def _numbered_output_stem(
     title: str,
     fallback: str,
     track_number: int | None,
+    track_total: int | None = None,
     user_id: str | None = None,
     playlist_routed: bool = False,
 ) -> str | None:
@@ -211,8 +212,17 @@ def _numbered_output_stem(
     if track_number <= 0:
         return None
 
+    # Pad to the album's own width (so a 120-track box set gets "007", not "07"
+    # squeezed in among "112"), falling back to the everyday two digits so
+    # "01 - Track" sorts before "10 - Track" like a filesystem expects.
+    try:
+        track_total = int(track_total) if track_total else None
+    except (TypeError, ValueError):
+        track_total = None
+    pad_width = max(2, len(str(track_total))) if track_total else 2
+
     safe_title = _safe_sanitized_title(title, fallback)
-    numbered_title = f"{track_number} - {safe_title}"
+    numbered_title = f"{track_number:0{pad_width}d} - {safe_title}"
     if playlist_routed or not get_setting_bool("organise_by_artist", True, user_id=user_id):
         safe_artist = sanitize_filename(artist or "Unknown Artist")
         return cap_filename_stem(f"{safe_artist} - {numbered_title}")
@@ -225,6 +235,7 @@ def _rename_with_track_number_if_enabled(
     title: str,
     fallback: str,
     track_number: int | None,
+    track_total: int | None = None,
     user_id: str | None = None,
     playlist_routed: bool = False,
 ) -> Path:
@@ -233,7 +244,7 @@ def _rename_with_track_number_if_enabled(
         return audio_file
 
     new_stem = _numbered_output_stem(
-        artist, title, fallback, track_number,
+        artist, title, fallback, track_number, track_total,
         user_id=user_id, playlist_routed=playlist_routed,
     )
     if not new_stem or audio_file.stem == new_stem:
@@ -4015,7 +4026,7 @@ def process_playlist_download(job_id: str, playlist_id: str, playlist_name: str,
 
                 audio_file = _rename_with_track_number_if_enabled(
                     audio_file, artist, title, video_id,
-                    tag_track_num, user_id=user_id,
+                    tag_track_num, tag_track_total, user_id=user_id,
                     playlist_routed=bool(playlists_dir),
                 )
 
@@ -4541,7 +4552,7 @@ def process_slskd_download(job_id: str, username: str, filename: str, artist: st
 
         final_file = _rename_with_track_number_if_enabled(
             final_file, tag_album_artist or artist, title, Path(filename).stem or job_id,
-            tag_track_num, user_id=user_id,
+            tag_track_num, tag_track_total, user_id=user_id,
             playlist_routed=bool(playlists_dir) and not playlist_album_routed,
         )
 
@@ -5024,7 +5035,7 @@ def _process_direct_mp3_download(job_id: str, download_url: str, artist_hint: st
 
         output_path = _rename_with_track_number_if_enabled(
             output_path, tag_album_artist or artist, title, job_id,
-            tag_track_num, user_id=user_id,
+            tag_track_num, tag_track_total, user_id=user_id,
             playlist_routed=bool(playlists_dir) and not playlist_album_routed,
         )
 
@@ -5761,7 +5772,7 @@ def process_download(job_id: str, video_id: str, convert_audio: bool = True, sou
 
         audio_file = _rename_with_track_number_if_enabled(
             audio_file, tag_album_artist or artist, title, video_id,
-            tag_track_num, user_id=user_id,
+            tag_track_num, tag_track_total, user_id=user_id,
             # Album-routed playlist tracks sit in Artist/Album/ so no artist prefix needed.
             playlist_routed=bool(playlists_dir) and not playlist_album_routed,
         )

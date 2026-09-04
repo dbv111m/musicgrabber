@@ -55,7 +55,7 @@ MusicGrabber is intentionally narrow. It is **not**:
 - **Enhanced metadata:** AcoustID audio fingerprinting with MusicBrainz lookups, falling back to source tags. For "Artist - Title" queries, MusicBrainz expected duration is used as a scoring signal at search time, so a 1:41 DJ edit won't outrank the 3:31 original
 - **Manual picks remain deliberate, not gullible:** choosing a live version, remix or edit is allowed to disagree with MusicBrainz, but MusicGrabber remembers the duration shown on that exact result and rejects downloaded bytes that are substantially shorter. A valid 30-second CDN preview can no longer dress up as the four-minute track you clicked
 - **Synced lyrics:** automatic lyrics fetching from LRClib, saved as `.lrc` files
-- **Auto-organise:** `Singles/Artist/Title.flac` (or flat `Singles/Artist - Title.flac` with "Organise by Artist" off). Optional track-number filenames produce `Singles/Artist/1 - Title.flac` when metadata includes a track number. Album mode uses `Albums/Artist/Album/Track.flac`
+- **Auto-organise:** `Singles/Artist/Title.flac` (or flat `Singles/Artist - Title.flac` with "Organise by Artist" off). Optional track-number filenames produce `Singles/Artist/01 - Title.flac` when metadata includes a track number, zero-padded so track 10 doesn't jump the queue. Album mode uses `Albums/Artist/Album/Track.flac`
 - **Duplicate detection:** local filesystem check plus optional Navidrome Subsonic API check
 - **Trash bin:** deleted files move to `/data/.trash/` instead of being permanently removed; restore with one click to skip re-downloading. Restoring a rejected download also marks its failed Queue row completed, because you have chosen that version after all. Files that fail mismatch or duration checks also land in the trash so you can listen before they vanish
 - **In-queue playback:** play button on completed queue cards and trashed files for instant preview without leaving the tab
@@ -356,7 +356,7 @@ Settings are stored in the database and persist across container restarts.
 | `PLAYLISTS_SUBDIR` | *(empty)* | Optional subfolder under `MUSIC_DIR` for playlist-routed downloads. Empty means playlist files use the Singles layout |
 | `ALBUMS_SUBDIR` | `Albums` | Subfolder under `MUSIC_DIR` for album-mode downloads. Use `.` for the music root |
 | `ORGANISE_BY_ARTIST` | `true` | Create artist subfolders under Singles. Set to `false` for a flat directory |
-| `INCLUDE_TRACK_NUMBER_IN_FILENAME` | `false` | Prefix saved filenames with the resolved track number when one is available, e.g. `Singles/Artist/1 - Title.flac` |
+| `INCLUDE_TRACK_NUMBER_IN_FILENAME` | `false` | Prefix saved filenames with the resolved, zero-padded track number when one is available, e.g. `Singles/Artist/01 - Title.flac` |
 | `AUTO_ALBUM_SINGLES` | `false` | If MusicBrainz finds album context for a single, move it into `Artist/Album/` automatically |
 | `AUTO_ALBUM_SINGLES_USE_ALBUMS_DIR` | `false` | Put auto-routed singles under the Albums directory instead of under Singles |
 | `PLAYLIST_ALBUM_AS_NAME` | `false` | Tag playlist-routed tracks as one compilation using the playlist name as the album |

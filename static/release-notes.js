@@ -9,7 +9,15 @@
 const RELEASE_NOTES = {
     "4.1.1": {
         title: "What's New in v4.1.1",
-        sections: []
+        sections: [
+            {
+                heading: "Tidier filenames",
+                items: [
+                    "Numbered track filenames now get a leading zero, so \"01 - Track\" sorts before \"10 - Track\" instead of after it. Big box sets pad a bit wider so nothing gets lost in the middle of a tracklist.",
+                    "Fixed a rare one: some artist and track names use a fancy hyphen character that looks normal but isn't, and a few SFTP apps and older file shares would turn it into a \"?\" on disk. Those now save as a plain, boring, perfectly readable hyphen.",
+                ]
+            },
+        ]
     },
     "4.1.0": {
         title: "What's New in v4.1.0",

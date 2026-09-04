@@ -51,8 +51,26 @@ def cap_filename_stem(stem: str) -> str:
     return truncate_to_bytes(stem, MAX_FILENAME_BYTES - FILENAME_STEM_RESERVE_BYTES)
 
 
+# Artist/track titles arrive with all sorts of "smart" hyphen and dash lookalikes
+# (MusicBrainz, YouTube uploaders and co all have their favourites). They're
+# valid UTF-8 and look fine in a terminal, but plenty of SFTP clients, older
+# SMB shares and non-UTF-8-locale tools mangle them into a "?" on disk, which
+# is a right pain when it's sitting in the middle of your folder name. Fold
+# them down to a plain ASCII hyphen so the filename actually travels.
+_UNICODE_DASH_TRANSLATION = str.maketrans({
+    "‐": "-",  # hyphen
+    "‑": "-",  # non-breaking hyphen
+    "‒": "-",  # figure dash
+    "–": "-",  # en dash
+    "—": "-",  # em dash
+    "―": "-",  # horizontal bar
+    "−": "-",  # minus sign
+})
+
+
 def sanitize_filename(name: str) -> str:
     """Remove/replace characters that are problematic in filenames"""
+    name = name.translate(_UNICODE_DASH_TRANSLATION)
     name = re.sub(r'[<>:"/\\|?*]', '', name)
     name = re.sub(r'\s+', ' ', name).strip()
     name = name[:MAX_FILENAME_LENGTH]
