@@ -1,5 +1,5 @@
 # Music Grabber
-**v4.1.0 (2026-09-03)**
+**v4.1.1 (2026-09-10)**
 
 A self-hosted music acquisition service. Search YouTube, SoundCloud, zvu4no, FreeMp3Cloud, Monochrome/Qobuz, optional MP3Phoenix, and optional Soulseek, tap a result and it downloads the best quality audio straight into your music library. You'll have a choice to convert to a common format, or store as is.
 
@@ -55,7 +55,7 @@ MusicGrabber is intentionally narrow. It is **not**:
 - **Enhanced metadata:** AcoustID audio fingerprinting with MusicBrainz lookups, falling back to source tags. For "Artist - Title" queries, MusicBrainz expected duration is used as a scoring signal at search time, so a 1:41 DJ edit won't outrank the 3:31 original
 - **Manual picks remain deliberate, not gullible:** choosing a live version, remix or edit is allowed to disagree with MusicBrainz, but MusicGrabber remembers the duration shown on that exact result and rejects downloaded bytes that are substantially shorter. A valid 30-second CDN preview can no longer dress up as the four-minute track you clicked
 - **Synced lyrics:** automatic lyrics fetching from LRClib, saved as `.lrc` files
-- **Auto-organise:** `Singles/Artist/Title.flac` (or flat `Singles/Artist - Title.flac` with "Organise by Artist" off). Optional track-number filenames produce `Singles/Artist/1 - Title.flac` when metadata includes a track number. Album mode uses `Albums/Artist/Album/Track.flac`
+- **Auto-organise:** `Singles/Artist/Title.flac` (or flat `Singles/Artist - Title.flac` with "Organise by Artist" off). Optional track-number filenames produce `Singles/Artist/01 - Title.flac` when metadata includes a track number, zero-padded so track 10 doesn't jump the queue. Album mode uses `Albums/Artist/Album/Track.flac`
 - **Duplicate detection:** local filesystem check plus optional Navidrome Subsonic API check
 - **Trash bin:** deleted files move to `/data/.trash/` instead of being permanently removed; restore with one click to skip re-downloading. Restoring a rejected download also marks its failed Queue row completed, because you have chosen that version after all. Files that fail mismatch or duration checks also land in the trash so you can listen before they vanish
 - **In-queue playback:** play button on completed queue cards and trashed files for instant preview without leaving the tab
@@ -81,6 +81,30 @@ MusicGrabber is intentionally narrow. It is **not**:
 MusicGrabber keeps the provider's source format by default. This avoids unnecessary re-encoding and prevents a lossy web download from turning up in a FLAC overcoat pretending it has always summered in the south of France.
 
 If you prefer a uniform library, choose **Convert to** and select FLAC, ALAC, Opus, or MP3. Opus, MP3, and the bitrate-limited AAC-in-M4A choices are lossy; when one is selected the Settings screen warns that converting a lossless source will permanently discard quality. FLAC and true ALAC preserve genuinely lossless input, but converting YouTube, SoundCloud, MP3, AAC, or Opus audio to a lossless container cannot restore information that has already gone missing. Monochrome and Soulseek may provide native lossless files; MusicGrabber records the known source and stored formats separately so the distinction survives the trip into your library.
+
+## Library scans and slow network shares
+
+The playlist destination selector and Stats storage totals refresh in the background.
+Watched playlist names and database-backed statistics appear immediately; physical
+playlist names and storage figures show a scanning indicator until their first
+complete scan finishes. Later requests use the last complete result while refreshing
+snapshots older than five minutes. Files added or removed outside MusicGrabber can
+therefore take a refresh to appear. Failed refreshes keep the previous result and
+show a failure message; reopen the view after at least 30 seconds to retry.
+`GET /api/playlists` includes `scan_state` (`refreshing`, `ready`, or `error`)
+and `scan_ready`; `GET /api/stats` includes `storage_scan_state`, with
+`storage_bytes` and `file_count` set to `null` until a complete result is available.
+
+Duplicate detection still checks familiar filenames first, then uses embedded
+Artist and Title tags to find files renamed by another organiser. One background
+tag scan runs per user/library at a time, with complete results cached for five
+minutes from completion. A lookup waits at most five seconds for that tag scan.
+If it is still running, the download reports an incomplete duplicate check and
+can be retried once indexing finishes; it does not treat an unfinished index as
+proof that a track is missing. API actions needing the same lookup return `503`
+with a retry message. The scan continues in the background. This limit applies to
+the tag-index wait, not every filesystem operation or an unresponsive NAS mount.
+Scans are kept in memory and start again after a service restart.
 
 ## Audio Provenance Audit
 
@@ -356,7 +380,7 @@ Settings are stored in the database and persist across container restarts.
 | `PLAYLISTS_SUBDIR` | *(empty)* | Optional subfolder under `MUSIC_DIR` for playlist-routed downloads. Empty means playlist files use the Singles layout |
 | `ALBUMS_SUBDIR` | `Albums` | Subfolder under `MUSIC_DIR` for album-mode downloads. Use `.` for the music root |
 | `ORGANISE_BY_ARTIST` | `true` | Create artist subfolders under Singles. Set to `false` for a flat directory |
-| `INCLUDE_TRACK_NUMBER_IN_FILENAME` | `false` | Prefix saved filenames with the resolved track number when one is available, e.g. `Singles/Artist/1 - Title.flac` |
+| `INCLUDE_TRACK_NUMBER_IN_FILENAME` | `false` | Prefix saved filenames with the resolved, zero-padded track number when one is available, e.g. `Singles/Artist/01 - Title.flac` |
 | `AUTO_ALBUM_SINGLES` | `false` | If MusicBrainz finds album context for a single, move it into `Artist/Album/` automatically |
 | `AUTO_ALBUM_SINGLES_USE_ALBUMS_DIR` | `false` | Put auto-routed singles under the Albums directory instead of under Singles |
 | `PLAYLIST_ALBUM_AS_NAME` | `false` | Tag playlist-routed tracks as one compilation using the playlist name as the album |
@@ -477,6 +501,11 @@ environment:
 ```
 
 Get your API key from Jellyfin: Dashboard, API Keys, Add.
+
+MusicGrabber uses Jellyfin's current `Authorization: MediaBrowser` token header,
+which works with Jellyfin 12 and older supported releases. Jellyfin 12 disables
+the deprecated `X-Emby-Token` method by default; MusicGrabber does not require
+legacy authorization to be enabled, nor does an existing API key need replacing.
 
 ### Plex Auto-Rescan
 

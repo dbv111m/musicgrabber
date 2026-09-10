@@ -18,6 +18,7 @@ import shutil
 
 from constants import (
     AUDIO_EXTENSIONS, MAX_FILENAME_LENGTH, MUSIC_DIR,
+    LIBRARY_SCAN_TTL_SECONDS, LIBRARY_INDEX_WAIT_SECONDS, LIBRARY_SCAN_RETRY_SECONDS,
     MAX_FILENAME_BYTES, FILENAME_STEM_RESERVE_BYTES,
     EXCLUDED_SCAN_DIR_NAMES, EXCLUDED_SCAN_DIR_PREFIXES,
 )
@@ -51,8 +52,26 @@ def cap_filename_stem(stem: str) -> str:
     return truncate_to_bytes(stem, MAX_FILENAME_BYTES - FILENAME_STEM_RESERVE_BYTES)
 
 
+# Artist/track titles arrive with all sorts of "smart" hyphen and dash lookalikes
+# (MusicBrainz, YouTube uploaders and co all have their favourites). They're
+# valid UTF-8 and look fine in a terminal, but plenty of SFTP clients, older
+# SMB shares and non-UTF-8-locale tools mangle them into a "?" on disk, which
+# is a right pain when it's sitting in the middle of your folder name. Fold
+# them down to a plain ASCII hyphen so the filename actually travels.
+_UNICODE_DASH_TRANSLATION = str.maketrans({
+    "‐": "-",  # hyphen
+    "‑": "-",  # non-breaking hyphen
+    "‒": "-",  # figure dash
+    "–": "-",  # en dash
+    "—": "-",  # em dash
+    "―": "-",  # horizontal bar
+    "−": "-",  # minus sign
+})
+
+
 def sanitize_filename(name: str) -> str:
     """Remove/replace characters that are problematic in filenames"""
+    name = name.translate(_UNICODE_DASH_TRANSLATION)
     name = re.sub(r'[<>:"/\\|?*]', '', name)
     name = re.sub(r'\s+', ' ', name).strip()
     name = name[:MAX_FILENAME_LENGTH]
@@ -345,7 +364,7 @@ def path_has_excluded_scan_dir(path: Path, root: Path | None = None) -> bool:
     return any(is_excluded_scan_dir(part) for part in relative.parts)
 
 
-def iter_library_audio_files(root: Path, extensions=None):
+def iter_library_audio_files(root: Path, extensions=None, *, strict=False):
     """Walk `root` yielding audio files, skipping trash bins and symlinks.
 
     The single walker every full-library scan should use. Symlinks are not
@@ -358,12 +377,20 @@ def iter_library_audio_files(root: Path, extensions=None):
     exts = tuple(ext.lower() for ext in (extensions or AUDIO_EXTENSIONS))
     try:
         if not root.exists():
+            if strict:
+                raise FileNotFoundError(f"Library directory is unavailable: {root}")
             return
         root_resolved = root.resolve()
     except OSError:
+        if strict:
+            raise
         return
 
-    for current, dirnames, filenames in os.walk(root, followlinks=False):
+    def walk_error(exc):
+        if strict:
+            raise exc
+
+    for current, dirnames, filenames in os.walk(root, followlinks=False, onerror=walk_error):
         current_path = Path(current)
         dirnames[:] = [
             d for d in dirnames
@@ -446,8 +473,20 @@ def authoritative_audio_file(raw_path: str | None, user_id: str | None = None) -
     return candidate
 
 
-_TAG_INDEX_TTL_SECONDS = 300
+_TAG_INDEX_TTL_SECONDS = LIBRARY_SCAN_TTL_SECONDS
 _tag_index_lock = threading.Lock()
+_tag_index_running = {}
+_tag_index_errors = {}
+
+
+class LibraryIndexUnavailable(RuntimeError):
+    """A complete duplicate check is not available yet; never assume a miss."""
+
+    prefix = "Duplicate check unavailable: "
+
+    def __init__(self, message):
+        super().__init__(self.prefix + message)
+
 _tag_index_cache: dict[tuple[str, str], tuple[float, dict[tuple[str, str], Path]]] = {}
 
 
@@ -467,7 +506,7 @@ def build_library_tag_index(user_id: str | None = None) -> dict[tuple[str, str],
 
     music_root = Path(get_setting("music_dir", str(MUSIC_DIR), user_id=user_id))
     index: dict[tuple[str, str], Path] = {}
-    for audio_file in iter_library_audio_files(music_root):
+    for audio_file in iter_library_audio_files(music_root, strict=True):
         artist, title = read_artist_title(audio_file)
         if not artist or not title:
             continue
@@ -500,14 +539,59 @@ def _tagged_duplicate(artist: str, title: str, user_id: str | None = None) -> Op
     # five minutes, which keeps bulk imports from reading every tag per track.
     stale_hit = any(key in index for key in wanted)
     if cached is None or stale_hit or now - cached_at >= _TAG_INDEX_TTL_SECONDS:
-        fresh = build_library_tag_index(user_id=user_id)
         with _tag_index_lock:
-            _tag_index_cache[cache_key] = (now, fresh)
-        for key in wanted:
-            hit = fresh.get(key)
-            safe_hit = authoritative_audio_file(str(hit), user_id=user_id) if hit else None
-            if safe_hit:
-                return safe_hit
+            # A different caller may have finished while we checked the old snapshot.
+            current = _tag_index_cache.get(cache_key)
+            if current is not cached:
+                ready = threading.Event()
+                ready.set()
+            else:
+                failure = _tag_index_errors.get(cache_key)
+                if failure and now - failure < LIBRARY_SCAN_RETRY_SECONDS:
+                    raise LibraryIndexUnavailable("Library tag scan failed. Check the library mount and retry shortly.")
+                ready = _tag_index_running.get(cache_key)
+                if ready is None:
+                    ready = threading.Event()
+                    _tag_index_running[cache_key] = ready
+
+                    def refresh():
+                        try:
+                            fresh = build_library_tag_index(user_id=user_id)
+                            with _tag_index_lock:
+                                _tag_index_cache[cache_key] = (time.monotonic(), fresh)
+                                _tag_index_errors.pop(cache_key, None)
+                        except Exception as exc:
+                            print(f"Library tag scan failed: {exc}")
+                            with _tag_index_lock:
+                                _tag_index_errors[cache_key] = time.monotonic()
+                        finally:
+                            with _tag_index_lock:
+                                _tag_index_running.pop(cache_key, None)
+                                ready.set()
+
+                    threading.Thread(target=refresh, daemon=True).start()
+        if not ready.wait(LIBRARY_INDEX_WAIT_SECONDS):
+            raise LibraryIndexUnavailable(
+                "Library tags are still being indexed in the background. "
+                "Duplicate checking is incomplete; retry once the scan has finished."
+            )
+        with _tag_index_lock:
+            if cache_key in _tag_index_errors:
+                raise LibraryIndexUnavailable("Library tag scan failed. Check the library mount and retry shortly.")
+            current = _tag_index_cache.get(cache_key)
+        return _tagged_duplicate_after_refresh(current, wanted, user_id)
+
+    return None
+
+
+def _tagged_duplicate_after_refresh(snapshot, wanted, user_id):
+    if snapshot is None:
+        raise LibraryIndexUnavailable("Library tags are not ready. Retry shortly.")
+    for key in wanted:
+        hit = snapshot[1].get(key)
+        safe_hit = authoritative_audio_file(str(hit), user_id=user_id) if hit else None
+        if safe_hit:
+            return safe_hit
     return None
 
 
@@ -591,6 +675,8 @@ def check_duplicate(artist: str, title: str, user_id: str | None = None) -> Opti
         # Title tags across the library so external renames do not manufacture a
         # duplicate download loop.
         return _tagged_duplicate(artist, title, user_id=user_id)
+    except LibraryIndexUnavailable:
+        raise
     except Exception:
         return None
 

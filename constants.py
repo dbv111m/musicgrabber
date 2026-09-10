@@ -7,7 +7,7 @@ All shared constants in one place for easy tuning.
 import os
 from pathlib import Path
 
-VERSION = "4.1.0"
+VERSION = "4.1.1"
 
 
 def _normalise_root_path(value: str) -> str:
@@ -466,3 +466,8 @@ QBDLX_TOKEN_CACHE_TTL = int(os.getenv("QBDLX_TOKEN_CACHE_TTL", "600"))  # re-fet
 SOURCE_HEALTH_CHECK_INTERVAL = int(os.getenv("SOURCE_HEALTH_CHECK_INTERVAL", "600"))  # re-check a source's health at most this often (seconds)
 SOURCE_HEALTH_COOLDOWN = int(os.getenv("SOURCE_HEALTH_COOLDOWN", "600"))              # how long a failed source stays auto-disabled (seconds)
 SERVICECHECK_TIMEOUT = int(os.getenv("SERVICECHECK_TIMEOUT", "8"))                    # per-source health probe timeout (seconds)
+
+# Library scans: serve cached listings and bound duplicate lookup waits.
+LIBRARY_SCAN_TTL_SECONDS = 300
+LIBRARY_INDEX_WAIT_SECONDS = 5
+LIBRARY_SCAN_RETRY_SECONDS = 30
