@@ -17,6 +17,14 @@ const RELEASE_NOTES = {
                 ]
             },
             {
+                heading: "Less waiting for the NAS",
+                items: [
+                    "Playlist choices and storage totals load in the background now, so the rest of the page can get on with its life. Loading and failed scans are labelled, and previous results stay visible during a refresh.",
+                    "Duplicate checks now share one tag scan instead of all rummaging through the same library. If it takes more than five seconds, you get a clear retry message while indexing continues, rather than a download sitting there indefinitely. Incomplete checks never count as a missing track.",
+                    "Fixed a premature playlist request around login, plus a late authentication error that could clear a newer session.",
+                ]
+            },
+            {
                 heading: "Tidier filenames",
                 items: [
                     "Numbered track filenames now get a leading zero, so \"01 - Track\" sorts before \"10 - Track\" instead of after it. Big box sets pad a bit wider so nothing gets lost in the middle of a tracklist.",

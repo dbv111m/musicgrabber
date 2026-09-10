@@ -54,6 +54,7 @@ from slskd import (
     search_slskd, should_retry_slskd_error,
 )
 from utils import (
+    LibraryIndexUnavailable,
     sanitize_filename,
     cap_filename_stem,
     sanitize_playlist_name,
@@ -1067,6 +1068,11 @@ def process_acquisition_cycle(
         attempted_sources.add(source)
         if candidate_id:
             attempted_ids.add(candidate_id)
+
+        # Changing provider cannot make a local library scan finish sooner.
+        if last_error.startswith(LibraryIndexUnavailable.prefix):
+            finish_acquisition_cycle(target_id, "failed", last_error)
+            return
 
         if not automatic or not get_setting_bool(
             "source_offline_fallback", True, user_id=user_id
@@ -5864,6 +5870,7 @@ def process_download(job_id: str, video_id: str, convert_audio: bool = True, sou
         # when the user has the setting on and we genuinely know what we were after.
         usable_query = bool(artist) and bool(title) and title != video_id
         if (allow_cross_source_fallback
+                and not isinstance(e, LibraryIndexUnavailable)
                 and usable_query
                 and len(attempted_ids) < _AUDIO_RESEARCH_MAX_ALTERNATES + 1
                 and get_setting_bool("source_offline_fallback", True, user_id=user_id)):

@@ -7,6 +7,9 @@
 
 ### Fixed
 - **Jellyfin 12 library refreshes work again** (issue #88): connection tests and automatic scans now use Jellyfin's current `Authorization: MediaBrowser` API token header. Jellyfin 12 disables the old `X-Emby-Token` header by default; older Jellyfin releases accept the new header too, so no server setting or new API key is needed.
+- **Slow library scans stop holding the UI hostage**: playlist files and Stats storage totals now refresh in the background, with loading/failure states and the last complete snapshot retained during refresh. Stats releases its database connection before filesystem work. Snapshots refresh on requests after five minutes.
+- **Duplicate tag scans share the work and have a bounded wait**: one scan per user/library, cache age measured from completion, and a five-second lookup wait. An unfinished scan produces an explicit retry message rather than a false missing-track result; failed scans do not publish an empty index. The scan continues in the background.
+- **Playlist loading waits for authentication**: the destination picker no longer sends an eager request before session validation. A late 401 from an older session also cannot clear a newly established session.
 - **Fancy Unicode hyphens in artist/track names no longer corrupt filenames on disk** (issue #87): reported as "alt-J" downloading to a folder that showed up as "alt?J" over SFTP. MusicBrainz and plenty of YouTube uploaders use "smart" dash characters (en dash, em dash, the proper Unicode hyphen) that look identical to a normal `-` in a terminal but are a different character underneath, and plenty of SFTP clients, older SMB shares and non-UTF-8-locale tools choke on them and print `?` instead. Filenames now fold these down to a plain ASCII hyphen before hitting disk. Existing folders already affected are not renamed automatically; the next matching download will use the corrected name.
 
 ## v4.1.0 (2026-09-03)

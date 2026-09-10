@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, FileResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, FileResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 import httpx
 
@@ -79,6 +79,9 @@ from search import (
     clear_automated_search_cache, SOURCE_REGISTRY, project_search_result,
     SourceSearchBusy,
 )
+from library_scans import snapshots, scan_playlists, scan_storage
+from utils import LibraryIndexUnavailable
+
 import servicecheck
 import monochrome_browser
 from slskd import slskd_enabled, search_slskd
@@ -426,6 +429,11 @@ def list_music_dirs(path: str = "", recursive: bool = False, max_depth: int | No
 # Playlist listing (watched + physical .m3u files)
 # =============================================================================
 
+@app.exception_handler(LibraryIndexUnavailable)
+async def library_index_unavailable(_request: Request, exc: LibraryIndexUnavailable):
+    return JSONResponse(status_code=503, content={"detail": str(exc)}, headers={"Retry-After": "30"})
+
+
 @app.get("/api/playlists")
 @prioritise_over_audio_audit
 def list_playlists(http_request: Request):
@@ -440,19 +448,14 @@ def list_playlists(http_request: Request):
 
     # Physical .m3u files from Playlists dir (lowest priority)
     playlists_dir = get_playlists_dir(user_id=user_id)
-    if playlists_dir and playlists_dir.exists():
-        try:
-            m3u_files = sorted(playlists_dir.rglob("*.m3u"), key=lambda p: p.stem.casefold())
-        except OSError:
-            m3u_files = []
-        for m3u in m3u_files:
-            name = m3u.stem
-            results[name] = {
-                "name": name,
-                "is_watched": False,
-                "watched_id": None,
-                "platform": None,
-            }
+    physical, scan_state = snapshots.get(
+        ("playlists", user_id, str(playlists_dir)),
+        lambda: scan_playlists(playlists_dir),
+    )
+    for name in physical or []:
+        results[name] = {
+            "name": name, "is_watched": False, "watched_id": None, "platform": None,
+        }
 
     # Watched playlists from DB (higher priority  -  overwrite any same-named .m3u entry)
     _scope_frag, _scope_params = _user_scope(user_id, is_admin)
@@ -472,7 +475,8 @@ def list_playlists(http_request: Request):
             "sync_mode": row["sync_mode"] or "append",
         }
 
-    return {"playlists": sorted(results.values(), key=lambda p: p["name"].casefold())}
+    return {"playlists": sorted(results.values(), key=lambda p: p["name"].casefold()),
+            "scan_state": scan_state, "scan_ready": physical is not None}
 
 
 # =============================================================================
@@ -1677,24 +1681,11 @@ def get_stats(http_request: Request):
         ).fetchone()
         converted_searches = int(search_to_download["converted_searches"] or 0)
 
-        # Storage usage  -  scan both Singles and Playlists dirs, deduplicate by inode
-        storage_bytes = 0
-        file_count = 0
-        seen_inodes: set[tuple] = set()
-        try:
-            for base_dir in [d for d in (get_singles_dir(), get_playlists_dir()) if d is not None]:
-                # Shared walker: skips NAS trash/recycle bins and symlinks, so the
-                # storage figure reflects the library rather than everything the
-                # user has ever deleted and the NAS has quietly kept hold of.
-                for f in iter_library_audio_files(base_dir, AUDIO_EXTENSIONS):
-                    st = f.stat()
-                    key = (st.st_dev, st.st_ino)
-                    if key not in seen_inodes:
-                        storage_bytes += st.st_size
-                        file_count += 1
-                        seen_inodes.add(key)
-        except OSError:
-            pass
+    # Release the DB connection before any filesystem work is scheduled.
+    directories = tuple(d for d in (get_singles_dir(), get_playlists_dir()) if d is not None)
+    storage, scan_state = snapshots.get(
+        ("storage", tuple(map(str, directories))), lambda: scan_storage(directories),
+    )
 
     return {
         "total_jobs": total,
@@ -1708,8 +1699,9 @@ def get_stats(http_request: Request):
         "converted_searches": converted_searches,
         "top_searched_artists": top_searched_artists,
         "recent": recent,
-        "storage_bytes": storage_bytes,
-        "file_count": file_count,
+        "storage_bytes": storage["storage_bytes"] if storage is not None else None,
+        "file_count": storage["file_count"] if storage is not None else None,
+        "storage_scan_state": scan_state,
     }
 
 

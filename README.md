@@ -82,6 +82,30 @@ MusicGrabber keeps the provider's source format by default. This avoids unnecess
 
 If you prefer a uniform library, choose **Convert to** and select FLAC, ALAC, Opus, or MP3. Opus, MP3, and the bitrate-limited AAC-in-M4A choices are lossy; when one is selected the Settings screen warns that converting a lossless source will permanently discard quality. FLAC and true ALAC preserve genuinely lossless input, but converting YouTube, SoundCloud, MP3, AAC, or Opus audio to a lossless container cannot restore information that has already gone missing. Monochrome and Soulseek may provide native lossless files; MusicGrabber records the known source and stored formats separately so the distinction survives the trip into your library.
 
+## Library scans and slow network shares
+
+The playlist destination selector and Stats storage totals refresh in the background.
+Watched playlist names and database-backed statistics appear immediately; physical
+playlist names and storage figures show a scanning indicator until their first
+complete scan finishes. Later requests use the last complete result while refreshing
+snapshots older than five minutes. Files added or removed outside MusicGrabber can
+therefore take a refresh to appear. Failed refreshes keep the previous result and
+show a failure message; reopen the view after at least 30 seconds to retry.
+`GET /api/playlists` includes `scan_state` (`refreshing`, `ready`, or `error`)
+and `scan_ready`; `GET /api/stats` includes `storage_scan_state`, with
+`storage_bytes` and `file_count` set to `null` until a complete result is available.
+
+Duplicate detection still checks familiar filenames first, then uses embedded
+Artist and Title tags to find files renamed by another organiser. One background
+tag scan runs per user/library at a time, with complete results cached for five
+minutes from completion. A lookup waits at most five seconds for that tag scan.
+If it is still running, the download reports an incomplete duplicate check and
+can be retried once indexing finishes; it does not treat an unfinished index as
+proof that a track is missing. API actions needing the same lookup return `503`
+with a retry message. The scan continues in the background. This limit applies to
+the tag-index wait, not every filesystem operation or an unresponsive NAS mount.
+Scans are kept in memory and start again after a service restart.
+
 ## Audio Provenance Audit
 
 Open **Watched → Audio Provenance Audit** and choose **Run Audit**. The scan

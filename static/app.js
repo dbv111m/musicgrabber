@@ -235,7 +235,7 @@
 
             if (response.status === 401) {
                 // Session expired or invalid; clear local state and show login screen
-                if (serverConfig && serverConfig.users_exist) {
+                if (token === getSessionToken() && serverConfig && serverConfig.users_exist) {
                     setSessionToken(null);
                     setCurrentUser(null);
                     showLoginScreen();
@@ -474,7 +474,12 @@
         let _albumDirAlbum = null;
         let _albumInfo = null; // response from /api/albums/dirs/{artist}/{album}/info
 
+        let playlistScanTimer = null;
+        let playlistScanBusy = false;
         async function loadPlaylists() {
+            if (playlistScanBusy) return;
+            playlistScanBusy = true;
+            clearTimeout(playlistScanTimer);
             try {
                 const resp = await apiFetch('/api/playlists');
                 if (!resp.ok) {
@@ -484,8 +489,22 @@
                 const data = await resp.json();
                 _playlists = data.playlists || [];
                 _populatePlaylistSelector();
+                const sel = document.getElementById('playlistSelectorInput');
+                if (sel && data.scan_state !== 'ready') {
+                    const status = document.createElement('option');
+                    status.disabled = true;
+                    status.textContent = data.scan_state === 'error'
+                        ? 'Library playlist scan failed; try again shortly'
+                        : 'Scanning library playlists…';
+                    sel.appendChild(status);
+                }
+                if (data.scan_state === 'refreshing' && document.getElementById('app').style.display !== 'none') {
+                    playlistScanTimer = setTimeout(loadPlaylists, 3000);
+                }
             } catch (e) {
                 console.warn('loadPlaylists failed:', e);
+            } finally {
+                playlistScanBusy = false;
             }
         }
 
@@ -506,7 +525,7 @@
             newOpt.value = '__new__';
             newOpt.textContent = '+ New playlist...';
             sel.appendChild(newOpt);
-            if (current && current !== '__new__' && [...sel.options].some(o => o.value === current)) {
+            if (current && [...sel.options].some(o => o.value === current)) {
                 sel.value = current;
             }
         }
@@ -765,8 +784,6 @@
             const playlistPanel = document.getElementById('playlistSelector');
             const albumPanel = document.getElementById('albumRoutePanel');
             if (!toggle) return;
-
-            loadPlaylists();
 
             toggle.addEventListener('click', () => {
                 if (_destinationMode !== null) { _resetDestination(); return; }
@@ -1079,6 +1096,7 @@
             applyUserRoleToUI();
             populateSourceChips();
             startSourceHealthPolling();
+            if (config) loadPlaylists();
           } finally {
             dismissBootPanel();
           }
@@ -9913,15 +9931,19 @@
         // Statistics Dashboard
         // =============================================================================
 
-        async function loadStats() {
-            statsContent.innerHTML = `
-                <div class="loading stats-loading" role="status">
-                    <div class="stats-equaliser" aria-hidden="true">
-                        <span></span><span></span><span></span>
+        let statsScanTimer = null;
+        async function loadStats(refreshing = false) {
+            clearTimeout(statsScanTimer);
+            if (!refreshing) {
+                statsContent.innerHTML = `
+                    <div class="loading stats-loading" role="status">
+                        <div class="stats-equaliser" aria-hidden="true">
+                            <span></span><span></span><span></span>
+                        </div>
+                        <span>Crunching the numbers…</span>
                     </div>
-                    <span>Crunching the numbers…</span>
-                </div>
-            `;
+                `;
+            }
 
             try {
                 const response = await apiFetch('/api/stats');
@@ -9929,6 +9951,11 @@
 
                 const data = await response.json();
                 renderStats(data);
+                if (data.storage_scan_state === 'refreshing') {
+                    statsScanTimer = setTimeout(() => {
+                        if (statsTabContainer.classList.contains('tab-visible') && document.getElementById('app').style.display !== 'none') loadStats(true);
+                    }, 3000);
+                }
             } catch (error) {
                 statsContent.innerHTML = `
                     <div class="empty-state">
@@ -10089,8 +10116,8 @@
                         <div style="font-size: 11px; color: var(--text-secondary);">Success rate</div>
                     </div>
                     <div style="padding: 14px; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 12px; text-align: center;" title="Number of audio files in your library and total disk space used">
-                        <div style="font-size: 22px; font-weight: 600;">${data.file_count}</div>
-                        <div style="font-size: 11px; color: var(--text-secondary);">${formatBytes(data.storage_bytes)}</div>
+                        <div style="font-size: 22px; font-weight: 600;">${data.file_count == null ? (data.storage_scan_state === 'error' ? 'Unavailable' : 'Scanning…') : data.file_count}</div>
+                        <div style="font-size: 11px; color: var(--text-secondary);">${data.storage_bytes == null ? (data.storage_scan_state === 'error' ? 'Scan failed; reopen Stats to retry' : 'Reading library storage') : formatBytes(data.storage_bytes)}${data.storage_bytes != null && data.storage_scan_state === 'refreshing' ? ' (refreshing)' : data.storage_bytes != null && data.storage_scan_state === 'error' ? ' (refresh failed)' : ''}</div>
                     </div>
                     <div style="padding: 14px; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 12px; text-align: center;" title="${searchSuccessRate}% of searches returned at least one result">
                         <div style="font-size: 22px; font-weight: 600;">${data.total_searches || 0}</div>
