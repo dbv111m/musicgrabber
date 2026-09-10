@@ -478,6 +478,11 @@ environment:
 
 Get your API key from Jellyfin: Dashboard, API Keys, Add.
 
+MusicGrabber uses Jellyfin's current `Authorization: MediaBrowser` token header,
+which works with Jellyfin 12 and older supported releases. Jellyfin 12 disables
+the deprecated `X-Emby-Token` method by default; MusicGrabber does not require
+legacy authorization to be enabled, nor does an existing API key need replacing.
+
 ### Plex Auto-Rescan
 
 To automatically trigger a Plex library scan after downloads:

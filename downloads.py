@@ -1446,6 +1446,11 @@ def _copy_to_auto_import(final_file: Path | None, user_id: str | None = None) ->
         print(f"Auto-import copy failed for {final_file}: {e}")
 
 
+def jellyfin_auth_headers(api_key: str) -> dict[str, str]:
+    """Build Jellyfin's supported authorization header for API tokens."""
+    return {"Authorization": f'MediaBrowser Token="{api_key}"'}
+
+
 def trigger_jellyfin_scan(user_id: str | None = None):
     """Trigger a Jellyfin library scan via API"""
     jellyfin_url = get_setting("jellyfin_url", user_id=user_id)
@@ -1458,7 +1463,7 @@ def trigger_jellyfin_scan(user_id: str | None = None):
         with httpx.Client(timeout=TIMEOUT_HTTP_REQUEST) as client:
             client.post(
                 f"{jellyfin_url}/Library/Refresh",
-                headers={"X-Emby-Token": jellyfin_api_key}
+                headers=jellyfin_auth_headers(jellyfin_api_key)
             )
     except Exception:
         pass  # Non-critical, scan will happen on schedule anyway

@@ -11,6 +11,12 @@ const RELEASE_NOTES = {
         title: "What's New in v4.1.1",
         sections: [
             {
+                heading: "Jellyfin 12",
+                items: [
+                    "Jellyfin 12 changed the lock; MusicGrabber now uses its current API authentication, so connection tests and automatic library scans work again. Your existing API key is still fine.",
+                ]
+            },
+            {
                 heading: "Tidier filenames",
                 items: [
                     "Numbered track filenames now get a leading zero, so \"01 - Track\" sorts before \"10 - Track\" instead of after it. Big box sets pad a bit wider so nothing gets lost in the middle of a tracklist.",

@@ -87,6 +87,7 @@ from downloads import (
     process_slskd_download,
     rebuild_watched_playlist_m3u,
     trigger_navidrome_scan, trigger_jellyfin_scan, trigger_plex_scan,
+    jellyfin_auth_headers,
     check_navidrome_duplicate, check_lidarr_duplicate,
     get_job_source_allowlist,
 )
@@ -1163,7 +1164,7 @@ def test_jellyfin_connection(http_request: Request, body: TestJellyfinRequest = 
         with httpx.Client(timeout=10) as client:
             response = client.get(
                 f"{url.rstrip('/')}/System/Info",
-                headers={"X-Emby-Token": api_key}
+                headers=jellyfin_auth_headers(api_key)
             )
             if response.status_code == 200:
                 data = response.json()

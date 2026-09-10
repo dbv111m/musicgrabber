@@ -6,6 +6,7 @@
 - **Track numbers in filenames now get a leading zero** (issue #86): with "include track number in filename" switched on, `1 - Track.flac` is now `01 - Track.flac`, so it sorts before `10 - Track.flac` instead of after it, the way any self-respecting filesystem ought to. Albums over 99 tracks (looking at you, box sets) pad wider still, e.g. `007 - Track.flac` for a 120-track release. Lyrics files inherit the same padded name automatically, no separate fix needed.
 
 ### Fixed
+- **Jellyfin 12 library refreshes work again** (issue #88): connection tests and automatic scans now use Jellyfin's current `Authorization: MediaBrowser` API token header. Jellyfin 12 disables the old `X-Emby-Token` header by default; older Jellyfin releases accept the new header too, so no server setting or new API key is needed.
 - **Fancy Unicode hyphens in artist/track names no longer corrupt filenames on disk** (issue #87): reported as "alt-J" downloading to a folder that showed up as "alt?J" over SFTP. MusicBrainz and plenty of YouTube uploaders use "smart" dash characters (en dash, em dash, the proper Unicode hyphen) that look identical to a normal `-` in a terminal but are a different character underneath, and plenty of SFTP clients, older SMB shares and non-UTF-8-locale tools choke on them and print `?` instead. Filenames now fold these down to a plain ASCII hyphen before hitting disk. Existing folders already affected are not renamed automatically; the next matching download will use the corrected name.
 
 ## v4.1.0 (2026-09-03)

@@ -307,6 +307,42 @@ def test_trigger_plex_scan_refreshes_only_music_sections(monkeypatch):
     ]
 
 
+def test_trigger_jellyfin_scan_uses_modern_authorization(monkeypatch):
+    downloads = _import_downloads_or_skip()
+    requests = []
+
+    class FakeClient:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def post(self, url, headers=None, **kwargs):
+            requests.append((url, headers))
+            return _FakeResponse({})
+
+    monkeypatch.setattr(
+        downloads,
+        "get_setting",
+        lambda key, user_id=None: {
+            "jellyfin_url": "http://jellyfin",
+            "jellyfin_api_key": "token",
+        }.get(key, ""),
+    )
+    monkeypatch.setattr(downloads.httpx, "Client", FakeClient)
+
+    downloads.trigger_jellyfin_scan()
+
+    assert requests == [(
+        "http://jellyfin/Library/Refresh",
+        {"Authorization": 'MediaBrowser Token="token"'},
+    )]
+
+
 def test_trigger_plex_scan_noop_when_unconfigured(monkeypatch):
     downloads = _import_downloads_or_skip()
     called = []
