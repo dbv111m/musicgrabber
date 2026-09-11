@@ -80,6 +80,16 @@ def playable_job(api, base_url):
     assert r.status_code == 200
     payload = r.json()
     jobs = payload if isinstance(payload, list) else payload.get("jobs", [])
+    # Prefer a row whose exact final path was verified by the jobs endpoint.
+    # A legacy row without one may require a full tag-index scan before the
+    # stream route can find it, which tests indexing rather than playback.
+    for job in jobs:
+        if (
+            job.get("status") == "completed"
+            and not job.get("file_deleted")
+            and job.get("final_path")
+        ):
+            return job["id"]
     for job in jobs:
         if job.get("status") == "completed" and not job.get("file_deleted"):
             return job["id"]

@@ -98,13 +98,18 @@ and `scan_ready`; `GET /api/stats` includes `storage_scan_state`, with
 Duplicate detection still checks familiar filenames first, then uses embedded
 Artist and Title tags to find files renamed by another organiser. One background
 tag scan runs per user/library at a time, with complete results cached for five
-minutes from completion. A lookup waits at most five seconds for that tag scan.
-If it is still running, the download reports an incomplete duplicate check and
-can be retried once indexing finishes; it does not treat an unfinished index as
-proof that a track is missing. API actions needing the same lookup return `503`
-with a retry message. The scan continues in the background. This limit applies to
-the tag-index wait, not every filesystem operation or an unresponsive NAS mount.
-Scans are kept in memory and start again after a service restart.
+minutes from completion. A cold or stale tag index starts refreshing in the
+background, but downloads and API actions never wait for it. They use the cheap
+filename and path checks plus the last complete tag snapshot, if one exists, and
+carry on immediately. While the first background scan is incomplete, a file
+renamed by an external organiser may not yet be recognised as a duplicate; that
+is preferable to turning library housekeeping into a download blockade. Scans
+are kept in memory and start again after a service restart.
+
+This duplicate-safety index is separate from the optional **Track Upgrades**
+scan. If both need the library at once, the optional upgrade scan yields to the
+tag-index refresh. Switching Track Upgrades off stops its active pass shortly;
+neither scan delays downloads.
 
 ## Audio Provenance Audit
 

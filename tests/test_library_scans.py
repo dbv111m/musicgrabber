@@ -1,4 +1,4 @@
-"""Slow library scans must not monopolise requests or manufacture duplicates."""
+"""Slow library scans stay in the background and publish only complete results."""
 
 import sys
 import threading
@@ -73,11 +73,10 @@ def tag_cache(monkeypatch, tmp_path):
     monkeypatch.setattr(utils, '_tag_index_running', {})
     monkeypatch.setattr(utils, '_tag_index_errors', {})
     monkeypatch.setattr(utils, 'get_setting', lambda *a, **kw: str(tmp_path))
-    monkeypatch.setattr(utils, 'LIBRARY_INDEX_WAIT_SECONDS', .02)
     return tmp_path
 
 
-def test_duplicate_timeout_is_not_a_miss_and_scan_is_shared(tag_cache, monkeypatch):
+def test_duplicate_scan_never_blocks_and_worker_is_shared(tag_cache, monkeypatch):
     release = threading.Event()
     calls = []
     song = tag_cache / 'renamed.flac'
@@ -90,11 +89,12 @@ def test_duplicate_timeout_is_not_a_miss_and_scan_is_shared(tag_cache, monkeypat
 
     monkeypatch.setattr(utils, 'build_library_tag_index', scan)
     try:
+        started = time.monotonic()
         with ThreadPoolExecutor(max_workers=4) as pool:
             futures = [pool.submit(utils._tagged_duplicate, 'Blur', 'Song 2', 'alice') for _ in range(4)]
             for future in futures:
-                with pytest.raises(utils.LibraryIndexUnavailable, match='background'):
-                    future.result(timeout=1)
+                assert future.result(timeout=1) is None
+        assert time.monotonic() - started < .5
         assert len(calls) == 1
         finished_after = time.monotonic()
     finally:
@@ -111,21 +111,10 @@ def test_failed_tag_scan_does_not_publish_empty_index(tag_cache, monkeypatch):
     def fail(**kwargs):
         raise OSError('NAS unavailable')
     monkeypatch.setattr(utils, 'build_library_tag_index', fail)
-    with pytest.raises(utils.LibraryIndexUnavailable, match='scan failed'):
-        utils._tagged_duplicate('Blur', 'Song 2', 'alice')
-    assert not utils._tag_index_cache
+    assert utils._tagged_duplicate('Blur', 'Song 2', 'alice') is None
     wait_until(lambda: not utils._tag_index_running)
-
-
-def test_check_duplicate_propagates_incomplete_scan(tag_cache, monkeypatch):
-    for name in ('get_download_dir', 'get_singles_dir', 'get_albums_dir', 'get_playlists_dir'):
-        monkeypatch.setattr(utils, name, lambda *a, **kw: tag_cache)
-
-    def pending(*a, **kw):
-        raise utils.LibraryIndexUnavailable('Still indexing')
-    monkeypatch.setattr(utils, '_tagged_duplicate', pending)
-    with pytest.raises(utils.LibraryIndexUnavailable):
-        utils.check_duplicate('Blur', 'Song 2', user_id='alice')
+    assert not utils._tag_index_cache
+    assert utils._tagged_duplicate('Blur', 'Song 2', 'alice') is None
 
 
 def load_route(name, namespace):
@@ -238,40 +227,6 @@ def test_new_library_without_optional_folders_has_zero_storage(tmp_path):
     assert library_scans.scan_storage((tmp_path / 'Singles', tmp_path / 'Playlists')) == {
         'storage_bytes': 0, 'file_count': 0,
     }
-
-
-def test_pending_index_stops_automatic_source_fallback(monkeypatch):
-    import downloads
-    from contextlib import contextmanager
-    from types import SimpleNamespace
-
-    job = {}
-    attempts = []
-    finishes = []
-    monkeypatch.setattr(downloads, '_job_was_cancelled', lambda *a: False)
-    monkeypatch.setattr(downloads, '_update_job', lambda job_id, **values: job.update(values))
-    monkeypatch.setattr(downloads, 'start_acquisition_attempt', lambda *a: attempts.append(a) or 'attempt')
-    monkeypatch.setattr(downloads, 'finish_acquisition_attempt', lambda *a: None)
-    monkeypatch.setattr(downloads, 'finish_acquisition_cycle', lambda *a: finishes.append(a))
-
-    def pending(*a, **kw):
-        raise utils.LibraryIndexUnavailable('Still indexing')
-
-    monkeypatch.setattr(downloads, 'process_download', pending)
-    monkeypatch.setattr(downloads, '_find_alternate_search_candidate', lambda *a, **kw: pytest.fail('Index wait triggered a source search'))
-
-    @contextmanager
-    def connection():
-        yield SimpleNamespace(execute=lambda *a: SimpleNamespace(fetchone=lambda: (job['status'], job['error'])))
-    monkeypatch.setattr(downloads, 'db_conn', connection)
-    downloads.process_acquisition_cycle(
-        'job', {'source': 'youtube', 'video_id': 'first'}, 'Blur', 'Song 2',
-        target_id='target', cycle=1, automatic=True,
-        candidate_pool=[{'source': 'monochrome', 'video_id': 'second'}],
-    )
-    assert len(attempts) == 1
-    assert job['status'] == 'failed'
-    assert finishes == [('target', 'failed', str(utils.LibraryIndexUnavailable('Still indexing')))]
 
 
 def test_playlist_refresh_preserves_new_playlist_choice():

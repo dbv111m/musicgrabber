@@ -50,7 +50,11 @@ from settings import (
     get_singles_dir,
     get_playlists_dir,
 )
-from utils import spawn_daemon_thread, iter_library_audio_files
+from utils import (
+    spawn_daemon_thread,
+    iter_library_audio_files,
+    library_tag_index_in_progress,
+)
 
 _LOSSLESS_CODECS = {"flac", "alac", "wav", "wave", "pcm", "ape", "wavpack", "tak"}
 
@@ -238,6 +242,21 @@ def _iter_audio_files(directory: Path):
     yield from iter_library_audio_files(directory, _AUDIO_EXTS)
 
 
+def _wait_for_duplicate_scan_priority(user_id: str | None = None) -> bool:
+    """Yield upgrade scanning to duplicate checks and honour its off switch.
+
+    The upgrade pass is optional background housekeeping. A download deciding
+    whether a track already exists is not, so there is no merit in making both
+    trawl the same NAS at once. Returning False tells the caller that upgrades
+    were switched off while it waited.
+    """
+    while get_setting_bool("enable_track_upgrades", False, user_id=user_id):
+        if not library_tag_index_in_progress(user_id):
+            return True
+        time.sleep(0.25)
+    return False
+
+
 def scan_user_library(user_id: str | None = None) -> dict:
     """Scan one user's eligible library and refresh their upgrade_candidates rows.
 
@@ -272,6 +291,16 @@ def scan_user_library(user_id: str | None = None) -> dict:
 
     for d in dirs:
         for path in _iter_audio_files(d):
+            if not _wait_for_duplicate_scan_priority(user_id):
+                print("Upgrade scan stopped because Track Upgrades was switched off")
+                return {
+                    "scanned": scanned,
+                    "eligible": eligible,
+                    "below_target": below,
+                    "skipped_unchanged": 0,
+                    "scrubbed": 0,
+                    "cancelled": True,
+                }
             scanned += 1
             spath = str(path)
             try:

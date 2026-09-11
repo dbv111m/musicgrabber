@@ -18,7 +18,7 @@ import shutil
 
 from constants import (
     AUDIO_EXTENSIONS, MAX_FILENAME_LENGTH, MUSIC_DIR,
-    LIBRARY_SCAN_TTL_SECONDS, LIBRARY_INDEX_WAIT_SECONDS, LIBRARY_SCAN_RETRY_SECONDS,
+    LIBRARY_SCAN_TTL_SECONDS, LIBRARY_SCAN_RETRY_SECONDS,
     MAX_FILENAME_BYTES, FILENAME_STEM_RESERVE_BYTES,
     EXCLUDED_SCAN_DIR_NAMES, EXCLUDED_SCAN_DIR_PREFIXES,
 )
@@ -478,16 +478,15 @@ _tag_index_lock = threading.Lock()
 _tag_index_running = {}
 _tag_index_errors = {}
 
-
-class LibraryIndexUnavailable(RuntimeError):
-    """A complete duplicate check is not available yet; never assume a miss."""
-
-    prefix = "Duplicate check unavailable: "
-
-    def __init__(self, message):
-        super().__init__(self.prefix + message)
-
 _tag_index_cache: dict[tuple[str, str], tuple[float, dict[tuple[str, str], Path]]] = {}
+
+
+def library_tag_index_in_progress(user_id: str | None = None) -> bool:
+    """Whether this user's duplicate-safety tag index is currently rebuilding."""
+    root = str(Path(get_setting("music_dir", str(MUSIC_DIR), user_id=user_id)))
+    cache_key = (user_id or "", root)
+    with _tag_index_lock:
+        return cache_key in _tag_index_running
 
 
 def _tag_identity(artist: str, title: str) -> tuple[str, str]:
@@ -539,18 +538,19 @@ def _tagged_duplicate(artist: str, title: str, user_id: str | None = None) -> Op
     # five minutes, which keeps bulk imports from reading every tag per track.
     stale_hit = any(key in index for key in wanted)
     if cached is None or stale_hit or now - cached_at >= _TAG_INDEX_TTL_SECONDS:
+        refreshed_snapshot = None
         with _tag_index_lock:
             # A different caller may have finished while we checked the old snapshot.
             current = _tag_index_cache.get(cache_key)
             if current is not cached:
-                ready = threading.Event()
-                ready.set()
+                refreshed_snapshot = current
             else:
                 failure = _tag_index_errors.get(cache_key)
-                if failure and now - failure < LIBRARY_SCAN_RETRY_SECONDS:
-                    raise LibraryIndexUnavailable("Library tag scan failed. Check the library mount and retry shortly.")
                 ready = _tag_index_running.get(cache_key)
-                if ready is None:
+                if (
+                    ready is None
+                    and not (failure and now - failure < LIBRARY_SCAN_RETRY_SECONDS)
+                ):
                     ready = threading.Event()
                     _tag_index_running[cache_key] = ready
 
@@ -570,23 +570,17 @@ def _tagged_duplicate(artist: str, title: str, user_id: str | None = None) -> Op
                                 ready.set()
 
                     threading.Thread(target=refresh, daemon=True).start()
-        if not ready.wait(LIBRARY_INDEX_WAIT_SECONDS):
-            raise LibraryIndexUnavailable(
-                "Library tags are still being indexed in the background. "
-                "Duplicate checking is incomplete; retry once the scan has finished."
+        if refreshed_snapshot is not None:
+            return _tagged_duplicate_after_refresh(
+                refreshed_snapshot, wanted, user_id
             )
-        with _tag_index_lock:
-            if cache_key in _tag_index_errors:
-                raise LibraryIndexUnavailable("Library tag scan failed. Check the library mount and retry shortly.")
-            current = _tag_index_cache.get(cache_key)
-        return _tagged_duplicate_after_refresh(current, wanted, user_id)
 
     return None
 
 
 def _tagged_duplicate_after_refresh(snapshot, wanted, user_id):
     if snapshot is None:
-        raise LibraryIndexUnavailable("Library tags are not ready. Retry shortly.")
+        return None
     for key in wanted:
         hit = snapshot[1].get(key)
         safe_hit = authoritative_audio_file(str(hit), user_id=user_id) if hit else None
@@ -675,8 +669,6 @@ def check_duplicate(artist: str, title: str, user_id: str | None = None) -> Opti
         # Title tags across the library so external renames do not manufacture a
         # duplicate download loop.
         return _tagged_duplicate(artist, title, user_id=user_id)
-    except LibraryIndexUnavailable:
-        raise
     except Exception:
         return None
 

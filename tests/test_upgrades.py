@@ -43,6 +43,34 @@ from upgrades import (
 from metadata import apply_metadata_to_file
 
 
+def test_upgrade_scan_yields_to_duplicate_safety_index(monkeypatch):
+    index_states = iter((True, False))
+    sleeps = []
+    monkeypatch.setattr(upgrades, "get_setting_bool", lambda *a, **kw: True)
+    monkeypatch.setattr(
+        upgrades, "library_tag_index_in_progress", lambda *a, **kw: next(index_states)
+    )
+    monkeypatch.setattr(upgrades.time, "sleep", lambda seconds: sleeps.append(seconds))
+
+    assert upgrades._wait_for_duplicate_scan_priority("alice") is True
+    assert sleeps == [0.25]
+
+
+def test_upgrade_scan_honours_toggle_while_waiting(monkeypatch):
+    enabled_states = iter((True, False))
+    sleeps = []
+    monkeypatch.setattr(
+        upgrades, "get_setting_bool", lambda *a, **kw: next(enabled_states)
+    )
+    monkeypatch.setattr(
+        upgrades, "library_tag_index_in_progress", lambda *a, **kw: True
+    )
+    monkeypatch.setattr(upgrades.time, "sleep", lambda seconds: sleeps.append(seconds))
+
+    assert upgrades._wait_for_duplicate_scan_priority("alice") is False
+    assert sleeps == [0.25]
+
+
 # --- tier_of -----------------------------------------------------------------
 
 @pytest.mark.parametrize("codec", ["flac", "FLAC", "alac", "wav", "wavpack"])

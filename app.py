@@ -17,7 +17,7 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import HTMLResponse, FileResponse, StreamingResponse, JSONResponse
+from fastapi.responses import HTMLResponse, FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 import httpx
 
@@ -80,8 +80,6 @@ from search import (
     SourceSearchBusy,
 )
 from library_scans import snapshots, scan_playlists, scan_storage
-from utils import LibraryIndexUnavailable
-
 import servicecheck
 import monochrome_browser
 from slskd import slskd_enabled, search_slskd
@@ -428,11 +426,6 @@ def list_music_dirs(path: str = "", recursive: bool = False, max_depth: int | No
 # =============================================================================
 # Playlist listing (watched + physical .m3u files)
 # =============================================================================
-
-@app.exception_handler(LibraryIndexUnavailable)
-async def library_index_unavailable(_request: Request, exc: LibraryIndexUnavailable):
-    return JSONResponse(status_code=503, content={"detail": str(exc)}, headers={"Retry-After": "30"})
-
 
 @app.get("/api/playlists")
 @prioritise_over_audio_audit

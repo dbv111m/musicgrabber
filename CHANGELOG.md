@@ -2,6 +2,10 @@
 
 ## v4.1.2 (DEV)
 
+### Fixed
+- **Library scanning no longer blocks downloads**: duplicate checks still use quick filename and path matches plus the last complete tag index, but a cold or stale full-library index now refreshes entirely in the background. Downloads and API actions carry on immediately instead of waiting for up to fifteen minutes or failing because the NAS has a large record collection. The trade-off is honest: an externally renamed duplicate may escape detection until the first background index completes.
+- **Turning Track Upgrades off now stops its active library pass**: the scanner used to check the toggle only before starting, so switching it off merely changed the setting while the existing scan carried cheerfully on. Upgrade scans now stop cooperatively and yield to the separate background duplicate tag index, because two optional librarians elbowing through the same NAS is nobody's idea of efficiency.
+
 ## v4.1.1 (2026-09-10)
 
 ### Added

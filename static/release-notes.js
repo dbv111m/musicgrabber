@@ -9,7 +9,15 @@
 const RELEASE_NOTES = {
     "4.1.2": {
         title: "What's New in v4.1.2",
-        sections: []
+        sections: [
+            {
+                heading: "Downloads outrank housekeeping",
+                items: [
+                    "Library tag indexing now stays firmly in the background. Downloads use the duplicate information already available and carry on immediately, even while a large NAS is still being indexed.",
+                    "Track Upgrades now stops an active scan when switched off, and yields to the separate background duplicate index. Housekeeping has finally been reminded who pays the bills.",
+                ]
+            },
+        ]
     },
     "4.1.1": {
         title: "What's New in v4.1.1",

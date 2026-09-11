@@ -469,5 +469,4 @@ SERVICECHECK_TIMEOUT = int(os.getenv("SERVICECHECK_TIMEOUT", "8"))              
 
 # Library scans: serve cached listings and bound duplicate lookup waits.
 LIBRARY_SCAN_TTL_SECONDS = 300
-LIBRARY_INDEX_WAIT_SECONDS = 5
 LIBRARY_SCAN_RETRY_SECONDS = 30

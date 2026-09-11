@@ -120,6 +120,7 @@ def test_check_duplicate_falls_back_to_primary_credited_artist(tmp_path, monkeyp
 
 def test_check_duplicate_finds_externally_renamed_file_by_tags(tmp_path, monkeypatch):
     import metadata
+    import time
     import utils
 
     music = tmp_path / "Music"
@@ -137,7 +138,13 @@ def test_check_duplicate_finds_externally_renamed_file_by_tags(tmp_path, monkeyp
         lambda path: ("Blur", "Song 2") if path == renamed else (None, None),
     )
     utils._tag_index_cache.clear()
+    utils._tag_index_errors.clear()
 
+    assert utils.check_duplicate("Blur", "Song 2", user_id="alice") is None
+    deadline = time.monotonic() + 2
+    while utils.library_tag_index_in_progress("alice"):
+        assert time.monotonic() < deadline
+        time.sleep(.005)
     assert utils.check_duplicate("Blur", "Song 2", user_id="alice") == renamed
 
 
