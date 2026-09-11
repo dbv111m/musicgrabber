@@ -26,6 +26,7 @@ from pathlib import Path
 from audio_probe import probe_file
 from constants import (
     UPGRADE_SCAN_INTERVAL_HOURS,
+    UPGRADE_SCAN_WRITE_BATCH,
     UPGRADE_SEARCH_TTL_SECONDS,
     UPGRADE_MATCH_FLOOR,
     TIER_LOSSY_128, TIER_LOSSY_192, TIER_LOSSY_256, TIER_LOSSY_320, TIER_LOSSLESS,
@@ -252,11 +253,13 @@ def _norm_user(user_id: str | None) -> str:
 
 
 def _iter_audio_files(directory: Path):
-    """Yield the user's real audio files, and nothing the NAS has binned.
+    """Yield `(path, stat)` for the user's real audio files, minus the NAS bins.
 
     Delegates to the shared library walker so trash/recycle folders and symlinks
     are skipped here exactly as they are everywhere else; offering to "upgrade"
     a file the user deleted three weeks ago is not the kind of helpful we want.
+    The walker hands back the stat it already took, which is the size and mtime
+    this scan needs anyway.
     """
     if not directory:
         return
@@ -314,10 +317,35 @@ def scan_user_library(user_id: str | None = None) -> dict:
     seen_ids: set[int] = set()
     scanned = eligible = below = skipped = 0
 
+    # Row writes are queued and committed in batches. SQLite in WAL mode fsyncs
+    # on every commit, and this loop used to commit once per file, so a library
+    # that had not changed since yesterday still cost one fsync per track to say
+    # so. A batch that dies mid-flush loses only that batch, and the next scan
+    # rebuilds it from the disk anyway, which is a bargain at the price.
+    pending: list[tuple[str, tuple, bool]] = []
+
+    def flush_pending():
+        """Commit everything queued so far, collecting new row IDs as we go."""
+        if not pending:
+            return
+        with db_conn() as conn:
+            for sql, params, capture_id in pending:
+                cur = conn.execute(sql, params)
+                if capture_id:
+                    seen_ids.add(cur.lastrowid)
+            conn.commit()
+        pending.clear()
+
+    def queue_write(sql, params, capture_id=False):
+        pending.append((sql, params, capture_id))
+        if len(pending) >= UPGRADE_SCAN_WRITE_BATCH:
+            flush_pending()
+
     for d in dirs:
-        for path in _iter_audio_files(d):
+        for path, st in _iter_audio_files(d):
             if not _wait_for_duplicate_scan_priority(user_id):
                 print("Upgrade scan stopped because Track Upgrades was switched off")
+                flush_pending()
                 return {
                     "scanned": scanned,
                     "eligible": eligible,
@@ -328,10 +356,6 @@ def scan_user_library(user_id: str | None = None) -> dict:
                 }
             scanned += 1
             spath = str(path)
-            try:
-                st = path.stat()
-            except OSError:
-                continue
             mtime = st.st_mtime
             cached = cache.get(spath)
 
@@ -352,39 +376,33 @@ def scan_user_library(user_id: str | None = None) -> dict:
                 )
                 is_below = 1 if file_tier < tgt else 0
                 below += is_below
-                with db_conn() as conn:
-                    conn.execute(
-                        """UPDATE upgrade_candidates
-                           SET file_tier=?, target_tier=?, below_target=?,
-                               last_scanned=CURRENT_TIMESTAMP
-                           WHERE user_id=? AND id=?""",
-                        (file_tier, tgt, is_below, uid, cached["id"]),
-                    )
-                    conn.commit()
+                queue_write(
+                    """UPDATE upgrade_candidates
+                       SET file_tier=?, target_tier=?, below_target=?,
+                           last_scanned=CURRENT_TIMESTAMP
+                       WHERE user_id=? AND id=?""",
+                    (file_tier, tgt, is_below, uid, cached["id"]),
+                )
                 continue
 
             info = probe_file(path)
             if info is None or not info.get("source"):
                 # Not our file (or unreadable). Drop any stale row and move on.
                 if cached is not None:
-                    with db_conn() as conn:
-                        conn.execute(
-                            "DELETE FROM upgrade_candidates WHERE user_id=? AND path=?",
-                            (uid, spath),
-                        )
-                        conn.commit()
+                    queue_write(
+                        "DELETE FROM upgrade_candidates WHERE user_id=? AND path=?",
+                        (uid, spath),
+                    )
                 continue
 
             if cached is None and info.get("file_id"):
                 cached = cache_by_file_id.get(info["file_id"])
                 if cached is not None:
                     # Same tagged file, moved within a configured library root.
-                    with db_conn() as conn:
-                        conn.execute(
-                            "UPDATE upgrade_candidates SET path=? WHERE user_id=? AND id=?",
-                            (spath, uid, cached["id"]),
-                        )
-                        conn.commit()
+                    queue_write(
+                        "UPDATE upgrade_candidates SET path=? WHERE user_id=? AND id=?",
+                        (spath, uid, cached["id"]),
+                    )
 
             eligible += 1
             seen.add(spath)
@@ -412,41 +430,43 @@ def scan_user_library(user_id: str | None = None) -> dict:
                 dismissed = 1
                 dismissed_mtime = cached["dismissed_mtime"]
 
-            with db_conn() as conn:
-                if cached is not None:
-                    conn.execute(
-                        """UPDATE upgrade_candidates SET path=?, mtime=?, file_size=?,
-                           codec=?, bitrate_kbps=?, duration=?, file_tier=?, target_tier=?,
-                           below_target=?, source=?, source_quality=?, source_codec=?,
-                           source_bitrate_kbps=?, file_id=?, content_sha256=?, artist=?,
-                           title=?, dismissed=?, dismissed_mtime=?,
-                           found_searched=CASE WHEN ? THEN found_searched ELSE 0 END,
-                           found_at=CASE WHEN ? THEN found_at ELSE NULL END,
-                           found_source=CASE WHEN ? THEN found_source ELSE NULL END,
-                           last_scanned=CURRENT_TIMESTAMP WHERE user_id=? AND id=?""",
-                        (spath, mtime, st.st_size, info["codec"], info["bitrate_kbps"],
-                         info["duration"], file_tier, tgt, is_below, info["source"],
-                         info.get("source_quality"), info.get("source_codec"),
-                         info.get("source_bitrate_kbps"), info.get("file_id"), file_hash,
-                         info["artist"], info["title"], dismissed, dismissed_mtime,
-                         unchanged, unchanged, unchanged, uid, cached["id"]),
-                    )
-                else:
-                    cur = conn.execute(
-                        """INSERT INTO upgrade_candidates
-                           (user_id,path,mtime,file_size,codec,bitrate_kbps,duration,
-                            file_tier,target_tier,below_target,source,source_quality,
-                            source_codec,source_bitrate_kbps,file_id,content_sha256,
-                            artist,title,dismissed,dismissed_mtime,last_scanned)
-                           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)""",
-                        (uid, spath, mtime, st.st_size, info["codec"], info["bitrate_kbps"],
-                         info["duration"], file_tier, tgt, is_below, info["source"],
-                         info.get("source_quality"), info.get("source_codec"),
-                         info.get("source_bitrate_kbps"), info.get("file_id"), file_hash,
-                         info["artist"], info["title"], dismissed, dismissed_mtime),
-                    )
-                    seen_ids.add(cur.lastrowid)
-                conn.commit()
+            if cached is not None:
+                queue_write(
+                    """UPDATE upgrade_candidates SET path=?, mtime=?, file_size=?,
+                       codec=?, bitrate_kbps=?, duration=?, file_tier=?, target_tier=?,
+                       below_target=?, source=?, source_quality=?, source_codec=?,
+                       source_bitrate_kbps=?, file_id=?, content_sha256=?, artist=?,
+                       title=?, dismissed=?, dismissed_mtime=?,
+                       found_searched=CASE WHEN ? THEN found_searched ELSE 0 END,
+                       found_at=CASE WHEN ? THEN found_at ELSE NULL END,
+                       found_source=CASE WHEN ? THEN found_source ELSE NULL END,
+                       last_scanned=CURRENT_TIMESTAMP WHERE user_id=? AND id=?""",
+                    (spath, mtime, st.st_size, info["codec"], info["bitrate_kbps"],
+                     info["duration"], file_tier, tgt, is_below, info["source"],
+                     info.get("source_quality"), info.get("source_codec"),
+                     info.get("source_bitrate_kbps"), info.get("file_id"), file_hash,
+                     info["artist"], info["title"], dismissed, dismissed_mtime,
+                     unchanged, unchanged, unchanged, uid, cached["id"]),
+                )
+            else:
+                # capture_id, because a row we have not pruned is a row the user
+                # still owns; forgetting a new ID here would delete it minutes later.
+                queue_write(
+                    """INSERT INTO upgrade_candidates
+                       (user_id,path,mtime,file_size,codec,bitrate_kbps,duration,
+                        file_tier,target_tier,below_target,source,source_quality,
+                        source_codec,source_bitrate_kbps,file_id,content_sha256,
+                        artist,title,dismissed,dismissed_mtime,last_scanned)
+                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)""",
+                    (uid, spath, mtime, st.st_size, info["codec"], info["bitrate_kbps"],
+                     info["duration"], file_tier, tgt, is_below, info["source"],
+                     info.get("source_quality"), info.get("source_codec"),
+                     info.get("source_bitrate_kbps"), info.get("file_id"), file_hash,
+                     info["artist"], info["title"], dismissed, dismissed_mtime),
+                    capture_id=True,
+                )
+
+    flush_pending()
 
     # Only prune after a scan that actually saw the roots. An offline/empty NAS
     # must never look like the user deleted their entire library.

@@ -327,6 +327,12 @@ WATCHED_HISTORY_RECHECK_HOURS = int(os.getenv("WATCHED_HISTORY_RECHECK_HOURS", "
 # How often the track-upgrades scan walks the library (hours). Cheap and network-free,
 # so daily is plenty; this is not time-sensitive.
 UPGRADE_SCAN_INTERVAL_HOURS = int(os.getenv("UPGRADE_SCAN_INTERVAL_HOURS", "24"))
+# How many row writes the upgrade scan batches into one transaction. SQLite in
+# WAL mode fsyncs on every commit, and committing once per file means one fsync
+# per file; on a twenty thousand track library that is twenty thousand of them
+# to record that nothing much happened. Batching trades a little lost work on a
+# crash (which the next scan redoes anyway) for a great deal less syncing.
+UPGRADE_SCAN_WRITE_BATCH = int(os.getenv("UPGRADE_SCAN_WRITE_BATCH", "500"))
 # How long a per-candidate upgrade search result stays cached before a revisit
 # re-searches (seconds). Keeps the Watched Upgrades page snappy without re-hammering
 # sources on every visit. Default 4 hours.

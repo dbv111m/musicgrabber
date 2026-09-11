@@ -67,6 +67,32 @@ def test_storage_deduplicates_hardlinks_and_excludes_trash(tmp_path):
     assert library_scans.scan_storage((tmp_path,)) == {'storage_bytes': 5, 'file_count': 1}
 
 
+def test_storage_uses_the_walkers_stat_and_never_touches_the_disk(tmp_path, monkeypatch):
+    """The storage tile refreshes every five minutes; it can stat things once.
+
+    The walker is replaced with entries whose stat data is pure fiction and
+    whose paths do not exist at all. If scan_storage still reports the fictional
+    sizes, it is reading what the walk handed it rather than going back to the
+    array for a second opinion.
+    """
+    import os
+
+    def make_stat(size, ino):
+        return os.stat_result((0o100644, ino, 99, 1, 0, 0, size, 0, 0, 0))
+
+    fake = [
+        utils.LibraryFile(tmp_path / 'Imaginary One.flac', make_stat(1000, 1)),
+        utils.LibraryFile(tmp_path / 'Imaginary Two.flac', make_stat(2500, 2)),
+        # Same device and inode: a hardlink, counted once.
+        utils.LibraryFile(tmp_path / 'Imaginary Two (copy).flac', make_stat(2500, 2)),
+    ]
+    monkeypatch.setattr(library_scans, 'iter_library_audio_files', lambda *a, **kw: iter(fake))
+
+    assert library_scans.scan_storage((tmp_path,)) == {
+        'storage_bytes': 3500, 'file_count': 2,
+    }
+
+
 @pytest.fixture
 def tag_cache(monkeypatch, tmp_path):
     monkeypatch.setattr(utils, '_tag_index_cache', {})

@@ -10,8 +10,9 @@ import re
 import secrets
 import threading
 import time
+from collections import deque
 from pathlib import Path
-from typing import Optional
+from typing import NamedTuple, Optional
 from urllib.parse import parse_qs, unquote, urlparse
 
 import shutil
@@ -364,51 +365,79 @@ def path_has_excluded_scan_dir(path: Path, root: Path | None = None) -> bool:
     return any(is_excluded_scan_dir(part) for part in relative.parts)
 
 
+class LibraryFile(NamedTuple):
+    """One audio file, with the metadata the directory read already gave us.
+
+    Yielded by `iter_library_audio_files`. `stat` is a plain `os.stat_result`,
+    so `st_size`, `st_mtime`, `st_mtime_ns`, `st_dev` and `st_ino` are all there
+    for the taking without going back to the disk for them.
+    """
+
+    path: Path
+    stat: os.stat_result
+
+
 def iter_library_audio_files(root: Path, extensions=None, *, strict=False):
     """Walk `root` yielding audio files, skipping trash bins and symlinks.
 
-    The single walker every full-library scan should use. Symlinks are not
-    followed, and files that resolve outside `root` are dropped, so a helpful
-    symlink to /mnt/everything cannot quietly turn a library scan into a
-    whole-NAS scan.
+    The single walker every full-library scan should use. Yields `LibraryFile`
+    tuples: the path, plus the `os.stat_result` the directory read had to fetch
+    anyway. Callers that need size, mtime or inode take them from there instead
+    of paying for a second `stat()` of their own, which over a network mount is
+    a round trip nobody enjoys.
+
+    Built on `os.scandir` rather than `os.walk` for exactly that reason. On
+    Linux the directory entry already carries the file type, so the symlink and
+    directory tests below cost nothing at all.
+
+    Symlinks are not followed: a symlinked directory is never descended into and
+    a symlinked file is never yielded. Nothing this walker hands back can
+    therefore have left `root` by way of a symlink, so a helpful shortcut to
+    /mnt/everything cannot quietly turn a library scan into a whole-NAS scan.
     """
     if not root:
         return
     exts = tuple(ext.lower() for ext in (extensions or AUDIO_EXTENSIONS))
+    root = Path(root)
     try:
         if not root.exists():
             if strict:
                 raise FileNotFoundError(f"Library directory is unavailable: {root}")
             return
-        root_resolved = root.resolve()
     except OSError:
         if strict:
             raise
         return
 
-    def walk_error(exc):
-        if strict:
-            raise exc
-
-    for current, dirnames, filenames in os.walk(root, followlinks=False, onerror=walk_error):
-        current_path = Path(current)
-        dirnames[:] = [
-            d for d in dirnames
-            if not is_excluded_scan_dir(d) and not (current_path / d).is_symlink()
-        ]
-        for filename in filenames:
-            path = current_path / filename
-            if path.suffix.lower() not in exts:
-                continue
-            try:
-                if path.is_symlink():
-                    continue
-                if not path.is_file():
-                    continue
-                path.resolve().relative_to(root_resolved)
-            except (OSError, ValueError):
-                continue
-            yield path
+    # Breadth first, in the order directories are discovered, which is as
+    # deterministic as the old os.walk ever was and rather less recursive.
+    queue = deque([root])
+    while queue:
+        current = queue.popleft()
+        try:
+            with os.scandir(current) as entries:
+                for entry in entries:
+                    try:
+                        if entry.is_symlink():
+                            continue
+                        if entry.is_dir(follow_symlinks=False):
+                            if not is_excluded_scan_dir(entry.name):
+                                queue.append(Path(entry.path))
+                            continue
+                        if os.path.splitext(entry.name)[1].lower() not in exts:
+                            continue
+                        if not entry.is_file(follow_symlinks=False):
+                            continue
+                        st = entry.stat(follow_symlinks=False)
+                    except OSError:
+                        # One unreadable entry is not a reason to abandon the
+                        # library; the directory-level failure above still is.
+                        continue
+                    yield LibraryFile(Path(entry.path), st)
+        except OSError as exc:
+            if strict:
+                raise exc
+            continue
 
 
 def _find_audio_match_in_dir(directory: Path, stems: list[str]) -> Optional[Path]:
@@ -505,7 +534,7 @@ def build_library_tag_index(user_id: str | None = None) -> dict[tuple[str, str],
 
     music_root = Path(get_setting("music_dir", str(MUSIC_DIR), user_id=user_id))
     index: dict[tuple[str, str], Path] = {}
-    for audio_file in iter_library_audio_files(music_root, strict=True):
+    for audio_file, _st in iter_library_audio_files(music_root, strict=True):
         artist, title = read_artist_title(audio_file)
         if not artist or not title:
             continue

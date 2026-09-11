@@ -124,6 +124,20 @@ matters and where it costs one read rather than thousands. The trade-off: a
 replacement that preserves both size and timestamp exactly will not be noticed
 until something else disturbs the file.
 
+Every full-library scan shares one walker, and that walker now reads directory
+entries directly rather than asking the filesystem the same questions repeatedly.
+A pass over 1,675 files went from 16,475 metadata operations to 2,547, which is
+9.84 per file down to 1.52. The scans that benefit are the duplicate tag index,
+Track Upgrades, the Stats storage totals and the admin library rebuild. Nothing
+about what they find changes; symlinked files and directories are still skipped
+and NAS bins are still excluded, so nothing a scan returns can have left the
+music root.
+
+The Track Upgrades scan also writes its results in batches rather than saving
+after every file, which on a large library removes tens of thousands of database
+flushes per pass. A crash mid-batch loses at most that batch; the next scan
+rebuilds it from the files themselves.
+
 ## Audio Provenance Audit
 
 Open **Watched → Audio Provenance Audit** and choose **Run Audit**. The scan

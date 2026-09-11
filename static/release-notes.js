@@ -22,6 +22,8 @@ const RELEASE_NOTES = {
                 items: [
                     "Track Upgrades used to read every file in your library, from beginning to end, every single day, just to check nothing had changed. It now skips anything that has not moved or been edited since last time, and only opens files that genuinely look different.",
                     "If your library lives on a NAS or on spinning disks, this is the difference between hours of grinding every night and a few seconds of polite enquiry.",
+                    "Every library scan used to ask your disks about the same file six to ten times over, having already been told. It now asks once and remembers the answer, which makes every scan in MusicGrabber roughly six times lighter on the drives.",
+                    "The upgrade scan also stopped saving its notes to disk after every single track. A full pass over an unchanged library went from a hundred seconds to about thirty. Your NAS has not said thank you, but we know.",
                 ]
             },
         ]

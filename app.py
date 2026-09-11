@@ -923,7 +923,7 @@ def _rebuild_library_index() -> int:
     for root in roots:
         if root is None or not root.exists():
             continue
-        for audio_path in iter_library_audio_files(root, AUDIO_EXTENSIONS):
+        for audio_path, _st in iter_library_audio_files(root, AUDIO_EXTENSIONS):
             resolved = str(audio_path.resolve())
             if resolved in known or resolved in seen:
                 continue

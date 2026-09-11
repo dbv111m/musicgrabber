@@ -68,8 +68,10 @@ def scan_storage(directories):
     for directory in directories:
         if not directory.exists() and directory.parent.exists():
             continue  # Optional library subdirectories need not exist yet.
-        for path in iter_library_audio_files(directory, AUDIO_EXTENSIONS, strict=True):
-            stat = path.stat()
+        for _path, stat in iter_library_audio_files(directory, AUDIO_EXTENSIONS, strict=True):
+            # The walker already stat'd this entry; asking the array a second
+            # time to hear the same answer is how five-minute stat tiles become
+            # a full-time job for a NAS.
             key = (stat.st_dev, stat.st_ino)
             if key not in seen:
                 storage_bytes += stat.st_size

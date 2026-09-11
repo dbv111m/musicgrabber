@@ -189,7 +189,7 @@ def test_iter_library_audio_files_skips_nas_bins(tmp_path):
     (root / "Fatboy Slim" / "@eaDir").mkdir()
     (root / "Fatboy Slim" / "@eaDir" / "thumb.flac").write_bytes(b"nope")
 
-    found = sorted(utils.iter_library_audio_files(root))
+    found = sorted(entry.path for entry in utils.iter_library_audio_files(root))
     assert found == [keeper]
 
 
@@ -201,7 +201,7 @@ def test_iter_library_audio_files_ignores_non_audio_and_missing_roots(tmp_path):
     (root / "Praise You.lrc").write_text("lyrics")
     (root / "Praise You.flac").write_bytes(b"audio")
 
-    assert [p.name for p in utils.iter_library_audio_files(root)] == ["Praise You.flac"]
+    assert [e.path.name for e in utils.iter_library_audio_files(root)] == ["Praise You.flac"]
     assert list(utils.iter_library_audio_files(tmp_path / "nope")) == []
     assert list(utils.iter_library_audio_files(None)) == []
 
@@ -224,7 +224,47 @@ def test_iter_library_audio_files_refuses_to_follow_symlinks_out(tmp_path):
         import pytest
         pytest.skip("symlinks unavailable on this filesystem")
 
-    assert [p.name for p in utils.iter_library_audio_files(root)] == ["Real.flac"]
+    assert [e.path.name for e in utils.iter_library_audio_files(root)] == ["Real.flac"]
+
+
+def test_iter_library_audio_files_hands_back_the_stat_it_took(tmp_path):
+    """The whole point of Phase 1: nobody should have to stat the file again."""
+    import utils
+    root = tmp_path / "Singles"
+    root.mkdir()
+    track = root / "Praise You.flac"
+    track.write_bytes(b"forty seven bytes of extremely convincing audio.")
+
+    (entry,) = list(utils.iter_library_audio_files(root))
+    real = track.stat()
+    assert entry.path == track
+    assert entry.stat.st_size == real.st_size == len(b"forty seven bytes of extremely convincing audio.")
+    assert entry.stat.st_mtime_ns == real.st_mtime_ns
+    assert (entry.stat.st_dev, entry.stat.st_ino) == (real.st_dev, real.st_ino)
+
+
+def test_iter_library_audio_files_steps_over_an_unreadable_directory(tmp_path):
+    """One sulking directory is not a reason to abandon the whole library."""
+    import utils
+    import pytest
+    root = tmp_path / "Singles"
+    (root / "Fatboy Slim").mkdir(parents=True)
+    keeper = root / "Fatboy Slim" / "Praise You.flac"
+    keeper.write_bytes(b"audio")
+    locked = root / "Locked"
+    locked.mkdir()
+    (locked / "Secret.flac").write_bytes(b"audio")
+    os.chmod(locked, 0o000)
+    if os.access(locked, os.R_OK):
+        pytest.skip("running as root, which can read anything it likes")
+
+    try:
+        found = [e.path.name for e in utils.iter_library_audio_files(root)]
+        assert found == ["Praise You.flac"]
+        with pytest.raises(OSError):
+            list(utils.iter_library_audio_files(root, strict=True))
+    finally:
+        os.chmod(locked, 0o755)
 
 
 def test_path_has_excluded_scan_dir_respects_root(tmp_path):

@@ -629,7 +629,9 @@ def _setup_scan(monkeypatch, tmp_path, target=TIER_LOSSLESS):
     monkeypatch.setattr(upgrades, "target_tier", lambda user_id=None: target)
     monkeypatch.setattr(upgrades, "get_singles_dir", lambda user_id=None: tmp_path)
     monkeypatch.setattr(upgrades, "get_playlists_dir", lambda user_id=None: None)
-    monkeypatch.setattr(upgrades, "_iter_audio_files", lambda d: iter([track]))
+    monkeypatch.setattr(
+        upgrades, "_iter_audio_files", lambda d: iter([(track, track.stat())])
+    )
     monkeypatch.setattr(
         upgrades, "_wait_for_duplicate_scan_priority", lambda user_id=None: True
     )
@@ -749,3 +751,100 @@ def test_scan_reprobes_a_row_too_thin_to_rerank(monkeypatch, tmp_path):
     upgrades.scan_user_library("alice")
 
     assert calls["probe"] == 1
+
+
+# --- Phase 2: batched writes -------------------------------------------------
+
+def _many_tracks(monkeypatch, tmp_path, count):
+    """Point the scan at `count` real files and count the commits it makes."""
+    conn, first, calls = _setup_scan(monkeypatch, tmp_path)
+    tracks = [first]
+    for n in range(1, count):
+        extra = tmp_path / f"Fatboy Slim - Track {n:03d}.mp3"
+        extra.write_bytes(b"also not really an mp3")
+        tracks.append(extra)
+    monkeypatch.setattr(
+        upgrades,
+        "_iter_audio_files",
+        lambda d: iter([(t, t.stat()) for t in tracks]),
+    )
+
+    calls["commit"] = 0
+
+    class CountingConn:
+        """sqlite3.Connection will not let us patch commit, so wrap it instead."""
+
+        def __getattr__(self, name):
+            return getattr(conn, name)
+
+        def __setattr__(self, name, value):
+            setattr(conn, name, value)
+
+        def commit(self):
+            calls["commit"] += 1
+            return conn.commit()
+
+    counted = CountingConn()
+
+    @contextmanager
+    def counting_db_conn():
+        yield counted
+
+    monkeypatch.setattr(upgrades, "db_conn", counting_db_conn)
+    return conn, tracks, calls
+
+
+def test_scan_commits_in_batches_not_once_per_file(monkeypatch, tmp_path):
+    """Twenty files used to mean twenty fsyncs. Now it means one."""
+    monkeypatch.setattr(upgrades, "UPGRADE_SCAN_WRITE_BATCH", 500)
+    conn, tracks, calls = _many_tracks(monkeypatch, tmp_path, 20)
+
+    summary = upgrades.scan_user_library("alice")
+
+    assert summary["eligible"] == 20
+    assert calls["commit"] == 1
+    assert conn.execute("SELECT COUNT(*) FROM upgrade_candidates").fetchone()[0] == 20
+
+
+def test_scan_flushes_when_the_batch_fills(monkeypatch, tmp_path):
+    monkeypatch.setattr(upgrades, "UPGRADE_SCAN_WRITE_BATCH", 5)
+    conn, tracks, calls = _many_tracks(monkeypatch, tmp_path, 12)
+
+    upgrades.scan_user_library("alice")
+
+    # Two full batches of five, then the remaining two on the final flush.
+    assert calls["commit"] == 3
+    assert conn.execute("SELECT COUNT(*) FROM upgrade_candidates").fetchone()[0] == 12
+
+
+def test_batched_inserts_still_survive_the_prune(monkeypatch, tmp_path):
+    """Deferred inserts must still hand back their row IDs, or the scan eats them.
+
+    The prune deletes every row it did not see. A batched INSERT does not have a
+    rowid until it is flushed, so if the flush forgot to collect them the scan
+    would insert the user's entire library and then immediately delete it again,
+    which would be a memorable bug report.
+    """
+    monkeypatch.setattr(upgrades, "UPGRADE_SCAN_WRITE_BATCH", 3)
+    conn, tracks, _ = _many_tracks(monkeypatch, tmp_path, 7)
+
+    summary = upgrades.scan_user_library("alice")
+
+    assert summary["scrubbed"] == 0
+    assert conn.execute("SELECT COUNT(*) FROM upgrade_candidates").fetchone()[0] == 7
+
+
+def test_cancelled_scan_keeps_the_work_it_had_already_done(monkeypatch, tmp_path):
+    """Switching Track Upgrades off mid-scan should not throw away the batch."""
+    monkeypatch.setattr(upgrades, "UPGRADE_SCAN_WRITE_BATCH", 500)
+    conn, tracks, calls = _many_tracks(monkeypatch, tmp_path, 6)
+
+    remaining = iter([True, True, True, False, False, False])
+    monkeypatch.setattr(
+        upgrades, "_wait_for_duplicate_scan_priority", lambda user_id=None: next(remaining)
+    )
+
+    summary = upgrades.scan_user_library("alice")
+
+    assert summary["cancelled"] is True
+    assert conn.execute("SELECT COUNT(*) FROM upgrade_candidates").fetchone()[0] == 3
