@@ -17,6 +17,13 @@ const RELEASE_NOTES = {
                     "Track Upgrades now stops an active scan when switched off, and yields to the separate background duplicate index. Housekeeping has finally been reminded who pays the bills.",
                 ]
             },
+            {
+                heading: "Your hard drives can have a lie-down",
+                items: [
+                    "Track Upgrades used to read every file in your library, from beginning to end, every single day, just to check nothing had changed. It now skips anything that has not moved or been edited since last time, and only opens files that genuinely look different.",
+                    "If your library lives on a NAS or on spinning disks, this is the difference between hours of grinding every night and a few seconds of polite enquiry.",
+                ]
+            },
         ]
     },
     "4.1.1": {

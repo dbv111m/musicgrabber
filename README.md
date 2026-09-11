@@ -39,10 +39,12 @@ MusicGrabber is intentionally narrow. It is **not**:
 - **Apprise notifications:** one URL covers Gotify, ntfy, Discord, Pushover, Slack, and about 50 others. Also supports Telegram webhook and SMTP email
 - **Navidrome/Lidarr duplicate heads-up:** searches warn when a track is already known to either library, including when a playlist says `Primary Artist, Guest` but the library quite reasonably files it under `Primary Artist`; Navidrome can also prevent the duplicate download and reuse the existing path for playlist routing
 - **Best quality audio:** new installations keep the provider's source format by default. Optional conversion supports FLAC, ALAC/AAC-in-M4A, Opus, or MP3, with quality settings for lossy formats and clear warnings that a larger container cannot resurrect audio already lost in action
-- **Track upgrades:** opt-in library scanner re-probes and hashes MusicGrabber files
-  on the configured interval, flags files below your quality tier, follows tagged
-  files moved inside the library, and revalidates the original immediately before
-  any safe, recoverable replacement. Proposals distinguish the quality of the
+- **Track upgrades:** opt-in library scanner flags files below your quality tier
+  on the configured interval, follows tagged files moved inside the library, and
+  revalidates the original immediately before any safe, recoverable replacement.
+  Files whose size and modification time are unchanged since the last pass are
+  re-ranked from cached data rather than re-opened and re-hashed, so a settled
+  library costs one `stat` per file instead of a full read of every track. Proposals distinguish the quality of the
   downloaded source from the configured stored output, so a lossless source headed
   for Opus, MP3, or AAC is clearly labelled as a lossy converted result
 - **Audio Provenance Audit:** a separate read-only scan of the complete configured
@@ -110,6 +112,17 @@ This duplicate-safety index is separate from the optional **Track Upgrades**
 scan. If both need the library at once, the optional upgrade scan yields to the
 tag-index refresh. Switching Track Upgrades off stops its active pass shortly;
 neither scan delays downloads.
+
+The upgrade scan also stopped reading files it has already seen. It used to
+re-probe and re-hash every eligible file on every pass, which meant pulling the
+entire library across the network once a day to establish that nothing had
+happened. A file whose size and modification time both match the previous scan
+is now re-ranked against your current quality target from stored data alone, so
+only genuinely new or changed files are opened. The stored hash is still
+verified against the real file immediately before any replacement, where it
+matters and where it costs one read rather than thousands. The trade-off: a
+replacement that preserves both size and timestamp exactly will not be noticed
+until something else disturbs the file.
 
 ## Audio Provenance Audit
 

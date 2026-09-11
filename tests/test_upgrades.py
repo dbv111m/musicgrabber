@@ -552,3 +552,200 @@ def test_delete_orphaned_quarantine_file_deletes_a_real_orphan(tmp_path, monkeyp
 
     assert result["status"] == "deleted"
     assert not f.exists()
+
+
+# --- Scan change detection (size + mtime gating) -------------------------------
+
+_CANDIDATES_DDL = """
+    CREATE TABLE upgrade_candidates (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id TEXT NOT NULL DEFAULT '',
+        path TEXT NOT NULL,
+        mtime REAL,
+        file_size INTEGER,
+        codec TEXT,
+        bitrate_kbps INTEGER,
+        duration REAL,
+        file_tier INTEGER,
+        target_tier INTEGER,
+        below_target INTEGER DEFAULT 0,
+        source TEXT,
+        artist TEXT,
+        title TEXT,
+        dismissed INTEGER DEFAULT 0,
+        dismissed_mtime REAL,
+        upgrade_state TEXT DEFAULT 'none',
+        last_scanned TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        file_id TEXT,
+        content_sha256 TEXT,
+        source_quality TEXT,
+        source_codec TEXT,
+        source_bitrate_kbps INTEGER,
+        found_at TIMESTAMP,
+        found_searched INTEGER DEFAULT 0,
+        found_source TEXT,
+        UNIQUE(user_id, path)
+    );
+"""
+
+
+def _setup_scan(monkeypatch, tmp_path, target=TIER_LOSSLESS):
+    """Wire scan_user_library to one real file, an in-memory DB, and no disk reads.
+
+    probe_file and content_sha256 are replaced with counters that explode if the
+    scan opens a file it had no business opening. That is the entire point of the
+    change under test: an unchanged library should cost stat calls and nothing else.
+    """
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.executescript(_CANDIDATES_DDL)
+
+    @contextmanager
+    def fake_db_conn():
+        yield conn
+
+    track = tmp_path / "Fatboy Slim - Praise You.mp3"
+    track.write_bytes(b"not really an mp3, but it has a size and an mtime")
+
+    calls = {"probe": 0, "hash": 0}
+
+    def fake_probe(path):
+        calls["probe"] += 1
+        return {
+            "codec": "mp3", "bitrate_kbps": 128, "duration": 200.0,
+            "source": "youtube", "source_quality": None, "source_codec": None,
+            "source_bitrate_kbps": 0, "file_id": "fid-1",
+            "artist": "Fatboy Slim", "title": "Praise You",
+        }
+
+    def fake_hash(path):
+        calls["hash"] += 1
+        return "deadbeef"
+
+    monkeypatch.setattr(upgrades, "db_conn", fake_db_conn)
+    monkeypatch.setattr(upgrades, "probe_file", fake_probe)
+    monkeypatch.setattr(upgrades, "content_sha256", fake_hash)
+    monkeypatch.setattr(upgrades, "get_setting_bool", lambda *a, **kw: True)
+    monkeypatch.setattr(upgrades, "target_tier", lambda user_id=None: target)
+    monkeypatch.setattr(upgrades, "get_singles_dir", lambda user_id=None: tmp_path)
+    monkeypatch.setattr(upgrades, "get_playlists_dir", lambda user_id=None: None)
+    monkeypatch.setattr(upgrades, "_iter_audio_files", lambda d: iter([track]))
+    monkeypatch.setattr(
+        upgrades, "_wait_for_duplicate_scan_priority", lambda user_id=None: True
+    )
+    return conn, track, calls
+
+
+def _seed_cached_row(conn, track, **overrides):
+    st = track.stat()
+    row = {
+        "user_id": "alice", "path": str(track), "mtime": st.st_mtime,
+        "file_size": st.st_size, "codec": "mp3", "bitrate_kbps": 128,
+        "duration": 200.0, "file_tier": TIER_LOSSY_128, "target_tier": TIER_LOSSLESS,
+        "below_target": 1, "source": "youtube", "artist": "Fatboy Slim",
+        "title": "Praise You", "dismissed": 0, "dismissed_mtime": None,
+        "file_id": "fid-1", "content_sha256": "deadbeef", "source_quality": None,
+        "source_codec": None, "source_bitrate_kbps": 0, "found_searched": 1,
+        "found_source": "slskd",
+    }
+    row.update(overrides)
+    cols = ", ".join(row)
+    conn.execute(
+        f"INSERT INTO upgrade_candidates ({cols}) VALUES ({', '.join('?' * len(row))})",
+        tuple(row.values()),
+    )
+    conn.commit()
+
+
+def test_scan_leaves_unchanged_files_on_disk(monkeypatch, tmp_path):
+    conn, track, calls = _setup_scan(monkeypatch, tmp_path)
+    _seed_cached_row(conn, track)
+
+    summary = upgrades.scan_user_library("alice")
+
+    assert calls == {"probe": 0, "hash": 0}
+    assert summary["skipped_unchanged"] == 1
+    assert summary["eligible"] == 1
+    assert summary["below_target"] == 1
+    assert summary["scrubbed"] == 0
+
+
+def test_scan_reprobes_when_mtime_moves(monkeypatch, tmp_path):
+    conn, track, calls = _setup_scan(monkeypatch, tmp_path)
+    _seed_cached_row(conn, track, mtime=track.stat().st_mtime - 500)
+
+    summary = upgrades.scan_user_library("alice")
+
+    assert calls == {"probe": 1, "hash": 1}
+    assert summary["skipped_unchanged"] == 0
+
+
+def test_scan_reprobes_when_size_changes(monkeypatch, tmp_path):
+    conn, track, calls = _setup_scan(monkeypatch, tmp_path)
+    _seed_cached_row(conn, track, file_size=track.stat().st_size + 1)
+
+    summary = upgrades.scan_user_library("alice")
+
+    assert calls == {"probe": 1, "hash": 1}
+    assert summary["skipped_unchanged"] == 0
+
+
+def test_scan_probes_files_it_has_never_seen(monkeypatch, tmp_path):
+    conn, track, calls = _setup_scan(monkeypatch, tmp_path)
+
+    summary = upgrades.scan_user_library("alice")
+
+    assert calls == {"probe": 1, "hash": 1}
+    assert summary["skipped_unchanged"] == 0
+    assert summary["eligible"] == 1
+
+
+def test_scan_reranks_unchanged_file_when_target_tier_moves(monkeypatch, tmp_path):
+    # The file has not budged, but the user has stopped wanting lossless. The row
+    # must follow the new target without anyone opening the file to ask.
+    conn, track, calls = _setup_scan(monkeypatch, tmp_path, target=TIER_LOSSY_128)
+    _seed_cached_row(conn, track)
+
+    summary = upgrades.scan_user_library("alice")
+
+    assert calls == {"probe": 0, "hash": 0}
+    assert summary["below_target"] == 0
+    row = conn.execute("SELECT * FROM upgrade_candidates").fetchone()
+    assert row["below_target"] == 0
+    assert row["target_tier"] == TIER_LOSSY_128
+    assert row["file_tier"] == TIER_LOSSY_128
+
+
+def test_scan_keeps_dismissal_and_search_cache_for_unchanged_file(monkeypatch, tmp_path):
+    conn, track, calls = _setup_scan(monkeypatch, tmp_path)
+    _seed_cached_row(conn, track, dismissed=1, dismissed_mtime=track.stat().st_mtime)
+
+    upgrades.scan_user_library("alice")
+
+    row = conn.execute("SELECT * FROM upgrade_candidates").fetchone()
+    assert calls["probe"] == 0
+    assert row["dismissed"] == 1
+    assert row["found_searched"] == 1
+    assert row["found_source"] == "slskd"
+
+
+def test_scan_does_not_scrub_the_row_it_skipped(monkeypatch, tmp_path):
+    # An unchanged file still counts as "seen", or the prune at the end of the
+    # scan would cheerfully delete the entire library's worth of candidates.
+    conn, track, _ = _setup_scan(monkeypatch, tmp_path)
+    _seed_cached_row(conn, track)
+
+    upgrades.scan_user_library("alice")
+
+    assert conn.execute("SELECT COUNT(*) FROM upgrade_candidates").fetchone()[0] == 1
+
+
+def test_scan_reprobes_a_row_too_thin_to_rerank(monkeypatch, tmp_path):
+    # Size and mtime match, but a row with no codec cannot be re-ranked from
+    # cache, so it has to earn its keep the expensive way.
+    conn, track, calls = _setup_scan(monkeypatch, tmp_path)
+    _seed_cached_row(conn, track, codec=None)
+
+    upgrades.scan_user_library("alice")
+
+    assert calls["probe"] == 1

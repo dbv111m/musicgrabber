@@ -226,6 +226,27 @@ def content_sha256(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _looks_unchanged(cached, st) -> bool:
+    """Whether a cached row still matches the file on disk, cheaply.
+
+    Size plus mtime, and nothing that requires opening the file. A row missing
+    either value, or missing the codec we would need to re-rank it without a
+    fresh probe, is treated as changed so the deep pass picks it up.
+
+    This will not notice a byte-for-byte replacement that carefully preserves
+    both size and timestamp. Anything that rewrites a file in the normal course
+    of events bumps its mtime; anything that goes out of its way not to has
+    earned the right to be missed until something else disturbs the file.
+    """
+    if cached is None:
+        return False
+    if cached["mtime"] is None or cached["file_size"] is None:
+        return False
+    if not cached["codec"]:
+        return False
+    return cached["file_size"] == st.st_size and cached["mtime"] == st.st_mtime
+
+
 def _norm_user(user_id: str | None) -> str:
     return user_id or ""
 
@@ -273,9 +294,13 @@ def scan_user_library(user_id: str | None = None) -> dict:
     if pl:
         dirs.append(pl)
 
-    # The interval scan is deliberately deep: users may replace a file while
-    # preserving its path and timestamps, so stat data is never trusted as proof
-    # that the audio is unchanged.
+    # The interval scan used to be deliberately deep, re-probing and re-hashing
+    # every file on the theory that someone might replace one while preserving
+    # its path and timestamps. Correct, and ruinously expensive: it pulled the
+    # entire library across the mount every single day to discover that nothing
+    # had happened. Size and mtime now gate the expensive work. Every organiser
+    # that rewrites a file bumps its mtime, so the deep pass is reserved for
+    # files that actually look different.
     with db_conn() as conn:
         conn.row_factory = sqlite3.Row
         rows = conn.execute(
@@ -287,7 +312,7 @@ def scan_user_library(user_id: str | None = None) -> dict:
 
     seen: set[str] = set()
     seen_ids: set[int] = set()
-    scanned = eligible = below = 0
+    scanned = eligible = below = skipped = 0
 
     for d in dirs:
         for path in _iter_audio_files(d):
@@ -297,7 +322,7 @@ def scan_user_library(user_id: str | None = None) -> dict:
                     "scanned": scanned,
                     "eligible": eligible,
                     "below_target": below,
-                    "skipped_unchanged": 0,
+                    "skipped_unchanged": skipped,
                     "scrubbed": 0,
                     "cancelled": True,
                 }
@@ -309,6 +334,35 @@ def scan_user_library(user_id: str | None = None) -> dict:
                 continue
             mtime = st.st_mtime
             cached = cache.get(spath)
+
+            if _looks_unchanged(cached, st):
+                # The file is where we left it, at the size and timestamp we left
+                # it. The target tier may still have moved under it, so re-rank
+                # from the columns we already hold and leave the disk alone.
+                eligible += 1
+                skipped += 1
+                seen.add(spath)
+                seen_ids.add(cached["id"])
+                file_tier = effective_tier(
+                    cached["codec"],
+                    cached["bitrate_kbps"],
+                    cached["source_quality"],
+                    cached["source_codec"],
+                    cached["source_bitrate_kbps"] or 0,
+                )
+                is_below = 1 if file_tier < tgt else 0
+                below += is_below
+                with db_conn() as conn:
+                    conn.execute(
+                        """UPDATE upgrade_candidates
+                           SET file_tier=?, target_tier=?, below_target=?,
+                               last_scanned=CURRENT_TIMESTAMP
+                           WHERE user_id=? AND id=?""",
+                        (file_tier, tgt, is_below, uid, cached["id"]),
+                    )
+                    conn.commit()
+                continue
+
             info = probe_file(path)
             if info is None or not info.get("source"):
                 # Not our file (or unreadable). Drop any stale row and move on.
@@ -406,7 +460,8 @@ def scan_user_library(user_id: str | None = None) -> dict:
             conn.commit()
 
     return {"scanned": scanned, "eligible": eligible, "below_target": below,
-            "skipped_unchanged": 0, "scrubbed": len(stale_ids) if scanned > 0 else 0}
+            "skipped_unchanged": skipped,
+            "scrubbed": len(stale_ids) if scanned > 0 else 0}
 
 
 def get_candidates(user_id: str | None = None, below_only: bool = True,
@@ -1272,7 +1327,8 @@ _scheduler_lock = threading.Lock()
 
 def run_scan_all() -> dict:
     """Scan every eligible user once. Safe to call from a route or the scheduler."""
-    totals = {"users": 0, "scanned": 0, "eligible": 0, "below_target": 0}
+    totals = {"users": 0, "scanned": 0, "eligible": 0, "below_target": 0,
+              "skipped_unchanged": 0}
     for uid in _eligible_user_ids():
         try:
             summary = scan_user_library(uid)
@@ -1283,6 +1339,7 @@ def run_scan_all() -> dict:
         totals["scanned"] += summary["scanned"]
         totals["eligible"] += summary["eligible"]
         totals["below_target"] += summary["below_target"]
+        totals["skipped_unchanged"] += summary.get("skipped_unchanged", 0)
     return totals
 
 
@@ -1298,7 +1355,8 @@ def upgrade_scan_scheduler():
             totals = run_scan_all()
             if totals["users"]:
                 print(f"Upgrade scan: {totals['below_target']} below-target across "
-                      f"{totals['eligible']} eligible files ({totals['users']} user(s))")
+                      f"{totals['eligible']} eligible files ({totals['users']} user(s)), "
+                      f"{totals['skipped_unchanged']} unchanged and left on disk")
         except Exception as e:
             print(f"Upgrade scan scheduler error: {e}")
             interval = UPGRADE_SCAN_INTERVAL_HOURS
