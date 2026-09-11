@@ -113,6 +113,7 @@ from watched_playlists import (
     fetch_listenbrainz_createdfor, start_scheduler, wake_scheduler,
 )
 from watched_artists import refresh_watched_artist, start_artist_scheduler, wake_artist_scheduler, seed_artist_albums
+from library_index import start_library_index_scheduler
 from upgrades import (
     start_upgrade_scheduler, run_scan_all,
     get_candidates_page, search_candidate, dismiss_candidate,
@@ -224,6 +225,10 @@ start_stale_job_monitor()
 start_scheduler()
 start_artist_scheduler()
 start_upgrade_scheduler()
+# The library index reconciles on its own, well after the schedulers above have
+# settled, and nothing reads it yet except the storage tile. If it cannot open
+# its database it says so once and everything carries on walking the disk.
+start_library_index_scheduler()
 servicecheck.start_health_checks()  # initial background health sweep at boot
 
 # Warm Monochrome's browser session at boot so the first hover preview (or

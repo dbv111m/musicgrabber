@@ -317,6 +317,31 @@ ALLOW_API_KEY_QUERY_PARAM = os.getenv("ALLOW_API_KEY_QUERY_PARAM", "false").lowe
 # Configuration from environment - structural paths
 MUSIC_DIR = Path(os.getenv("MUSIC_DIR", "/music"))
 DB_PATH = Path(os.getenv("DB_PATH", "/data/music_grabber.db"))
+
+# Persistent library index. A disposable, rebuildable cache of facts about every
+# audio file under a library root, living in its own database file so that a
+# housekeeping write can never share a lock domain with a download, and so that
+# the recovery procedure for a corrupt index is "delete the file".
+LIBRARY_INDEX_DB_PATH = Path(
+    os.getenv("LIBRARY_INDEX_DB_PATH", str(DB_PATH.parent / "music_grabber_library_index.db"))
+)
+LIBRARY_INDEX_WRITE_BATCH = int(os.getenv("LIBRARY_INDEX_WRITE_BATCH", "500"))
+LIBRARY_INDEX_BUSY_TIMEOUT_MS = int(os.getenv("LIBRARY_INDEX_BUSY_TIMEOUT_MS", "5000"))
+# How often a root is reconciled against the disk. Once MusicGrabber's own file
+# changes are hooked, this exists only to catch external organisers, and those
+# run on human schedules rather than quarter-day ones.
+LIBRARY_INDEX_RECONCILE_HOURS = int(os.getenv("LIBRARY_INDEX_RECONCILE_HOURS", "24"))
+# Deliberately offset from the upgrade scan's 45 second settle, so the two never
+# start together and race each other to the same mount.
+LIBRARY_INDEX_START_DELAY = int(os.getenv("LIBRARY_INDEX_START_DELAY", "300"))
+# The delete guard. A walk that quietly returned a fraction of the library (a
+# half-mounted share, a permissions change on one subtree) must never be allowed
+# to publish that as "the user deleted everything". Below this fraction of the
+# previous count, deletions are refused, loudly, and the index is left exactly as
+# it was for the next pass to sort out. A library that genuinely halved will be
+# correct one day later and nobody will notice; an index that deleted itself is a
+# duplicate-detection outage that lasts until somebody spots it.
+LIBRARY_INDEX_DELETE_FLOOR = float(os.getenv("LIBRARY_INDEX_DELETE_FLOOR", "0.5"))
 ROOT_PATH = _normalise_root_path(os.getenv("ROOT_PATH", ""))
 
 # Other settings that don't change at runtime (not in UI)

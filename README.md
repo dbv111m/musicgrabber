@@ -138,6 +138,55 @@ after every file, which on a large library removes tens of thousands of database
 flushes per pass. A crash mid-batch loses at most that batch; the next scan
 rebuilds it from the files themselves.
 
+## Persistent library index
+
+MusicGrabber keeps a persistent index of the audio files beneath each configured
+music root: one row per file holding its size, modification time, inode, codec,
+bitrate, duration, Artist and Title tags, and whether MusicGrabber downloaded it.
+It is stored separately from the main application database, at
+`/data/music_grabber_library_index.db` by default (`LIBRARY_INDEX_DB_PATH`).
+
+The index is a cache and nothing more. The filesystem remains the source of
+truth. A missing, cold, stale, locked or rebuilding index is an unavailable
+optional hint, never an error: every feature that can use it also keeps the
+behaviour it had before and falls back without comment. It shares no locks or
+transactions with the database holding your jobs, settings and watch lists, so
+index work cannot block a download, and if it is ever corrupted the recovery
+procedure is to delete the file and let it rebuild. Upgrades that change the
+index's shape discard its contents and rebuild them from disk rather than
+migrating; a cache has nothing worth migrating, and the disk always knows.
+
+Reconciliation runs once a day per root (`LIBRARY_INDEX_RECONCILE_HOURS`),
+starting a few minutes after the other schedulers have settled
+(`LIBRARY_INDEX_START_DELAY`). A file whose size and modification time both
+match the previous pass is not opened at all. A file that appears at a new path
+with a size and timestamp matching one that has vanished is treated as a rename
+and keeps everything already known about it, so an external organiser
+reorganising the library overnight does not force a full re-read. Only genuinely
+new or changed files are opened, and each is opened once.
+
+Files MusicGrabber did not download are indexed too, recorded as not ours. This
+is deliberate and is most of the value: on a typical library the great majority
+of files were never downloaded by MusicGrabber, and without a row saying so they
+are opened on every scan, forever, to rediscover that.
+
+The index is keyed on the library root rather than on the user. A file's size,
+codec and tags do not change depending on who is asking, so users sharing a
+music root share the rows instead of building an identical copy each. Users with
+different roots get different rows, and every lookup still passes its result
+through the existing containment check, which is what enforces isolation.
+
+Deletions are published only after a walk that completes successfully. If a walk
+returns fewer than half the files the previous complete scan saw
+(`LIBRARY_INDEX_DELETE_FLOOR`), the pruning step is refused outright, the reason
+is logged and recorded against the root, and the index is left exactly as it was
+for the next pass. A half-mounted share or a permissions change on one subtree
+must never be published as "the user deleted their library".
+
+Currently the Stats storage figures read from the index, falling back to a live
+walk whenever it cannot answer. Duplicate detection and the Track Upgrades scan
+still walk the disk and are unaffected.
+
 ## Audio Provenance Audit
 
 Open **Watched → Audio Provenance Audit** and choose **Run Audit**. The scan

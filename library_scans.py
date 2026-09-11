@@ -63,6 +63,23 @@ def scan_playlists(directory):
 
 
 def scan_storage(directories):
+    """Total bytes and file count across the library directories.
+
+    Asks the persistent index first, which answers in about a millisecond from
+    data it already holds. The walk below stays exactly as it was and is used
+    whenever the index cannot answer: no index, no complete scan of this root
+    yet, or a directory sitting outside every root the index covers. A stat tile
+    is not worth a wrong number, and it is certainly not worth an exception.
+    """
+    try:
+        from library_index import storage_totals
+
+        indexed = storage_totals(directories)
+    except Exception:
+        indexed = None
+    if indexed is not None:
+        return indexed
+
     storage_bytes = file_count = 0
     seen = set()
     for directory in directories:

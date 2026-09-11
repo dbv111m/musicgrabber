@@ -1,0 +1,771 @@
+"""
+MusicGrabber - Persistent library index
+
+A disposable, rebuildable cache of facts about every audio file beneath a
+library root: size, mtime, inode, codec, bitrate, duration, artist, title, and
+whether the file carries our SOURCE tag.
+
+Four things in MusicGrabber used to walk the library independently and open the
+same files to learn overlapping subsets of one mutagen parse. This is that parse,
+done once, written down.
+
+Design rules, in descending order of how cross you should be if one is broken:
+
+1. **It is a cache.** The filesystem is the source of truth. A missing, stale,
+   locked, corrupt or half-built index is an unavailable optional hint, never an
+   error. Nothing in here may raise into a caller, delay a download, or fail an
+   API request. Every public function returns a "cannot help you" value instead.
+2. **It lives in its own database file.** Its own connections, no ATTACH, no
+   shared lock domain with the primary database. A reconciliation write cannot
+   block a download, and the recovery procedure for a corrupt index is to delete
+   the file and let it rebuild.
+3. **It is keyed on the library root, not on the user.** A file's size, codec and
+   tags are facts about the file; they do not change depending on who is asking.
+   Users sharing a root share the rows. Isolation is enforced where it always
+   was, by `authoritative_audio_file` checking containment on the way out.
+4. **Files MusicGrabber did not download get a row too**, with `source` NULL.
+   That negative cache is most of the point. On a real library 98% of the files
+   are not ours, and without a row saying so we open every one of them on every
+   scan, forever, to rediscover it.
+"""
+
+import os
+import sqlite3
+import threading
+import time
+from contextlib import contextmanager
+from datetime import datetime, timezone
+from pathlib import Path
+
+from audio_probe import probe_file
+from constants import (
+    LIBRARY_INDEX_BUSY_TIMEOUT_MS,
+    LIBRARY_INDEX_DB_PATH,
+    LIBRARY_INDEX_DELETE_FLOOR,
+    LIBRARY_INDEX_RECONCILE_HOURS,
+    LIBRARY_INDEX_START_DELAY,
+    LIBRARY_INDEX_WRITE_BATCH,
+    MUSIC_DIR,
+)
+from settings import get_setting
+from utils import iter_library_audio_files
+
+SCHEMA_VERSION = 2
+
+_SCHEMA = """
+CREATE TABLE IF NOT EXISTS library_roots (
+    root_path             TEXT PRIMARY KEY,
+    last_complete_scan_at TEXT,
+    last_attempt_at       TEXT,
+    last_error            TEXT,
+    file_count            INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE TABLE IF NOT EXISTS library_files (
+    root_path           TEXT NOT NULL,
+    relative_path       TEXT NOT NULL,
+    size_bytes          INTEGER NOT NULL,
+    mtime_ns            INTEGER NOT NULL,
+    dev                 INTEGER,
+    ino                 INTEGER,
+    artist              TEXT,
+    title               TEXT,
+    artist_key          TEXT,
+    title_key           TEXT,
+    album               TEXT,
+    codec               TEXT,
+    bitrate_kbps        INTEGER,
+    duration            REAL,
+    source              TEXT,
+    source_quality      TEXT,
+    source_codec        TEXT,
+    source_bitrate_kbps INTEGER,
+    file_id             TEXT,
+    indexed_at          TEXT NOT NULL,
+    PRIMARY KEY (root_path, relative_path)
+);
+
+CREATE INDEX IF NOT EXISTS library_files_identity
+    ON library_files (root_path, artist_key, title_key);
+CREATE INDEX IF NOT EXISTS library_files_fingerprint
+    ON library_files (root_path, size_bytes, mtime_ns);
+CREATE INDEX IF NOT EXISTS library_files_file_id
+    ON library_files (root_path, file_id);
+"""
+
+_PARSED_COLUMNS = (
+    "artist", "title", "artist_key", "title_key", "album", "codec",
+    "bitrate_kbps", "duration", "source", "source_quality", "source_codec",
+    "source_bitrate_kbps", "file_id",
+)
+
+_init_lock = threading.Lock()
+_initialised = False
+_unavailable_logged = False
+
+_scan_state_lock = threading.Lock()
+_scans_running: set[str] = set()
+
+_scheduler_running = False
+_scheduler_thread: threading.Thread | None = None
+
+
+# =============================================================================
+# Plumbing
+# =============================================================================
+
+def _now() -> str:
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+@contextmanager
+def index_conn():
+    """A short-lived connection to the index database.
+
+    No pool. Index reads are small and infrequent next to the primary database's
+    traffic, and opening a SQLite connection costs a fraction of a millisecond;
+    a second pool would be a second thing to get subtly wrong for no measurable
+    gain. Writers hold one of these for a whole batch, not for a whole scan.
+    """
+    conn = sqlite3.connect(
+        str(LIBRARY_INDEX_DB_PATH), timeout=LIBRARY_INDEX_BUSY_TIMEOUT_MS / 1000
+    )
+    try:
+        conn.execute(f"PRAGMA busy_timeout = {LIBRARY_INDEX_BUSY_TIMEOUT_MS}")
+        yield conn
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
+
+
+def init_index() -> bool:
+    """Create the index database if needed. False means carry on without one."""
+    global _initialised, _unavailable_logged
+    if _initialised:
+        return True
+    with _init_lock:
+        if _initialised:
+            return True
+        try:
+            Path(LIBRARY_INDEX_DB_PATH).parent.mkdir(parents=True, exist_ok=True)
+            with index_conn() as conn:
+                conn.execute("PRAGMA journal_mode=WAL")
+                found = conn.execute("PRAGMA user_version").fetchone()[0]
+                if found and found != SCHEMA_VERSION:
+                    # A disposable cache does not get migration scripts. If the
+                    # shape has moved on, throw the contents away and let the
+                    # next reconciliation rebuild them from the disk, which is
+                    # the only source of truth any of this ever had.
+                    print(
+                        f"Library index schema {found} is not {SCHEMA_VERSION}; "
+                        "discarding and rebuilding from disk"
+                    )
+                    conn.executescript(
+                        "DROP TABLE IF EXISTS library_files;"
+                        "DROP TABLE IF EXISTS library_roots;"
+                    )
+                conn.executescript(_SCHEMA)
+                conn.execute(f"PRAGMA user_version = {SCHEMA_VERSION}")
+                conn.commit()
+            _initialised = True
+            _unavailable_logged = False
+            return True
+        except Exception as exc:
+            if not _unavailable_logged:
+                print(f"Library index unavailable, carrying on without it: {exc}")
+                _unavailable_logged = True
+            return False
+
+
+def reset_for_tests() -> None:
+    """Forget the "already initialised" flag. Tests only."""
+    global _initialised, _unavailable_logged
+    with _init_lock:
+        _initialised = False
+        _unavailable_logged = False
+    with _scan_state_lock:
+        _scans_running.clear()
+
+
+def _tag_keys(artist: str | None, title: str | None) -> tuple[str | None, str | None]:
+    """Normalised Artist/Title keys, using the same rules as duplicate checks.
+
+    Imported late: utils will import this module back once duplicate detection
+    starts reading the index, and circular imports at module scope are a
+    memorable way to break start-up.
+    """
+    from utils import _tag_identity
+
+    if not artist or not title:
+        return None, None
+    key = _tag_identity(artist, title)
+    if not all(key):
+        return None, None
+    return key
+
+
+def _relative_to(root: str, path: Path | str) -> str | None:
+    """`path` expressed beneath `root`, or None if it does not live there."""
+    try:
+        rel = Path(path).relative_to(root)
+    except (ValueError, TypeError):
+        return None
+    return rel.as_posix()
+
+
+def _prefix_range(prefix: str) -> tuple[str, str]:
+    """Bounds for "every relative path inside this subdirectory".
+
+    A range scan on the primary key, which beats LIKE both for speed and for not
+    having to think about what a '%' in somebody's album title would do.
+    """
+    start = prefix if prefix.endswith("/") else prefix + "/"
+    # '/' is 0x2F, so 0x30 ('0') is the first string that sorts past the subtree.
+    return start, start[:-1] + "0"
+
+
+# =============================================================================
+# Reading
+# =============================================================================
+
+def root_state(root: Path | str) -> dict | None:
+    """What the index knows about a root, or None if it knows nothing."""
+    if not init_index():
+        return None
+    try:
+        with index_conn() as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                "SELECT * FROM library_roots WHERE root_path = ?", (str(root),)
+            ).fetchone()
+        return dict(row) if row else None
+    except Exception:
+        return None
+
+
+def is_ready(root: Path | str) -> bool:
+    """True once a complete walk of this root has been published."""
+    state = root_state(root)
+    return bool(state and state.get("last_complete_scan_at"))
+
+
+def storage_totals(directories) -> dict | None:
+    """`{storage_bytes, file_count}` for these directories, or None if we cannot.
+
+    None means "ask the disk yourself": no index, no complete scan yet, or a
+    directory that sits outside every root we have indexed. The caller keeps its
+    existing walk for exactly that case.
+    """
+    if not init_index():
+        return None
+    try:
+        roots = _indexed_roots_ready()
+        if not roots:
+            return None
+
+        clauses, params = [], []
+        for directory in directories:
+            if directory is None:
+                continue
+            target = str(directory)
+            owner = _owning_root(roots, target)
+            if owner is None:
+                return None  # Not covered by any index; the walk is still correct.
+            rel = _relative_to(owner, target)
+            if rel is None or rel == ".":
+                clauses.append("root_path = ?")
+                params.append(owner)
+            else:
+                start, end = _prefix_range(rel)
+                clauses.append(
+                    "(root_path = ? AND ((relative_path >= ? AND relative_path < ?)))"
+                )
+                params.extend([owner, start, end])
+        if not clauses:
+            return {"storage_bytes": 0, "file_count": 0}
+
+        # Hardlinks are counted once, matching the walk this replaces. Rows with
+        # no inode recorded fall back to their own path, so they can never
+        # collapse into each other by accident.
+        sql = f"""
+            SELECT COUNT(*) AS files, COALESCE(SUM(size_bytes), 0) AS total FROM (
+                SELECT size_bytes FROM library_files
+                WHERE {' OR '.join(clauses)}
+                GROUP BY CASE
+                    WHEN dev IS NULL OR ino IS NULL THEN root_path || '/' || relative_path
+                    ELSE dev || ':' || ino
+                END
+            )
+        """
+        with index_conn() as conn:
+            row = conn.execute(sql, params).fetchone()
+        if row is None:
+            return None
+        return {"storage_bytes": int(row[1] or 0), "file_count": int(row[0] or 0)}
+    except Exception as exc:
+        print(f"Library index storage lookup failed, falling back to a walk: {exc}")
+        return None
+
+
+def _indexed_roots_ready() -> list[str]:
+    """Roots with a complete published scan, longest first for owner matching."""
+    with index_conn() as conn:
+        rows = conn.execute(
+            "SELECT root_path FROM library_roots WHERE last_complete_scan_at IS NOT NULL"
+        ).fetchall()
+    return sorted((r[0] for r in rows), key=len, reverse=True)
+
+
+def _owning_root(roots: list[str], target: str) -> str | None:
+    """The indexed root that contains `target`, preferring the most specific."""
+    for root in roots:
+        if target == root or _relative_to(root, target) is not None:
+            return root
+    return None
+
+
+def find_by_tags(root: Path | str, artist: str, title: str) -> Path | None:
+    """The first indexed file carrying these Artist/Title tags, if any.
+
+    Not yet wired into duplicate detection; that is step 3c. Present and tested
+    here so the index can be verified in isolation first.
+    """
+    if not init_index():
+        return None
+    artist_key, title_key = _tag_keys(artist, title)
+    if not artist_key or not title_key:
+        return None
+    try:
+        with index_conn() as conn:
+            row = conn.execute(
+                """SELECT relative_path FROM library_files
+                   WHERE root_path = ? AND artist_key = ? AND title_key = ?
+                   ORDER BY relative_path LIMIT 1""",
+                (str(root), artist_key, title_key),
+            ).fetchone()
+        return Path(root) / row[0] if row else None
+    except Exception:
+        return None
+
+
+def file_count(root: Path | str) -> int:
+    """Rows held for a root. Diagnostics and tests."""
+    if not init_index():
+        return 0
+    try:
+        with index_conn() as conn:
+            return int(
+                conn.execute(
+                    "SELECT COUNT(*) FROM library_files WHERE root_path = ?", (str(root),)
+                ).fetchone()[0]
+            )
+    except Exception:
+        return 0
+
+
+# =============================================================================
+# Reconciliation
+# =============================================================================
+
+def _row_values(info: dict | None) -> tuple:
+    """The parsed columns, in `_PARSED_COLUMNS` order, from one probe result.
+
+    `info is None` means mutagen could not read the file. That still earns a
+    row: remembering "this one is not worth opening" is the entire point of the
+    negative cache, and a file we cannot parse is the clearest case of it.
+    """
+    if info is None:
+        return (None,) * len(_PARSED_COLUMNS)
+    artist = info.get("artist")
+    title = info.get("title")
+    artist_key, title_key = _tag_keys(artist, title)
+    return (
+        artist, title, artist_key, title_key, info.get("album"), info.get("codec"),
+        info.get("bitrate_kbps"), info.get("duration"), info.get("source"),
+        info.get("source_quality"), info.get("source_codec"),
+        info.get("source_bitrate_kbps"), info.get("file_id"),
+    )
+
+
+_UPSERT = f"""
+INSERT INTO library_files
+    (root_path, relative_path, size_bytes, mtime_ns, dev, ino,
+     {', '.join(_PARSED_COLUMNS)}, indexed_at)
+VALUES ({', '.join('?' * (6 + len(_PARSED_COLUMNS) + 1))})
+ON CONFLICT(root_path, relative_path) DO UPDATE SET
+    size_bytes = excluded.size_bytes,
+    mtime_ns = excluded.mtime_ns,
+    dev = excluded.dev,
+    ino = excluded.ino,
+    {', '.join(f'{c} = excluded.{c}' for c in _PARSED_COLUMNS)},
+    indexed_at = excluded.indexed_at
+"""
+
+
+def reconcile(root: Path | str, *, walker=None, probe=None) -> dict:
+    """Bring one library root's index back in line with what is on disk.
+
+    Returns a summary dict. Never raises; a failure is reported in `error` and
+    leaves every previously published row exactly where it was.
+    """
+    summary = {
+        "root": str(root), "walked": 0, "unchanged": 0, "renamed": 0, "probed": 0,
+        "deleted": 0, "delete_skipped": False, "ran": False, "error": None,
+    }
+    if not init_index():
+        summary["error"] = "index unavailable"
+        return summary
+
+    root_str = str(root)
+    try:
+        if not Path(root_str).is_dir():
+            summary["error"] = f"root is not a directory: {root_str}"
+            return summary
+    except OSError as exc:
+        summary["error"] = f"root unavailable: {exc}"
+        return summary
+
+    with _scan_state_lock:
+        if root_str in _scans_running:
+            summary["error"] = "a reconciliation is already running for this root"
+            return summary
+        _scans_running.add(root_str)
+    try:
+        summary["ran"] = True
+        return _reconcile_locked(root_str, summary, walker=walker, probe=probe)
+    except Exception as exc:
+        summary["error"] = str(exc)
+        _record_failure(root_str, str(exc))
+        print(f"Library index reconciliation failed for {root_str}: {exc}")
+        return summary
+    finally:
+        with _scan_state_lock:
+            _scans_running.discard(root_str)
+
+
+def _reconcile_locked(root: str, summary: dict, *, walker=None, probe=None) -> dict:
+    walk = walker or iter_library_audio_files
+    probe_fn = probe or probe_file
+    started = _now()
+
+    with index_conn() as conn:
+        conn.row_factory = sqlite3.Row
+        existing = {
+            r["relative_path"]: r
+            for r in conn.execute(
+                "SELECT * FROM library_files WHERE root_path = ?", (root,)
+            ).fetchall()
+        }
+        previous = conn.execute(
+            "SELECT file_count FROM library_roots WHERE root_path = ?", (root,)
+        ).fetchone()
+        previous_count = int(previous["file_count"]) if previous else 0
+
+    # Fingerprint index for rename detection: an organiser that moved a file
+    # without touching it leaves size and mtime exactly where they were.
+    by_fingerprint: dict[tuple[int, int], list[str]] = {}
+    for rel, row in existing.items():
+        by_fingerprint.setdefault((row["size_bytes"], row["mtime_ns"]), []).append(rel)
+
+    upserts: list[tuple] = []
+    seen: set[str] = set()
+    # Orphan rows already claimed by a rename. Kept separate from `seen`, which
+    # means "still on disk at this path": a claimed orphan is neither, and it
+    # still needs pruning at the end.
+    consumed: set[str] = set()
+
+    def flush():
+        if not upserts:
+            return
+        with index_conn() as conn:
+            conn.executemany(_UPSERT, upserts)
+            conn.commit()
+        upserts.clear()
+
+    for entry in walk(Path(root), strict=True):
+        path, st = entry.path, entry.stat
+        rel = _relative_to(root, path)
+        if rel is None:
+            continue
+        summary["walked"] += 1
+        seen.add(rel)
+        cached = existing.get(rel)
+
+        if (
+            cached is not None
+            and cached["size_bytes"] == st.st_size
+            and cached["mtime_ns"] == st.st_mtime_ns
+        ):
+            # Nothing to say and nobody to say it to. A row that still matches
+            # the disk needs no write: the prune below works from `seen`, which
+            # is already in hand, so recording "still here" 20,000 times would
+            # be 20,000 writes nothing ever reads.
+            summary["unchanged"] += 1
+        else:
+            parsed = None
+            if cached is None:
+                parsed = _rename_of(root, existing, by_fingerprint, seen, consumed, st)
+            if parsed is not None:
+                summary["renamed"] += 1
+            else:
+                parsed = _row_values(probe_fn(path))
+                summary["probed"] += 1
+            upserts.append(
+                (root, rel, st.st_size, st.st_mtime_ns, st.st_dev, st.st_ino)
+                + tuple(parsed) + (started,)
+            )
+
+        if len(upserts) >= LIBRARY_INDEX_WRITE_BATCH:
+            flush()
+
+    flush()
+
+    # The delete guard. Everything above degrades to "slower than it could be";
+    # this is the one step that can quietly leave the user without an index.
+    stale = [rel for rel in existing if rel not in seen]
+    floor = previous_count * LIBRARY_INDEX_DELETE_FLOOR
+    if stale and previous_count > 0 and summary["walked"] < floor:
+        summary["delete_skipped"] = True
+        message = (
+            f"refused to prune {len(stale)} rows: the walk saw {summary['walked']} "
+            f"files where the last complete scan saw {previous_count}. The index is "
+            f"unchanged; check the mount."
+        )
+        print(f"Library index: {message}")
+        _record_failure(root, message, attempted_at=started)
+        return summary
+
+    if stale:
+        with index_conn() as conn:
+            conn.executemany(
+                "DELETE FROM library_files WHERE root_path = ? AND relative_path = ?",
+                [(root, rel) for rel in stale],
+            )
+            conn.commit()
+        summary["deleted"] = len(stale)
+
+    with index_conn() as conn:
+        conn.execute(
+            """INSERT INTO library_roots
+                   (root_path, last_complete_scan_at, last_attempt_at, last_error, file_count)
+               VALUES (?, ?, ?, NULL, ?)
+               ON CONFLICT(root_path) DO UPDATE SET
+                   last_complete_scan_at = excluded.last_complete_scan_at,
+                   last_attempt_at = excluded.last_attempt_at,
+                   last_error = NULL,
+                   file_count = excluded.file_count""",
+            (root, _now(), started, summary["walked"]),
+        )
+        conn.commit()
+    return summary
+
+
+def _rename_of(root, existing, by_fingerprint, seen, consumed, st) -> tuple | None:
+    """Parsed columns inherited from a file that merely moved, if this is one.
+
+    A new path whose size and mtime match a row whose own file has since
+    vanished is an organiser's rename, not a new file, so its tags are already
+    known and there is nothing to open. Confirming the old path really is gone
+    costs one stat, only ever on a genuinely new path, and it is what stops two
+    coincidentally identical files swapping identities.
+    """
+    for candidate in by_fingerprint.get((st.st_size, st.st_mtime_ns), []):
+        if candidate in seen or candidate in consumed:
+            continue
+        try:
+            if (Path(root) / candidate).exists():
+                continue
+        except OSError:
+            continue
+        consumed.add(candidate)
+        row = existing[candidate]
+        return tuple(row[column] for column in _PARSED_COLUMNS)
+    return None
+
+
+def _record_failure(root: str, message: str, attempted_at: str | None = None) -> None:
+    """Note that a pass did not publish. Published rows are left alone."""
+    try:
+        with index_conn() as conn:
+            conn.execute(
+                """INSERT INTO library_roots (root_path, last_attempt_at, last_error)
+                   VALUES (?, ?, ?)
+                   ON CONFLICT(root_path) DO UPDATE SET
+                       last_attempt_at = excluded.last_attempt_at,
+                       last_error = excluded.last_error""",
+                (root, attempted_at or _now(), message[:500]),
+            )
+            conn.commit()
+    except Exception:
+        pass
+
+
+# =============================================================================
+# Hooks. Defined and tested here; wired into the download paths in Phase 5.
+# =============================================================================
+
+def index_file(path: Path | str) -> bool:
+    """Index one file immediately, so our own downloads do not wait for a scan."""
+    if not init_index():
+        return False
+    try:
+        root = _owning_root(_known_roots(), str(path))
+        if root is None:
+            return False
+        rel = _relative_to(root, path)
+        if rel is None:
+            return False
+        st = os.stat(path)
+        values = (
+            (root, rel, st.st_size, st.st_mtime_ns, st.st_dev, st.st_ino)
+            + _row_values(probe_file(Path(path))) + (_now(),)
+        )
+        with index_conn() as conn:
+            conn.execute(_UPSERT, values)
+            conn.commit()
+        return True
+    except Exception as exc:
+        print(f"Library index could not record {path}: {exc}")
+        return False
+
+
+def remove_file(path: Path | str) -> bool:
+    """Forget one file. A miss is a success; the row was already gone."""
+    if not init_index():
+        return False
+    try:
+        root = _owning_root(_known_roots(), str(path))
+        rel = _relative_to(root, path) if root else None
+        if rel is None:
+            return False
+        with index_conn() as conn:
+            conn.execute(
+                "DELETE FROM library_files WHERE root_path = ? AND relative_path = ?",
+                (root, rel),
+            )
+            conn.commit()
+        return True
+    except Exception as exc:
+        print(f"Library index could not forget {path}: {exc}")
+        return False
+
+
+def move_file(old_path: Path | str, new_path: Path | str) -> bool:
+    """Follow one of our own moves without reopening the file."""
+    if not init_index():
+        return False
+    try:
+        roots = _known_roots()
+        old_root = _owning_root(roots, str(old_path))
+        new_root = _owning_root(roots, str(new_path))
+        old_rel = _relative_to(old_root, old_path) if old_root else None
+        new_rel = _relative_to(new_root, new_path) if new_root else None
+        if old_rel is None or new_rel is None:
+            # Moved in or out of the indexed world entirely; index the arrival
+            # and forget the departure, rather than pretending it was a rename.
+            removed = remove_file(old_path) if old_rel else False
+            return index_file(new_path) if new_rel else removed
+        with index_conn() as conn:
+            conn.execute(
+                "DELETE FROM library_files WHERE root_path = ? AND relative_path = ?",
+                (new_root, new_rel),
+            )
+            conn.execute(
+                """UPDATE library_files SET root_path = ?, relative_path = ?, indexed_at = ?
+                   WHERE root_path = ? AND relative_path = ?""",
+                (new_root, new_rel, _now(), old_root, old_rel),
+            )
+            conn.commit()
+        return True
+    except Exception as exc:
+        print(f"Library index could not follow {old_path} to {new_path}: {exc}")
+        return False
+
+
+def _known_roots() -> list[str]:
+    """Every root the index holds rows for, most specific first."""
+    try:
+        with index_conn() as conn:
+            rows = conn.execute("SELECT root_path FROM library_roots").fetchall()
+        return sorted((r[0] for r in rows), key=len, reverse=True)
+    except Exception:
+        return []
+
+
+# =============================================================================
+# Scheduling
+# =============================================================================
+
+def configured_roots() -> list[str]:
+    """Every distinct music root across the global and per-user settings.
+
+    Distinct, because the index is keyed on the root: three users pointed at the
+    same library is one set of rows, not three identical ones.
+    """
+    roots = {str(Path(get_setting("music_dir", str(MUSIC_DIR))))}
+    try:
+        from db import db_conn
+
+        with db_conn() as conn:
+            user_ids = [r[0] for r in conn.execute("SELECT id FROM users").fetchall()]
+        for user_id in user_ids:
+            roots.add(str(Path(get_setting("music_dir", str(MUSIC_DIR), user_id=user_id))))
+    except Exception as exc:
+        print(f"Library index could not read per-user music roots: {exc}")
+    return sorted(roots)
+
+
+def reconcile_all() -> list[dict]:
+    """One reconciliation per configured root."""
+    return [reconcile(root) for root in configured_roots()]
+
+
+def library_index_scheduler():
+    """Background loop: reconcile each root against the disk, once a day."""
+    print(
+        f"Library index scheduler started (every {LIBRARY_INDEX_RECONCILE_HOURS}h, "
+        f"first pass in {LIBRARY_INDEX_START_DELAY}s)"
+    )
+    slept = 0
+    while slept < LIBRARY_INDEX_START_DELAY and _scheduler_running:
+        time.sleep(5)
+        slept += 5
+
+    while _scheduler_running:
+        try:
+            for summary in reconcile_all():
+                if summary["error"]:
+                    print(f"Library index: {summary['root']}: {summary['error']}")
+                elif summary["ran"]:
+                    print(
+                        f"Library index: {summary['root']}: {summary['walked']} files "
+                        f"({summary['unchanged']} unchanged, {summary['renamed']} moved, "
+                        f"{summary['probed']} read, {summary['deleted']} gone)"
+                    )
+        except Exception as exc:
+            print(f"Library index scheduler error: {exc}")
+
+        sleep_seconds = max(3600, LIBRARY_INDEX_RECONCILE_HOURS * 3600)
+        elapsed = 0
+        while elapsed < sleep_seconds and _scheduler_running:
+            time.sleep(60)
+            elapsed += 60
+
+
+def start_library_index_scheduler() -> None:
+    """Start the reconciliation loop once. Safe to call more than once."""
+    global _scheduler_running, _scheduler_thread
+    if _scheduler_running:
+        return
+    if not init_index():
+        return
+    _scheduler_running = True
+    _scheduler_thread = threading.Thread(target=library_index_scheduler, daemon=True)
+    _scheduler_thread.start()
+
+
+def stop_library_index_scheduler() -> None:
+    global _scheduler_running
+    _scheduler_running = False

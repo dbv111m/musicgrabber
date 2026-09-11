@@ -26,6 +26,14 @@ const RELEASE_NOTES = {
                     "The upgrade scan also stopped saving its notes to disk after every single track. A full pass over an unchanged library went from a hundred seconds to about thirty. Your NAS has not said thank you, but we know.",
                 ]
             },
+            {
+                heading: "MusicGrabber has developed a memory",
+                items: [
+                    "There is now a proper index of your library: one line per track, kept in its own little database, quietly brought up to date once a day. Only files that are actually new or changed get opened. A track someone else renamed is recognised and keeps everything we already knew about it.",
+                    "It lives on its own, away from your jobs and history, so it can never hold anything up. If it goes missing or gets confused, everything simply works the way it did before while it rebuilds itself. No buttons, no settings, nothing to do.",
+                    "First up: the Stats page storage total, which used to count your entire collection from scratch every five minutes and now just looks it up. More things will start using it once it has proved it can be trusted.",
+                ]
+            },
         ]
     },
     "4.1.1": {
