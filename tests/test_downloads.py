@@ -1643,3 +1643,99 @@ def test_auto_route_single_still_fills_in_a_missing_track_number(tmp_path, monke
     )
 
     assert FLAC(str(routed))["TRACKNUMBER"] == ["2"]
+
+
+# ---------------------------------------------------------------------------
+# GitLab issue #90: YouTube downloads ran for six months with no cookies.
+#
+# The gate was written as "not is_soundcloud" and meant it. v2.0.0 rewrote it
+# as "not is_url_source"; v2.3.0 then began synthesising a source_url for every
+# YouTube job, so the gate closed on YouTube itself. These tests hold the
+# original intent in place: cookies for YouTube, never for anyone else.
+# ---------------------------------------------------------------------------
+
+
+def _cookie_gate(source_url):
+    """The real decision from downloads.py, not a copy of it that could agree
+    with a broken implementation."""
+    from downloads import youtube_cookies_apply
+    return youtube_cookies_apply(source_url)
+
+
+def test_youtube_downloads_send_cookies_even_with_a_source_url():
+    # The exact shape app.py synthesises "for tracking", which caused all this.
+    assert _cookie_gate("https://www.youtube.com/watch?v=nfWlot6h_JM") is True
+    assert _cookie_gate("https://music.youtube.com/watch?v=nfWlot6h_JM") is True
+    # A bare YouTube job with no source_url at all still gets them, as before.
+    assert _cookie_gate(None) is True
+    assert _cookie_gate("") is True
+
+
+def test_other_url_backed_sources_still_get_no_youtube_cookies():
+    """Handing YouTube cookies to SoundCloud was never the intention."""
+    for url in (
+        "https://soundcloud.com/artist/track",
+        "https://meln.top/track/123",
+        "monochrome://12345",
+        "soulseek://someone/some/path.flac",
+    ):
+        assert _cookie_gate(url) is False, url
+
+
+def test_download_command_carries_cookies_for_a_youtube_source_url(tmp_path, monkeypatch):
+    """End to end on the command builder, which is what actually runs."""
+    import downloads
+    import youtube
+
+    cookies = tmp_path / "cookies.txt"
+    cookies.write_text("# Netscape HTTP Cookie File\n.youtube.com\tTRUE\t/\tTRUE\t99\tA\tb\n")
+    monkeypatch.setattr(youtube, "COOKIES_FILE", cookies)
+    monkeypatch.setattr(youtube, "get_user_cookies_file", lambda user_id: cookies)
+    monkeypatch.setattr(youtube, "_cookies_allowed", lambda: True)
+
+    url = "https://www.youtube.com/watch?v=nfWlot6h_JM"
+    cmd = downloads._build_ytdlp_download_cmd(
+        "nfWlot6h_JM", str(tmp_path / "o.%(ext)s"), True,
+        source_url=url, use_cookies=_cookie_gate(url),
+    )
+    assert "--cookies" in cmd
+    assert str(cookies) in cmd
+
+    soundcloud = "https://soundcloud.com/artist/track"
+    cmd = downloads._build_ytdlp_download_cmd(
+        "x", str(tmp_path / "o.%(ext)s"), True,
+        source_url=soundcloud, use_cookies=_cookie_gate(soundcloud),
+    )
+    assert "--cookies" not in cmd
+
+
+def test_per_user_cookie_file_is_actually_reached(tmp_path, monkeypatch):
+    """user_id was in scope at every call site and passed at none of them."""
+    import downloads
+    import youtube
+
+    mine = tmp_path / "user-alice.txt"
+    mine.write_text("# Netscape HTTP Cookie File\n.youtube.com\tTRUE\t/\tTRUE\t99\tA\tb\n")
+    everyones = tmp_path / "global.txt"
+    everyones.write_text("# Netscape HTTP Cookie File\n.youtube.com\tTRUE\t/\tTRUE\t99\tZ\tz\n")
+
+    monkeypatch.setattr(youtube, "COOKIES_FILE", everyones)
+    monkeypatch.setattr(youtube, "_cookies_allowed", lambda: True)
+    monkeypatch.setattr(
+        youtube, "get_user_cookies_file",
+        lambda user_id: mine if user_id == "alice" else tmp_path / "nope.txt",
+    )
+
+    cmd = downloads._build_ytdlp_download_cmd(
+        "abc", str(tmp_path / "o.%(ext)s"), True,
+        source_url="https://www.youtube.com/watch?v=abc",
+        use_cookies=True, user_id="alice",
+    )
+    assert str(mine) in cmd, "alice's own cookies should win"
+
+    cmd = downloads._build_ytdlp_download_cmd(
+        "abc", str(tmp_path / "o.%(ext)s"), True,
+        source_url="https://www.youtube.com/watch?v=abc",
+        use_cookies=True, user_id="bob",
+    )
+    assert str(everyones) in cmd, "bob has none of his own, so the global file"

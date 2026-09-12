@@ -1591,6 +1591,26 @@ def _extract_source_format_from_info(info: dict) -> tuple[str, int]:
     return codec_label, bitrate_kbps
 
 
+def youtube_cookies_apply(source_url: str | None) -> bool:
+    """Whether YouTube cookies belong on a job with this source_url.
+
+    Cookies are for YouTube and nowhere else. The original gate said precisely
+    that, as "not is_soundcloud". v2.0.0 rewrote it to "not is_url_source",
+    which was harmless at the time because YouTube jobs carried no source_url;
+    v2.3.0 then started synthesising one for every YouTube job "for tracking"
+    and sprang the trap. From that day every YouTube download ran with no
+    cookies and no player-client override: no Premium formats for the people
+    paying for them, and no defence against "sign in to confirm you're not a
+    bot" for anybody. Reported by dynAdZ as GitLab issue #90, six months later.
+
+    Lives on its own so the rule is stated once and can be tested directly,
+    rather than retyped in a test that would happily agree with a broken copy.
+    """
+    if not source_url:
+        return True
+    return bool(is_valid_source_url("youtube", source_url))
+
+
 def _build_ytdlp_download_cmd(
     video_id: str,
     output_template: str,
@@ -1636,7 +1656,7 @@ def _build_ytdlp_download_cmd(
         audio_quality = "0" if q == "lossless" else q.rstrip("kK")
     else:
         audio_quality = "0"  # best for FLAC
-    base_args = _ytdlp_base_args() if use_cookies else []
+    base_args = _ytdlp_base_args(user_id) if use_cookies else []
     url = source_url or f"https://www.youtube.com/watch?v={video_id}"
     return [
         "yt-dlp",
@@ -3756,7 +3776,7 @@ def process_playlist_download(job_id: str, playlist_id: str, playlist_name: str,
         # Get playlist information and extract all video IDs
         info_cmd = [
             "yt-dlp",
-            *_ytdlp_base_args(),
+            *_ytdlp_base_args(user_id),
             "--dump-json",
             "--flat-playlist",
             "--no-warnings",
@@ -3818,7 +3838,7 @@ def process_playlist_download(job_id: str, playlist_id: str, playlist_name: str,
                 # Get detailed video info
                 detail_cmd = [
                     "yt-dlp",
-                    *_ytdlp_base_args(),
+                    *_ytdlp_base_args(user_id),
                     "--dump-json",
                     "--no-warnings",
                     f"https://www.youtube.com/watch?v={video_id}"
@@ -5227,6 +5247,7 @@ def process_download(job_id: str, video_id: str, convert_audio: bool = True, sou
     # arrive here with one set, and refusing those would be an exciting way to
     # break every download in the application.
     is_youtube_url = is_valid_source_url("youtube", source_url)
+    use_youtube_cookies = youtube_cookies_apply(source_url)
     if is_url_source and not (is_soundcloud or is_mp3phoenix or is_zvu4no
                               or is_freemp3cloud or is_monochrome or is_youtube_url):
         _update_job(
@@ -5329,7 +5350,7 @@ def process_download(job_id: str, video_id: str, convert_audio: bool = True, sou
         _update_job(job_id, status="downloading", progress_stage="Fetching info")
 
         # First, get video info for proper metadata
-        base_args = _ytdlp_base_args() if not is_url_source else []
+        base_args = _ytdlp_base_args(user_id) if use_youtube_cookies else []
         info_cmd = [
             "yt-dlp",
             *base_args,
@@ -5347,7 +5368,7 @@ def process_download(job_id: str, video_id: str, convert_audio: bool = True, sou
         )
         if info_timed_out or info_result is None or info_result.returncode != 0:
             info_stderr = info_result.stderr if info_result is not None else ""
-            if not is_url_source and _is_ytdlp_403(info_stderr) and has_cookies:
+            if use_youtube_cookies and _is_ytdlp_403(info_stderr) and has_cookies:
                 _note_cookie_failure()
             reason_msg = _format_info_lookup_error(source_label, info_stderr, has_cookies)
             # Always log the raw stderr so we can diagnose vague "provider
@@ -5456,7 +5477,7 @@ def process_download(job_id: str, video_id: str, convert_audio: bool = True, sou
         download_cmd = _build_ytdlp_download_cmd(
             video_id, output_template, convert_audio,
             source_url=source_url,
-            use_cookies=not is_url_source,
+            use_cookies=use_youtube_cookies,
             user_id=user_id,
         )
         has_cookies = "--cookies" in download_cmd
@@ -5504,7 +5525,7 @@ def process_download(job_id: str, video_id: str, convert_audio: bool = True, sou
 
             if stderr and not audio_file:
                 error_msg = f"Download failed: {stderr}"
-                if not is_url_source and download_result and _is_ytdlp_403(stderr):
+                if use_youtube_cookies and download_result and _is_ytdlp_403(stderr):
                     if has_cookies:
                         error_msg = "YouTube blocked this download (403). Your cookies may have expired  -  try re-exporting them in Settings."
                     else:

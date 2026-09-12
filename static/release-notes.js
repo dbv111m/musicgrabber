@@ -11,6 +11,15 @@ const RELEASE_NOTES = {
         title: "What's New in v4.1.2",
         sections: [
             {
+                heading: "YouTube Premium works properly again",
+                items: [
+                    "If you pay for YouTube Premium, MusicGrabber was not telling YouTube about it, so you were getting the ordinary quality stream instead of the good one. It now hands over your cookies properly and yt-dlp picks the Premium audio by itself. No new settings, nothing to switch on.",
+                    "Everyone else benefits too: those cookies are also what keeps YouTube from stopping you with a 'confirm you are not a robot' check, and they were being left in the drawer on every single download since March.",
+                    "If you set up cookies for your own account rather than globally, those were being ignored as well. They are not now.",
+                    "Found, diagnosed and handed to us complete with the fix by dynAdZ, who noticed their Opus files were half the bitrate they were paying for. Thank you kindly.",
+                ]
+            },
+            {
                 heading: "Downloads outrank housekeeping",
                 items: [
                     "Library tag indexing now stays firmly in the background. Downloads use the duplicate information already available and carry on immediately, even while a large NAS is still being indexed.",
