@@ -2,6 +2,9 @@
 
 ## v4.1.3 (DEV)
 
+### Changed
+- **Amazon playlists are now read one way instead of two**: alongside reading the rendered page, MusicGrabber also eavesdropped on every JSON response the Amazon Music app made, sifting each one recursively for anything that looked like a track. It was added as insurance and kept on probation, on the reasonable theory that it might be the only thing that worked on some playlist shape nobody had tried yet. The probation is over and it has been let go. On a live 60-track playlist it found precisely zero tracks, every single one having come from the page itself; and on a playlist that no longer resolves, where the page gave up nothing at all, it also found nothing, which was exactly the scenario it existed to rescue. Verified by scraping the same real playlist before and after: 60 tracks, identical titles, identical running order. Sixty lines lighter, one fewer thing to be confused by, and the scroll loop now measures its own progress instead of counting a collector that was never contributing to it.
+
 ## v4.1.2 (2026-09-12)
 
 ### Added

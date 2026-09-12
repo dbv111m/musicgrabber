@@ -9,7 +9,14 @@
 const RELEASE_NOTES = {
     "4.1.3": {
         title: "What's New in v4.1.3",
-        sections: []
+        sections: [
+            {
+                heading: "Housekeeping",
+                items: [
+                    "Amazon playlist importing used to read the page and also listen in on everything the Amazon app said to its servers, just in case. It turns out the page had it covered all along, so the eavesdropping has been shown the door. Same playlists, same running order, rather less lurking.",
+                ]
+            },
+        ]
     },
     "4.1.2": {
         title: "What's New in v4.1.2",

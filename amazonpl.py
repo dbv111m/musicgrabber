@@ -11,7 +11,6 @@ import os
 import re
 import sys
 import time
-from typing import Any
 
 try:
     from playwright.sync_api import sync_playwright
@@ -96,43 +95,6 @@ def _strip_featured_suffix(title: str, artist: str) -> str:
 
 def _looks_like_duration(text: str) -> bool:
     return bool(re.match(r"^\d{1,2}:\d{2}$", text))
-
-
-def _extract_from_payload(payload: Any, out: dict[str, None]) -> None:
-    """Best-effort recursive extractor for track-like JSON objects.
-
-    `out` is a dict used as an ordered set, so discovery order survives.
-    """
-    if isinstance(payload, dict):
-        typename = str(payload.get("__typename", "")).lower()
-        has_track_hint = any(
-            k in payload for k in ("trackId", "asin", "duration", "durationMs", "isExplicit")
-        ) or "track" in typename
-
-        title = payload.get("title") or payload.get("name")
-        artist = (
-            payload.get("artistName")
-            or payload.get("primaryArtistName")
-            or payload.get("displayArtistName")
-            or payload.get("subtitle")
-        )
-
-        if isinstance(payload.get("artist"), dict):
-            artist = payload["artist"].get("name") or artist
-        elif isinstance(payload.get("artist"), str):
-            artist = payload.get("artist")
-
-        if has_track_hint and isinstance(title, str) and isinstance(artist, str):
-            title = title.strip()
-            artist = artist.strip()
-            if title and artist and title.lower() != artist.lower():
-                out.setdefault(_normalise_track(artist, title), None)
-
-        for value in payload.values():
-            _extract_from_payload(value, out)
-    elif isinstance(payload, list):
-        for item in payload:
-            _extract_from_payload(item, out)
 
 
 def _collect_visible_tracks(page) -> list[tuple[float, str]]:
@@ -319,7 +281,6 @@ def main() -> None:
     # track -> position in the list; dicts keep insertion order, which is the
     # tie-break for anything the page couldn't give us a position for.
     dom_tracks: dict[str, float] = {}
-    network_tracks: dict[str, None] = {}  # ordered set, discovery order
 
     try:
         with sync_playwright() as p:
@@ -334,20 +295,6 @@ def main() -> None:
             )
             page = context.new_page()
 
-            def on_response(response):
-                try:
-                    req = response.request
-                    if req.resource_type not in ("xhr", "fetch"):
-                        return
-                    ctype = response.headers.get("content-type", "")
-                    if "json" not in ctype:
-                        return
-                    data = response.json()
-                    _extract_from_payload(data, network_tracks)
-                except Exception:
-                    return
-
-            page.on("response", on_response)
             page.goto(amazon_url, timeout=90000, wait_until="domcontentloaded")
             time.sleep(3)
 
@@ -398,7 +345,7 @@ def main() -> None:
                 page.mouse.wheel(0, 600)
                 time.sleep(0.3)
 
-                total = len(dom_tracks) + len(network_tracks)
+                total = len(dom_tracks)
                 if total == previous:
                     stale += 1
                 else:
@@ -415,7 +362,7 @@ def main() -> None:
                 _merge_positioned(_collect_visible_tracks(page), dom_tracks)
                 page.mouse.wheel(0, 600)
                 time.sleep(0.3)
-                new_total = len(dom_tracks) + len(network_tracks)
+                new_total = len(dom_tracks)
                 if new_total == previous:
                     stale += 1
                 else:
@@ -428,20 +375,13 @@ def main() -> None:
         # strings was tidy and completely wrong: a playlist is a running order,
         # and Amazon's is the one the user actually chose to follow.
         tracks = [track for track, _ in sorted(dom_tracks.items(), key=lambda item: item[1])]
-        network_only = [track for track in network_tracks if track not in dom_tracks]
-        tracks += network_only
-        # The network-JSON extractor is on probation. It contributed nothing at
-        # all on the playlists measured so far, everything having come from the
-        # DOM, but it costs nothing to run and might be the only thing that
-        # works on a shape nobody has tried yet. Log what it actually earns so
-        # the decision to keep or bin it is eventually made on evidence rather
-        # than on a hunch. If this line reads "network-only: 0" for every
-        # playlist shape you can find, delete _extract_from_payload guilt-free.
-        print(
-            f"Amazon extract: dom={len(dom_tracks)} network={len(network_tracks)} "
-            f"network-only={len(network_only)}",
-            file=sys.stderr,
-        )
+        # There used to be a second collector here, sifting the page's XHR JSON
+        # for anything track-shaped, kept on probation in case it was the only
+        # thing that worked on some playlist nobody had tried. The probation is
+        # over: it reported dom=60 network=0 on a live 60-track playlist, having
+        # never contributed a single track on any shape measured. The DOM is
+        # where Amazon puts the tracklist, so the DOM is where we read it.
+        print(f"Amazon extract: dom={len(dom_tracks)}", file=sys.stderr)
         print(
             json.dumps(
                 {

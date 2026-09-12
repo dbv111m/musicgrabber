@@ -1,9 +1,14 @@
 """Regression guards for Amazon playlist scraping (GitLab issue #81).
 
-Amazon playlists used to come back sorted alphabetically by artist, because
-both collectors were sets and the result was run through sorted().  A playlist
-is a running order, so these check the ordering survives, and that the explicit
-badge stops gatecrashing the title while we're here.
+Amazon playlists used to come back sorted alphabetically by artist, because the
+collectors were sets and the result was run through sorted().  A playlist is a
+running order, so these check the ordering survives, and that the explicit badge
+stops gatecrashing the title while we're here.
+
+There were two collectors at the time, the rendered page and a sifter for the
+app's JSON traffic. The latter was removed in v4.1.3 having never contributed a
+single track, so `_ordered` below now mirrors the whole of `main`'s final step
+rather than most of it.
 """
 
 import os
@@ -63,21 +68,6 @@ def test_a_row_at_the_very_top_is_not_lost_to_a_falsy_position():
     seen = {}
     amazonpl._merge_positioned([(80.0, "second"), (0.0, "first")], seen)
     assert _ordered(seen) == ["first", "second"]
-
-
-def test_payload_extractor_keeps_discovery_order():
-    out: dict[str, None] = {}
-    amazonpl._extract_from_payload(
-        {
-            "tracks": [
-                {"trackId": "1", "title": "Zebra", "artistName": "Zed"},
-                {"trackId": "2", "title": "Apple", "artistName": "Ann"},
-                {"trackId": "3", "title": "Zebra", "artistName": "Zed"},
-            ]
-        },
-        out,
-    )
-    assert list(out) == ["Zed - Zebra", "Ann - Apple"]
 
 
 # ---------------------------------------------------------------------------
