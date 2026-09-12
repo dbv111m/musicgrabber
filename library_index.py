@@ -11,8 +11,8 @@ done once, written down.
 
 Design rules, in descending order of how cross you should be if one is broken:
 
-1. **It is a cache.** The filesystem is the source of truth. A missing, stale,
-   locked, corrupt or half-built index is an unavailable optional hint, never an
+1. **It is a cache.** The filesystem is the source of truth. A missing,
+   locked, corrupt or never-completed index is an unavailable optional hint, never an
    error. Nothing in here may raise into a caller, delay a download, or fail an
    API request. Every public function returns a "cannot help you" value instead.
 2. **It lives in its own database file.** Its own connections, no ATTACH, no
@@ -120,19 +120,23 @@ def _now() -> str:
 
 
 @contextmanager
-def index_conn():
+def index_conn(*, read_only: bool = False):
     """A short-lived connection to the index database.
 
     No pool. Index reads are small and infrequent next to the primary database's
     traffic, and opening a SQLite connection costs a fraction of a millisecond;
     a second pool would be a second thing to get subtly wrong for no measurable
     gain. Writers hold one of these for a whole batch, not for a whole scan.
+    Download-facing reads use read_only=True: no database creation or lock wait.
     """
-    conn = sqlite3.connect(
-        str(LIBRARY_INDEX_DB_PATH), timeout=LIBRARY_INDEX_BUSY_TIMEOUT_MS / 1000
+    busy_timeout = 0 if read_only else LIBRARY_INDEX_BUSY_TIMEOUT_MS
+    database = (
+        Path(LIBRARY_INDEX_DB_PATH).absolute().as_uri() + "?mode=ro"
+        if read_only else str(LIBRARY_INDEX_DB_PATH)
     )
+    conn = sqlite3.connect(database, timeout=busy_timeout / 1000, uri=read_only)
     try:
-        conn.execute(f"PRAGMA busy_timeout = {LIBRARY_INDEX_BUSY_TIMEOUT_MS}")
+        conn.execute(f"PRAGMA busy_timeout = {busy_timeout}")
         yield conn
     finally:
         try:
@@ -347,26 +351,41 @@ def _owning_root(roots: list[str], target: str) -> str | None:
     return None
 
 
-def find_by_tags(root: Path | str, artist: str, title: str) -> Path | None:
-    """The first indexed file carrying these Artist/Title tags, if any.
+def find_by_tags(root: Path | str, artist: str | list[str], title: str) -> list[Path] | None:
+    """Matching candidates in credit preference order, or None if unavailable.
 
-    Not yet wired into duplicate detection; that is step 3c. Present and tested
-    here so the index can be verified in isolation first.
+    An empty list is a completed index's honest miss. Age and an active refresh
+    do not invalidate its answers. Callers must validate paths before reuse.
     """
-    if not init_index():
-        return None
-    artist_key, title_key = _tag_keys(artist, title)
-    if not artist_key or not title_key:
-        return None
     try:
-        with index_conn() as conn:
-            row = conn.execute(
-                """SELECT relative_path FROM library_files
-                   WHERE root_path = ? AND artist_key = ? AND title_key = ?
-                   ORDER BY relative_path LIMIT 1""",
-                (str(root), artist_key, title_key),
+        variants = [artist] if isinstance(artist, str) else artist
+        identities = [_tag_keys(variant, title) for variant in variants]
+        keys = list(dict.fromkeys(key[0] for key in identities if key[0]))
+        title_key = next((key[1] for key in identities if key[1]), None)
+        # The download path must neither initialise/migrate the cache nor wait
+        # behind an exclusive lock. Startup and the scheduler own that work.
+        with index_conn(read_only=True) as conn:
+            if conn.execute("PRAGMA user_version").fetchone()[0] != SCHEMA_VERSION:
+                return None
+            state = conn.execute(
+                "SELECT last_complete_scan_at FROM library_roots WHERE root_path = ?",
+                (str(root),),
             ).fetchone()
-        return Path(root) / row[0] if row else None
+            if not state or not state[0]:
+                return None
+            if not keys or not title_key:
+                return []
+            placeholders = ','.join('?' for _ in keys)
+            rows = conn.execute(
+                f"""SELECT artist_key, relative_path FROM library_files
+                    WHERE root_path = ? AND artist_key IN ({placeholders}) AND title_key = ?""",
+                (str(root), *keys, title_key),
+            ).fetchall()
+        priority = {key: rank for rank, key in enumerate(keys)}
+        # SQL ORDER BY relative_path tempts SQLite to scan the whole root's
+        # primary key instead of seeking by identity. Sort only the few hits.
+        rows.sort(key=lambda row: (priority[row[0]], row[1]))
+        return [Path(root) / row[1] for row in rows]
     except Exception:
         return None
 

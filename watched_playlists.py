@@ -1070,7 +1070,7 @@ def fetch_playlist_tracks(url: str, platform: str, user_id: str | None = None) -
 
         info_cmd = [
             "yt-dlp",
-            *_ytdlp_base_args(),
+            *_ytdlp_base_args(user_id=user_id),
             "--dump-json",
             "--flat-playlist",
             "--no-warnings",

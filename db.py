@@ -163,8 +163,10 @@ def _get_pooled_conn() -> sqlite3.Connection:
     # pool on demand up to its ceiling instead.
     with _db_pool_lock:
         if _db_pool_created < _DB_POOL_SIZE:
+            conn = get_db()
+            # Failed opens are not borrowers; do not reserve seats for ghosts.
             _db_pool_created += 1
-            return get_db()
+            return conn
     # Pool is at full stretch and every connection is out on loan; either wait
     # for one to come back (up to 15s) or open a fresh connection as a safety
     # valve. Under heavy concurrent load (bulk import + multiple download

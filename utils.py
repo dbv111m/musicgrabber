@@ -547,15 +547,29 @@ def build_library_tag_index(user_id: str | None = None) -> dict[tuple[str, str],
 
 
 def _tagged_duplicate(artist: str, title: str, user_id: str | None = None) -> Optional[Path]:
-    """Find a metadata-tagged copy, refreshing the cached index when necessary."""
+    """Query persistent tags first; retain the background fallback if unavailable."""
+    from library_index import find_by_tags
+
     root = str(Path(get_setting("music_dir", str(MUSIC_DIR), user_id=user_id)))
+    variants = artist_credit_lookup_variants(artist) or [artist]
+    candidates = find_by_tags(root, variants, title)
+    if candidates is not None:
+        for candidate in candidates:
+            if path_has_excluded_scan_dir(candidate, root=Path(root)):
+                continue
+            safe_hit = authoritative_audio_file(str(candidate), user_id=user_id)
+            if safe_hit:
+                return safe_hit
+        # A completed index's miss must not start another whole-library crawl.
+        return None
+
     cache_key = (user_id or "", root)
     now = time.monotonic()
     with _tag_index_lock:
         cached = _tag_index_cache.get(cache_key)
         cached_at, index = cached if cached is not None else (0.0, {})
 
-    wanted = [_tag_identity(a, title) for a in (artist_credit_lookup_variants(artist) or [artist])]
+    wanted = [_tag_identity(a, title) for a in variants]
     for key in wanted:
         hit = index.get(key)
         safe_hit = authoritative_audio_file(str(hit), user_id=user_id) if hit else None
@@ -694,9 +708,7 @@ def check_duplicate(artist: str, title: str, user_id: str | None = None) -> Opti
                 if match:
                     return match
 
-        # Last resort: filenames are labels, not identity. Read the Artist and
-        # Title tags across the library so external renames do not manufacture a
-        # duplicate download loop.
+        # Last resort: query Artist/Title identity, which survives external renames.
         return _tagged_duplicate(artist, title, user_id=user_id)
     except Exception:
         return None

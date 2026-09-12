@@ -10,6 +10,7 @@ wrong?
 import os
 import sqlite3
 import sys
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -18,6 +19,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import library_index
 import library_scans
+import utils
 
 
 @pytest.fixture
@@ -34,6 +36,157 @@ def library(tmp_path):
     root = tmp_path / "music"
     (root / "Fatboy Slim").mkdir(parents=True)
     return root
+
+
+@pytest.fixture
+def duplicate_library(index, library, monkeypatch):
+    monkeypatch.setattr(utils, "get_setting", lambda *a, **kw: str(library))
+    monkeypatch.setattr(utils, "get_download_dir", lambda *a, **kw: library / "Singles")
+    monkeypatch.setattr(utils, "get_singles_dir", lambda *a, **kw: library / "Singles")
+    monkeypatch.setattr(utils, "get_albums_dir", lambda *a, **kw: library / "Albums")
+    monkeypatch.setattr(utils, "get_playlists_dir", lambda *a, **kw: None)
+    monkeypatch.setattr(utils, "_tag_index_cache", {})
+    monkeypatch.setattr(utils, "_tag_index_running", {})
+    monkeypatch.setattr(utils, "_tag_index_errors", {})
+    return library
+
+
+def test_duplicate_reads_persisted_tags_after_restart_without_scanning(index, duplicate_library, monkeypatch):
+    track = _track(duplicate_library, "001 renamed.flac")
+    index.reconcile(duplicate_library, probe=Probe(returns={"artist": "Fatboy Slim", "title": "Praise You"}))
+    index.reset_for_tests()
+    scans = []
+    monkeypatch.setattr(utils, "build_library_tag_index", lambda **kw: scans.append(1) or {})
+    assert utils.check_duplicate("Fatboy Slim", "Praise You", "alice") == track
+    assert utils.check_duplicate("Fatboy Slim", "Missing", "alice") is None
+    assert scans == []
+    assert utils._tag_index_cache == {}
+    assert utils._tag_index_running == {}
+
+
+def test_artist_variants_use_one_query_and_keep_credit_preference(index, duplicate_library, monkeypatch):
+    primary = _track(duplicate_library, "a.flac")
+    full = _track(duplicate_library, "z.flac")
+    def probe(path):
+        return {"artist": "Disclosure" if path == primary else "Disclosure feat. Sam Smith", "title": "Latch"}
+    index.reconcile(duplicate_library, probe=probe)
+    statements = []
+    real_conn = index.index_conn
+    @contextmanager
+    def traced_conn(**kwargs):
+        with real_conn(**kwargs) as conn:
+            assert conn.execute("PRAGMA busy_timeout").fetchone()[0] == 0
+            conn.set_trace_callback(statements.append)
+            yield conn
+    monkeypatch.setattr(index, "index_conn", traced_conn)
+    assert utils._tagged_duplicate("Disclosure feat. Sam Smith", "Latch", "alice") == full
+    queries = [sql for sql in statements if "FROM library_files" in sql]
+    assert len(queries) == 1
+    assert "artist_key IN (" in queries[0]
+    with real_conn(read_only=True) as conn:
+        plan = conn.execute("EXPLAIN QUERY PLAN " + queries[0]).fetchall()
+    assert any("USING INDEX library_files_identity" in row[3] for row in plan)
+    full.unlink()
+    assert utils._tagged_duplicate("Disclosure feat. Sam Smith", "Latch", "alice") == primary
+
+
+def test_stale_persistent_index_answers_during_refresh(index, duplicate_library, monkeypatch):
+    track = _track(duplicate_library, "Praise You.flac")
+    index.reconcile(duplicate_library, probe=Probe())
+    with index.index_conn() as conn:
+        conn.execute("UPDATE library_roots SET last_complete_scan_at = '2000-01-01', last_error = 'failed refresh'")
+        conn.commit()
+    index._scans_running.add(str(duplicate_library))
+    assert utils._tagged_duplicate("Fatboy Slim", "Praise You", "alice") == track
+    assert utils._tagged_duplicate("Missing", "Recording", "alice") is None
+    assert utils._tag_index_running == {}
+
+
+@pytest.mark.parametrize("invalid", ["missing", "symlink", "outside", "excluded"])
+def test_duplicate_skips_unsafe_indexed_candidates(index, duplicate_library, tmp_path, invalid):
+    first = _track(duplicate_library, "a.flac")
+    keeper = _track(duplicate_library, "z.flac")
+    index.reconcile(duplicate_library, probe=Probe(returns={"artist": "Blur", "title": "Song 2"}))
+    first.unlink()
+    outside = tmp_path / "outside.flac"
+    outside.write_bytes(b"audio")
+    if invalid == "symlink":
+        first.symlink_to(outside)
+    elif invalid in ("outside", "excluded"):
+        rel = "../outside.flac" if invalid == "outside" else ".mg_staging/a.flac"
+        if invalid == "excluded":
+            path = duplicate_library / rel
+            path.parent.mkdir()
+            path.write_bytes(b"audio")
+        with index.index_conn() as conn:
+            conn.execute("UPDATE library_files SET relative_path = ? WHERE relative_path = ?", (rel, first.relative_to(duplicate_library).as_posix()))
+            conn.commit()
+    assert utils._tagged_duplicate("Blur", "Song 2", "alice") == keeper
+
+
+def test_duplicate_scopes_candidates_to_user_root(index, duplicate_library, tmp_path, monkeypatch):
+    track = _track(duplicate_library, "Praise You.flac")
+    index.reconcile(duplicate_library, probe=Probe())
+    other = tmp_path / "other"
+    other.mkdir()
+    index.reconcile(other, probe=Probe())
+    monkeypatch.setattr(utils, "get_setting", lambda *a, user_id=None, **kw: str(other if user_id == "bob" else duplicate_library))
+    assert utils._tagged_duplicate("Fatboy Slim", "Praise You", "alice") == track
+    assert utils._tagged_duplicate("Fatboy Slim", "Praise You", "shared") == track
+    assert utils._tagged_duplicate("Fatboy Slim", "Praise You", "bob") is None
+
+
+@pytest.mark.parametrize("state", ["cold", "partial", "corrupt", "locked"])
+def test_unavailable_tag_index_uses_existing_nonblocking_fallback(index, duplicate_library, monkeypatch, state):
+    index.init_index()
+    held = None
+    if state == "partial":
+        with index.index_conn() as conn:
+            conn.execute("INSERT INTO library_roots (root_path) VALUES (?)", (str(duplicate_library),))
+            conn.commit()
+        path = _track(duplicate_library, "Praise You.flac")
+        monkeypatch.setattr(index, "probe_file", Probe())
+        assert index.index_file(path)
+    elif state == "corrupt":
+        Path(index.LIBRARY_INDEX_DB_PATH).write_bytes(b"not a database")
+    elif state == "locked":
+        held = sqlite3.connect(index.LIBRARY_INDEX_DB_PATH)
+        held.execute("PRAGMA journal_mode=DELETE")
+        held.execute("BEGIN EXCLUSIVE")
+    # A previous complete fallback snapshot may still answer immediately.
+    fallback = _track(duplicate_library, "fallback.flac")
+    import time
+    utils._tag_index_cache[("alice", str(duplicate_library))] = (
+        time.monotonic(), {utils._tag_identity("Blur", "Song 2"): fallback},
+    )
+    try:
+        assert index.find_by_tags(duplicate_library, ["Blur"], "Song 2") is None
+        assert utils._tagged_duplicate("Blur", "Song 2", "alice") == fallback
+    finally:
+        if held:
+            held.close()
+
+
+def test_tag_lookup_does_not_create_or_migrate_database(index, library):
+    assert index.find_by_tags(library, ["Blur"], "Song 2") is None
+    assert not Path(index.LIBRARY_INDEX_DB_PATH).exists()
+    index.init_index()
+    with index.index_conn() as conn:
+        conn.execute("PRAGMA user_version = 999")
+    assert index.find_by_tags(library, ["Blur"], "Song 2") is None
+    with index.index_conn() as conn:
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == 999
+
+
+def test_filename_match_does_not_query_index(index, duplicate_library, monkeypatch):
+    singles = duplicate_library / "Singles"
+    singles.mkdir()
+    track = singles / "Praise You.flac"
+    track.write_bytes(b"audio")
+    def unexpected(*a, **kw):
+        pytest.fail("filename matches must not need the tag index")
+    monkeypatch.setattr(index, "find_by_tags", unexpected)
+    assert utils.check_duplicate("Fatboy Slim", "Praise You", "alice") == track
 
 
 def _track(root, name, payload=b"audio", artist="Fatboy Slim"):
@@ -123,7 +276,7 @@ def test_a_rename_is_followed_without_reading_a_single_tag(index, library):
     assert summary["renamed"] == 1
     assert summary["deleted"] == 1
     assert index.file_count(library) == 1
-    assert index.find_by_tags(library, "Fatboy Slim", "Praise You") == moved
+    assert index.find_by_tags(library, "Fatboy Slim", "Praise You") == [moved]
 
 
 def test_a_deleted_file_is_pruned(index, library):
@@ -136,7 +289,7 @@ def test_a_deleted_file_is_pruned(index, library):
 
     assert summary["deleted"] == 1
     assert index.file_count(library) == 1
-    assert index.find_by_tags(library, "Fatboy Slim", "Praise You") == keeper
+    assert index.find_by_tags(library, "Fatboy Slim", "Praise You") == [keeper]
 
 
 # --- the negative cache, which is most of the point --------------------------
@@ -277,7 +430,7 @@ def test_two_roots_are_indexed_independently(index, tmp_path):
 
     assert index.file_count(a) == 1
     assert index.file_count(b) == 1
-    assert index.find_by_tags(a, "Fatboy Slim", "B Side") is None
+    assert index.find_by_tags(a, "Fatboy Slim", "B Side") == []
     assert index.find_by_tags(b, "Fatboy Slim", "B Side") is not None
 
 
@@ -310,7 +463,7 @@ def test_index_file_records_one_arrival(index, library, monkeypatch):
     monkeypatch.setattr(library_index, "probe_file", Probe())
 
     assert index.index_file(arrival) is True
-    assert index.find_by_tags(library, "Fatboy Slim", "Right Here Right Now") == arrival
+    assert index.find_by_tags(library, "Fatboy Slim", "Right Here Right Now") == [arrival]
 
 
 def test_remove_file_forgets_one_departure(index, library, monkeypatch):
@@ -332,7 +485,7 @@ def test_move_file_follows_without_reopening_anything(index, library, monkeypatc
 
     assert index.move_file(track, moved) is True
     assert probe.calls == []
-    assert index.find_by_tags(library, "Fatboy Slim", "Praise You") == moved
+    assert index.find_by_tags(library, "Fatboy Slim", "Praise You") == [moved]
 
 
 def test_hooks_are_idempotent(index, library, monkeypatch):

@@ -16,12 +16,14 @@ const RELEASE_NOTES = {
                     "If you pay for YouTube Premium, MusicGrabber was not telling YouTube about it, so you were getting the ordinary quality stream instead of the good one. It now hands over your cookies properly and yt-dlp picks the Premium audio by itself. No new settings, nothing to switch on.",
                     "Everyone else benefits too: those cookies are also what keeps YouTube from stopping you with a 'confirm you are not a robot' check, and they were being left in the drawer on every single download since March.",
                     "If you set up cookies for your own account rather than globally, those were being ignored as well. They are not now.",
+                    "Watched YouTube playlists now use your own cookies when checking for new tracks too. Previously they turned up with the shared credentials, which is a poor way to get into a private party.",
                     "Found, diagnosed and handed to us complete with the fix by dynAdZ, who noticed their Opus files were half the bitrate they were paying for. Thank you kindly.",
                 ]
             },
             {
                 heading: "Downloads outrank housekeeping",
                 items: [
+                    "If the database temporarily cannot be opened, failed attempts no longer leave later lookups waiting for imaginary connections. The waiting room has been cleared of ghosts.",
                     "Library tag indexing now stays firmly in the background. Downloads use the duplicate information already available and carry on immediately, even while a large NAS is still being indexed.",
                     "Track Upgrades now stops an active scan when switched off, and yields to the separate background duplicate index. Housekeeping has finally been reminded who pays the bills.",
                 ]
@@ -39,8 +41,9 @@ const RELEASE_NOTES = {
                 heading: "MusicGrabber has developed a memory",
                 items: [
                     "There is now a proper index of your library: one line per track, kept in its own little database, quietly brought up to date once a day. Only files that are actually new or changed get opened. A track someone else renamed is recognised and keeps everything we already knew about it.",
-                    "It lives on its own, away from your jobs and history, so it can never hold anything up. If it goes missing or gets confused, everything simply works the way it did before while it rebuilds itself. No buttons, no settings, nothing to do.",
-                    "First up: the Stats page storage total, which used to count your entire collection from scratch every five minutes and now just looks it up. More things will start using it once it has proved it can be trusted.",
+                    "It lives on its own, away from your jobs and history. If it goes missing or gets confused, everything uses its existing fallback. A completed index still answers while it is being refreshed. No new settings, nothing to switch on.",
+                    "Files moved or retagged by another organiser become visible at the next daily scan. Familiar filenames and known paths are still checked immediately.",
+                    "Stats storage totals and duplicate checks now use that memory. Finding a renamed track no longer means reading the entire collection again, and restarting MusicGrabber no longer gives duplicate detection amnesia.",
                     "The very first run has to read every file once, which on a big collection takes a while. It now says how it is getting on every thirty seconds, so you can tell the difference between working hard and having quietly died.",
                     "Fixed before anyone else could trip over it: on some network shares the index refused to build at all, quietly, forever, because of one obscure disagreement about how big a number is allowed to be. If your library lives on an SMB share and the storage figures never looked right, they will now.",
                 ]

@@ -1687,6 +1687,8 @@ def test_download_command_carries_cookies_for_a_youtube_source_url(tmp_path, mon
     import downloads
     import youtube
 
+    monkeypatch.setattr(downloads, "get_setting", lambda key, default="", **kw: default)
+
     cookies = tmp_path / "cookies.txt"
     cookies.write_text("# Netscape HTTP Cookie File\n.youtube.com\tTRUE\t/\tTRUE\t99\tA\tb\n")
     monkeypatch.setattr(youtube, "COOKIES_FILE", cookies)
@@ -1713,6 +1715,8 @@ def test_per_user_cookie_file_is_actually_reached(tmp_path, monkeypatch):
     """user_id was in scope at every call site and passed at none of them."""
     import downloads
     import youtube
+
+    monkeypatch.setattr(downloads, "get_setting", lambda key, default="", **kw: default)
 
     mine = tmp_path / "user-alice.txt"
     mine.write_text("# Netscape HTTP Cookie File\n.youtube.com\tTRUE\t/\tTRUE\t99\tA\tb\n")

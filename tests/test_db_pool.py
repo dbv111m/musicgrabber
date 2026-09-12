@@ -2,9 +2,12 @@
 
 import os
 import queue
+import sqlite3
 import sys
 import threading
 import time
+
+import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -27,6 +30,26 @@ def test_first_connection_on_a_cold_pool_is_immediate(monkeypatch, tmp_path):
     with db.db_conn() as conn:
         conn.execute("SELECT 1")
     assert time.perf_counter() - start < 1.0
+
+
+def test_failed_connection_creation_does_not_consume_pool_capacity(monkeypatch, tmp_path):
+    _fresh_pool(monkeypatch, tmp_path, size=2)
+    real_get_db = db.get_db
+
+    def fail_open():
+        raise sqlite3.OperationalError("unable to open database file")
+
+    monkeypatch.setattr(db, "get_db", fail_open)
+    for _ in range(3):
+        with pytest.raises(sqlite3.OperationalError):
+            db._get_pooled_conn()
+        assert db._db_pool_created == 0
+
+    # When storage returns, there must be no phantom borrowers to wait for.
+    monkeypatch.setattr(db, "get_db", real_get_db)
+    with db.db_conn() as conn:
+        assert conn.execute("SELECT 1").fetchone()[0] == 1
+    assert db._db_pool_created == 1
 
 
 def test_pool_grows_to_its_ceiling_without_waiting(monkeypatch, tmp_path):

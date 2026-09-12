@@ -97,21 +97,19 @@ show a failure message; reopen the view after at least 30 seconds to retry.
 and `scan_ready`; `GET /api/stats` includes `storage_scan_state`, with
 `storage_bytes` and `file_count` set to `null` until a complete result is available.
 
-Duplicate detection still checks familiar filenames first, then uses embedded
-Artist and Title tags to find files renamed by another organiser. One background
-tag scan runs per user/library at a time, with complete results cached for five
-minutes from completion. A cold or stale tag index starts refreshing in the
-background, but downloads and API actions never wait for it. They use the cheap
-filename and path checks plus the last complete tag snapshot, if one exists, and
-carry on immediately. While the first background scan is incomplete, a file
-renamed by an external organiser may not yet be recognised as a duplicate; that
-is preferable to turning library housekeeping into a download blockade. Scans
-are kept in memory and start again after a service restart.
+Duplicate detection checks familiar filenames first, then queries the persistent
+library index by Artist and Title, including featured-artist credit variants.
+A completed index survives restarts and remains usable while old or being
+refreshed. Matches are checked against real files inside the user's library;
+a vanished copy does not hide another valid match. No whole-library tag crawl
+runs for hits or misses while that root has a usable completed index.
 
-This duplicate-safety index is separate from the optional **Track Upgrades**
-scan. If both need the library at once, the optional upgrade scan yields to the
-tag-index refresh. Switching Track Upgrades off stops its active pass shortly;
-neither scan delays downloads.
+If the index is missing, inaccessible, corrupt or has never completed a scan,
+the existing background tag scan remains the fallback. Its last complete
+in-memory snapshot is usable immediately; downloads never wait for a build.
+During a first build, renamed files may escape duplicate detection until tags
+are available. Track Upgrades remains separate and yields to this fallback tag
+scan. Switching Track Upgrades off stops its active pass shortly.
 
 The upgrade scan also stopped reading files it has already seen. It used to
 re-probe and re-hash every eligible file on every pass, which meant pulling the
@@ -147,9 +145,9 @@ It is stored separately from the main application database, at
 `/data/music_grabber_library_index.db` by default (`LIBRARY_INDEX_DB_PATH`).
 
 The index is a cache and nothing more. The filesystem remains the source of
-truth. A missing, cold, stale, locked or rebuilding index is an unavailable
-optional hint, never an error: every feature that can use it also keeps the
-behaviour it had before and falls back without comment. It shares no locks or
+truth. A missing, cold, locked or corrupt index is an unavailable optional hint,
+never an error: consumers retain their fallback behaviour. A completed index
+remains usable regardless of age or an active refresh. It shares no locks or
 transactions with the database holding your jobs, settings and watch lists, so
 index work cannot block a download, and if it is ever corrupted the recovery
 procedure is to delete the file and let it rebuild. Upgrades that change the
@@ -194,9 +192,9 @@ disk, so nothing is lost; the next reconciliation reads every file once and
 builds it back. Do not delete the main database, which is not derived from
 anything and is not so forgiving.
 
-Currently the Stats storage figures read from the index, falling back to a live
-walk whenever it cannot answer. Duplicate detection and the Track Upgrades scan
-still walk the disk and are unaffected.
+Stats storage figures and duplicate tag checks now read from the index, retaining
+their existing fallbacks when it cannot answer. Track Upgrades and the admin
+library rebuild still use their existing scans.
 
 ## Audio Provenance Audit
 
@@ -426,7 +424,7 @@ The easiest way to configure MusicGrabber is via the **Settings tab** in the UI.
 - **Jellyfin**: URL and API key for library refresh
 - **Lidarr**: URL and API key for library refresh
 - **Notifications**: Apprise URL, Telegram webhook, generic webhook URL, and SMTP settings
-- **YouTube**: Upload browser cookies for authenticated downloads
+- **YouTube**: Upload browser cookies for authenticated downloads and playlist fetching, including watched-playlist refreshes. These use your own cookie file when available, falling back to the shared cookie file otherwise.
 - **Maintenance**: preview and remove orphaned watched imports, clear selected Queue-history states, reconcile missing files, or rebuild path records from audio beneath the configured Singles, Playlists, and Albums folders. These actions change database records only; they never delete or move library audio
 - **Spotify**: Upload browser cookies to access private playlists
 - **Apple Music**: Add a user token for private library playlists
@@ -890,7 +888,7 @@ Each watched playlist can also:
 
 Artist guest lists are not required to agree word-for-word across Spotify, Navidrome, Lidarr, and the file on disk. MusicGrabber tries the complete credit first, then falls back to the primary artist when a service has written `Primary Artist, Guest` or `Primary Artist feat. Guest`. If a manual Search download discovers that the primary-artist copy already exists, the watched row is reconciled too: it leaves Missing, gains the reusable path where available, and joins the next M3U rebuild. The guest artist has not been erased from history; the databases have merely stopped arguing over the seating plan.
 
-Filename matching is only the fast path. When that misses, MusicGrabber indexes the Artist and Title tags carried by audio anywhere beneath `music_dir`, excluding trash and system folders. A file renamed or rearranged by MusicBee, beets, or another organiser can therefore be found without downloading another copy. The index is cached for five minutes and refreshed immediately when a previously indexed path disappears.
+Filename matching is only the fast path. When that misses, MusicGrabber queries the persistent Artist and Title index for audio beneath `music_dir`, excluding trash and system folders. External renames, moves and retags become visible at the next daily reconciliation (`LIBRARY_INDEX_RECONCILE_HOURS`). Until then, a renamed file may escape the tag check. Immediate index updates for MusicGrabber’s own file changes are not yet wired in either; filename and known-path checks still recognise those files where possible. If no usable completed index exists, the background fallback retains its five-minute cache and refresh-on-missing-path behaviour.
 
 With missing-file re-downloads disabled, playlist and watched-artist cards show how many previously downloaded tracks are no longer findable. Append playlists include their retained historical tracks in that count, not just the tracks still present upstream; those departed tracks remain historical and are never re-queued automatically.
 
