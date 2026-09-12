@@ -455,3 +455,32 @@ def test_a_current_schema_is_left_well_alone(index, library):
 
     assert index.init_index() is True
     assert index.file_count(library) == 1
+
+
+# --- saying something during a long scan -------------------------------------
+
+def test_a_slow_scan_reports_progress(index, library, capsys, monkeypatch):
+    """A cold build is twenty minutes long; silence is not an acceptable UI."""
+    monkeypatch.setattr(library_index, "LIBRARY_INDEX_PROGRESS_SECONDS", 0)
+    _track(library, "Praise You.flac")
+    _track(library, "Rockafeller Skank.flac")
+
+    index.reconcile(str(library), probe=Probe())
+
+    lines = [
+        line for line in capsys.readouterr().out.splitlines() if "files seen" in line
+    ]
+    assert lines, "a slow scan must say what it is doing"
+    assert "2 files seen" in lines[-1]
+    assert "2 read" in lines[-1]
+
+
+def test_a_quick_scan_says_nothing(index, library, capsys):
+    """The ticker is for slow builds. A pass that beats the interval stays quiet."""
+    _track(library, "Praise You.flac")
+    index.reconcile(str(library), probe=Probe())
+    capsys.readouterr()
+
+    index.reconcile(str(library), probe=Probe())
+
+    assert "files seen" not in capsys.readouterr().out

@@ -42,6 +42,7 @@ from constants import (
     LIBRARY_INDEX_BUSY_TIMEOUT_MS,
     LIBRARY_INDEX_DB_PATH,
     LIBRARY_INDEX_DELETE_FLOOR,
+    LIBRARY_INDEX_PROGRESS_SECONDS,
     LIBRARY_INDEX_RECONCILE_HOURS,
     LIBRARY_INDEX_START_DELAY,
     LIBRARY_INDEX_WRITE_BATCH,
@@ -484,6 +485,11 @@ def _reconcile_locked(root: str, summary: dict, *, walker=None, probe=None) -> d
             conn.commit()
         upserts.clear()
 
+    # Progress reporting, so a twenty minute cold build is distinguishable from
+    # a twenty minute hang. Borrowed from Michael Strong's persistent-library-index
+    # branch, which had the good manners to say something while it worked.
+    last_progress = time.monotonic()
+
     for entry in walk(Path(root), strict=True):
         path, st = entry.path, entry.stat
         rel = _relative_to(root, path)
@@ -519,6 +525,16 @@ def _reconcile_locked(root: str, summary: dict, *, walker=None, probe=None) -> d
 
         if len(upserts) >= LIBRARY_INDEX_WRITE_BATCH:
             flush()
+
+        now = time.monotonic()
+        if now - last_progress >= LIBRARY_INDEX_PROGRESS_SECONDS:
+            last_progress = now
+            print(
+                f"Library index: {root}: {summary['walked']} files seen, "
+                f"{summary['probed']} read, {summary['renamed']} moved, "
+                f"{summary['unchanged']} unchanged so far",
+                flush=True,
+            )
 
     flush()
 

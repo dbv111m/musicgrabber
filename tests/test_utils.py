@@ -148,6 +148,44 @@ def test_check_duplicate_finds_externally_renamed_file_by_tags(tmp_path, monkeyp
     assert utils.check_duplicate("Blur", "Song 2", user_id="alice") == renamed
 
 
+def test_a_stale_tag_index_never_fails_a_lookup(tmp_path, monkeypatch):
+    """Index age alone must never become a failed download.
+
+    A snapshot past its TTL is still the best answer anyone has. The refresh
+    belongs in the background; the caller gets the old answer now and a better
+    one next time. Michael Strong's persistent-library-index branch made the
+    same argument from the other direction, and it is worth a test so nobody
+    reintroduces a raise here in a tidy-up.
+    """
+    import time
+    import utils
+
+    music = tmp_path / "Music"
+    filed = music / "Filed Elsewhere" / "001 renamed.flac"
+    filed.parent.mkdir(parents=True)
+    filed.write_bytes(b"tagged audio")
+
+    monkeypatch.setattr(utils, "get_setting", lambda *a, **kw: str(music))
+    key = ("alice", str(music))
+    stale = time.monotonic() - utils._TAG_INDEX_TTL_SECONDS - 1000
+    monkeypatch.setattr(
+        utils, "_tag_index_cache",
+        {key: (stale, {utils._tag_identity("Blur", "Song 2"): filed})},
+    )
+    monkeypatch.setattr(utils, "_tag_index_running", {})
+    # A scan that failed moments ago, so the retry cooldown is active too.
+    monkeypatch.setattr(utils, "_tag_index_errors", {key: time.monotonic()})
+
+    def never_called(**kwargs):
+        raise AssertionError("a stale lookup must not rebuild in the foreground")
+
+    monkeypatch.setattr(utils, "build_library_tag_index", never_called)
+
+    # An expired hit still answers, and an expired miss is still just a miss.
+    assert utils._tagged_duplicate("Blur", "Song 2", "alice") == filed
+    assert utils._tagged_duplicate("Missing", "Recording", "alice") is None
+
+
 # ---------------------------------------------------------------------------
 # Library scans must stay inside the library.
 #

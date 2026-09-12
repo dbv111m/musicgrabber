@@ -32,6 +32,14 @@ const RELEASE_NOTES = {
                     "There is now a proper index of your library: one line per track, kept in its own little database, quietly brought up to date once a day. Only files that are actually new or changed get opened. A track someone else renamed is recognised and keeps everything we already knew about it.",
                     "It lives on its own, away from your jobs and history, so it can never hold anything up. If it goes missing or gets confused, everything simply works the way it did before while it rebuilds itself. No buttons, no settings, nothing to do.",
                     "First up: the Stats page storage total, which used to count your entire collection from scratch every five minutes and now just looks it up. More things will start using it once it has proved it can be trusted.",
+                    "The very first run has to read every file once, which on a big collection takes a while. It now says how it is getting on every thirty seconds, so you can tell the difference between working hard and having quietly died.",
+                ]
+            },
+            {
+                heading: "With thanks to Michael Strong",
+                items: [
+                    "Michael independently built his own version of the library memory and shared it. Two ideas from it are in this release: the progress updates above, and a written-down way to make MusicGrabber rebuild its index from scratch if you ever suspect it has gone funny (it is safe, because everything in it comes from your music files).",
+                    "Nice to be beaten to good manners by a stranger on the internet. Cheers, Michael.",
                 ]
             },
         ]

@@ -342,6 +342,11 @@ LIBRARY_INDEX_START_DELAY = int(os.getenv("LIBRARY_INDEX_START_DELAY", "300"))
 # correct one day later and nobody will notice; an index that deleted itself is a
 # duplicate-detection outage that lasts until somebody spots it.
 LIBRARY_INDEX_DELETE_FLOOR = float(os.getenv("LIBRARY_INDEX_DELETE_FLOOR", "0.5"))
+# A cold build of a real library is twenty minutes of total silence, which is
+# indistinguishable from twenty minutes of being wedged. Say something every so
+# often. A warm pass finishes long before the first line is due and stays quiet.
+# Idea borrowed from Michael Strong's persistent-library-index branch.
+LIBRARY_INDEX_PROGRESS_SECONDS = int(os.getenv("LIBRARY_INDEX_PROGRESS_SECONDS", "30"))
 ROOT_PATH = _normalise_root_path(os.getenv("ROOT_PATH", ""))
 
 # Other settings that don't change at runtime (not in UI)

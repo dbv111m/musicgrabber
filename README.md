@@ -183,6 +183,17 @@ is logged and recorded against the root, and the index is left exactly as it was
 for the next pass. A half-mounted share or a permissions change on one subtree
 must never be published as "the user deleted their library".
 
+A full build of a large library takes a while and logs its progress every 30
+seconds (`LIBRARY_INDEX_PROGRESS_SECONDS`) so it can be told apart from a stall.
+A reconciliation that finishes inside that window logs nothing.
+
+To force a complete rebuild, stop MusicGrabber, delete
+`/data/music_grabber_library_index.db` along with any `-wal` and `-shm` files
+beside it, and start it again. The index is derived entirely from the audio on
+disk, so nothing is lost; the next reconciliation reads every file once and
+builds it back. Do not delete the main database, which is not derived from
+anything and is not so forgiving.
+
 Currently the Stats storage figures read from the index, falling back to a live
 walk whenever it cannot answer. Duplicate detection and the Track Upgrades scan
 still walk the disk and are unaffected.
