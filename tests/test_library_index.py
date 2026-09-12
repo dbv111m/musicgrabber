@@ -484,3 +484,54 @@ def test_a_quick_scan_says_nothing(index, library, capsys):
     index.reconcile(str(library), probe=Probe())
 
     assert "files seen" not in capsys.readouterr().out
+
+
+# --- filesystems that hand out unsigned inode numbers -------------------------
+
+def test_unsigned_cifs_inodes_do_not_take_down_the_whole_scan(index, library, monkeypatch):
+    """A CIFS mount that hashes file handles produces inodes past 2**63.
+
+    SQLite's INTEGER is signed, so one such file used to abort the batch, unwind
+    the reconciliation and leave the index permanently unbuilt. Found on the VM,
+    where the mount hashes, having been invisible on the host beside it, where
+    the same NAS supplies real inode numbers.
+    """
+    huge = 16946177935372863836  # a real one, off /music/Singles/The Beatles
+    assert huge > 2 ** 63 - 1
+
+    _track(library, "Let It Be.flac")
+    _track(library, "Jolene.flac")
+
+    from utils import LibraryFile
+
+    real = os.stat_result
+
+    def walker(root, strict=False):
+        for entry in library_index.iter_library_audio_files(root, strict=strict):
+            st = entry.stat
+            fields = list(st)
+            fields[1] = huge  # st_ino
+            yield LibraryFile(
+                entry.path, real(fields, {"st_mtime_ns": st.st_mtime_ns})
+            )
+
+    summary = index.reconcile(str(library), walker=walker, probe=Probe())
+
+    assert summary["error"] is None
+    assert summary["walked"] == 2 and summary["probed"] == 2
+
+    with index.index_conn() as conn:
+        stored = [r[0] for r in conn.execute("SELECT ino FROM library_files")]
+    # The same 64 bits, read as signed, so the two files stay distinguishable.
+    assert set(stored) == {huge - 2 ** 64}
+    assert index.storage_totals([Path(str(library))])["file_count"] == 1
+
+
+def test_signed64_is_reversible_and_leaves_ordinary_inodes_alone():
+    assert library_index._signed64(45329555) == 45329555
+    assert library_index._signed64(None) is None
+    assert library_index._signed64(2 ** 64 - 1) == -1
+    assert library_index._signed64(2 ** 63) == -(2 ** 63)
+    # Distinctness is the whole contract: no two inodes may collide.
+    values = [2 ** 63 - 1, 2 ** 63, 2 ** 64 - 1, 0, 1, 45329555]
+    assert len({library_index._signed64(v) for v in values}) == len(values)

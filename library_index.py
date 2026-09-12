@@ -216,6 +216,26 @@ def _relative_to(root: str, path: Path | str) -> str | None:
     return rel.as_posix()
 
 
+def _signed64(value):
+    """Reinterpret an unsigned 64-bit stat field as the signed one SQLite stores.
+
+    SQLite's INTEGER is signed 64-bit. Most filesystems hand out inode numbers
+    that fit comfortably, but CIFS synthesises them by hashing the file handle
+    when the server will not supply real ones, and those use the full unsigned
+    range. About one file in 150 on such a mount then overflows, which used to
+    take the entire reconciliation down with it, every day, forever.
+
+    Storing the same 64 bits read as signed keeps every value distinct, which is
+    the only thing the hardlink grouping in `storage_totals` ever asks of them.
+    Found on Karl's VM, where the mount hashes; invisible on the host beside it,
+    where the very same NAS hands over real inode numbers. Filesystems, eh.
+    """
+    if value is None:
+        return None
+    value &= 0xFFFFFFFFFFFFFFFF
+    return value - 0x10000000000000000 if value >= 0x8000000000000000 else value
+
+
 def _prefix_range(prefix: str) -> tuple[str, str]:
     """Bounds for "every relative path inside this subdirectory".
 
@@ -519,7 +539,8 @@ def _reconcile_locked(root: str, summary: dict, *, walker=None, probe=None) -> d
                 parsed = _row_values(probe_fn(path))
                 summary["probed"] += 1
             upserts.append(
-                (root, rel, st.st_size, st.st_mtime_ns, st.st_dev, st.st_ino)
+                (root, rel, st.st_size, st.st_mtime_ns,
+             _signed64(st.st_dev), _signed64(st.st_ino))
                 + tuple(parsed) + (started,)
             )
 
@@ -635,7 +656,8 @@ def index_file(path: Path | str) -> bool:
             return False
         st = os.stat(path)
         values = (
-            (root, rel, st.st_size, st.st_mtime_ns, st.st_dev, st.st_ino)
+            (root, rel, st.st_size, st.st_mtime_ns,
+             _signed64(st.st_dev), _signed64(st.st_ino))
             + _row_values(probe_file(Path(path))) + (_now(),)
         )
         with index_conn() as conn:
