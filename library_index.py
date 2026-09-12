@@ -39,6 +39,7 @@ from pathlib import Path
 
 from audio_probe import probe_file
 from constants import (
+    AUDIO_EXTENSIONS,
     LIBRARY_INDEX_BUSY_TIMEOUT_MS,
     LIBRARY_INDEX_DB_PATH,
     LIBRARY_INDEX_DELETE_FLOOR,
@@ -49,7 +50,7 @@ from constants import (
     MUSIC_DIR,
 )
 from settings import get_setting
-from utils import iter_library_audio_files
+from utils import iter_library_audio_files, path_has_excluded_scan_dir
 
 SCHEMA_VERSION = 2
 
@@ -808,11 +809,41 @@ def _record_failure(root: str, message: str, attempted_at: str | None = None) ->
 
 
 # =============================================================================
-# Hooks. Defined and tested here; wired into the download paths in Phase 5.
+# Hooks. Called the moment we move one of our own files, so the index does not
+# spend a day believing yesterday's arrangement.
 # =============================================================================
 
+def _indexable(rel: str) -> bool:
+    """Whether the walker would ever hand us this file.
+
+    Not everything a completed job points at is audio. A watched playlist records
+    its .m3u as the job's final path, and the download plumbing shuffles .lrc
+    sidecars about with the same helpers as the music. The index holds rows for
+    audio, so anything else is declined here rather than at every call site.
+
+    The directory check is for libraries with a bin inside the share: MusicGrabber
+    keeps its own trash and quarantine under /data, but Synology, QNAP and Windows
+    all park deletions in a hidden folder within the share itself, and the walker
+    skips those. A row for a file no scan will ever see again is a row the next
+    reconciliation would only delete.
+
+    Judged on the root-relative path deliberately. A share mounted beneath
+    something like /mnt/@recycle is nobody's business but the mount's.
+    """
+    path = Path(rel)
+    if path.suffix.lower() not in AUDIO_EXTENSIONS:
+        return False
+    return not path_has_excluded_scan_dir(path)
+
+
 def index_file(path: Path | str) -> bool:
-    """Index one file immediately, so our own downloads do not wait for a scan."""
+    """Index one file immediately, so our own downloads do not wait for a scan.
+
+    True means the index now describes this file, which includes the case where
+    it already did and nothing needed reading. False means it does not, and the
+    daily reconciliation will sort it out: no root owns the path, the path is not
+    something a scan would ever yield, or the index is simply unavailable.
+    """
     if not init_index():
         return False
     try:
@@ -820,9 +851,24 @@ def index_file(path: Path | str) -> bool:
         if root is None:
             return False
         rel = _relative_to(root, path)
-        if rel is None:
+        if rel is None or not _indexable(rel):
             return False
         st = os.stat(path)
+        with index_conn() as conn:
+            known = conn.execute(
+                "SELECT size_bytes, mtime_ns FROM library_files "
+                "WHERE root_path = ? AND relative_path = ?",
+                (root, rel),
+            ).fetchone()
+        # The same fingerprint gate the reconciliation and the upgrade hint both
+        # use. A download that turned out to be a duplicate still records a
+        # completed job, and reopening a file we already hold current facts about
+        # would be exactly the work this whole index exists to stop; a bulk import
+        # of mostly-owned tracks would pay 24ms a piece over SMB for nothing.
+        # Anything that genuinely changed the file moves one of these two numbers,
+        # and callers that changed a file on purpose remove the row first.
+        if known and known[0] == st.st_size and known[1] == st.st_mtime_ns:
+            return True
         values = (
             (root, rel, st.st_size, st.st_mtime_ns,
              _signed64(st.st_dev), _signed64(st.st_ino))
@@ -868,6 +914,11 @@ def move_file(old_path: Path | str, new_path: Path | str) -> bool:
         new_root = _owning_root(roots, str(new_path))
         old_rel = _relative_to(old_root, old_path) if old_root else None
         new_rel = _relative_to(new_root, new_path) if new_root else None
+        # Not indexable is not indexed, which for a move means the same thing as
+        # being outside the roots entirely, so a file moved into a bin the scans
+        # skip is a departure rather than a rename.
+        old_rel = old_rel if old_rel and _indexable(old_rel) else None
+        new_rel = new_rel if new_rel and _indexable(new_rel) else None
         if old_rel is None or new_rel is None:
             # Moved in or out of the indexed world entirely; index the arrival
             # and forget the departure, rather than pretending it was a rename.

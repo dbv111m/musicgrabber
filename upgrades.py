@@ -1029,6 +1029,13 @@ def perform_upgrade(user_id: str | None, candidate_id: int, force: bool = False)
         except Exception:
             pass
 
+        # Not a move as far as the index is concerned: the file now sitting at
+        # new_path is a different file with a different codec, bitrate and, after
+        # the retagging above, possibly different tags. So the old row goes and a
+        # fresh one is read, rather than carrying yesterday's facts to a new home.
+        library_index.remove_file(current)
+        library_index.index_file(new_path)
+
         _fix_m3u_references(user_id, current, new_path)
         # All three, same as every other completed-download site. This used to
         # poke Navidrome only, so Jellyfin and Plex users were left staring at
@@ -1308,6 +1315,13 @@ def restore_from_quarantine(user_id: str | None, entry_id: int, is_admin: bool =
                  row["artist"], row["title"], bumped_path.stat().st_size),
             )
         conn.commit()
+
+    # Both ends of the undo. The quarantine sits under /data, outside every
+    # library root, so the index reads these as one departure and one arrival,
+    # which is exactly what they are.
+    if bumped_path is not None:
+        library_index.move_file(replaced_by, bumped_path)
+    library_index.move_file(quarantined, original)
 
     scan_user_library(row["user_id"])
     return {"status": "restored", "path": str(original)}

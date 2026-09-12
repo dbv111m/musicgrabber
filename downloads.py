@@ -67,6 +67,7 @@ from utils import (
     artist_credit_match_score,
     artist_credits_match,
 )
+import library_index
 from monochrome import download_monochrome_track
 from source_urls import is_valid_source_url
 from zvu4no import download_zvu4no_track, is_zvu4no_url
@@ -83,6 +84,9 @@ from acquisition import (
     start_acquisition_attempt,
 )
 
+
+# Job statuses that mean "the audio is where it is going to stay".
+_INDEXABLE_JOB_STATUSES = frozenset({"completed", "completed_with_errors"})
 
 _AUDIO_RECHECK_MAX_ATTEMPTS = 2
 _AUDIO_RESEARCH_MAX_ALTERNATES = 2
@@ -1850,6 +1854,18 @@ def _update_job(job_id: str, **fields) -> None:
             (*values, job_id),
         )
         conn.commit()
+
+    # A job recording a local final path is the one moment we know for certain
+    # where the file has ended up: after the promotion out of staging, after the
+    # integrity check that might have deleted it again, after any relocation for
+    # a name MusicBrainz spells better. Telling the index here rather than at the
+    # move means it never holds a row for a file we thought better of.
+    #
+    # Deliberately not on failure, where final_path is written as breadcrumbs for
+    # a file that may well have been binned. Playlist jobs point their final_path
+    # at an .m3u, which the hook declines on sight.
+    if fields.get("status") in _INDEXABLE_JOB_STATUSES and fields.get("final_path"):
+        library_index.index_file(fields["final_path"])
 
 
 def _local_final_path(path: Path | str | None) -> str | None:

@@ -163,6 +163,20 @@ and keeps everything already known about it, so an external organiser
 reorganising the library overnight does not force a full re-read. Only genuinely
 new or changed files are opened, and each is opened once.
 
+MusicGrabber's own file changes do not wait for that daily pass. Completing a
+download, moving a file to the trash, restoring it, replacing it with an upgrade,
+undoing that replacement and correcting tags through the Queue each update the
+index on the spot. An arrival is recorded when the job is recorded complete
+rather than when the file first lands, because integrity and bitrate checks run
+after the move and may still delete it; failed jobs and playlist `.m3u` paths are
+not recorded at all. A tag correction replaces the row rather than moving it,
+since the file's contents changed and not just its name, and that one matters:
+duplicate detection trusts the index's Artist and Title outright, so a stale row
+would refuse an unrelated download as a duplicate of a name the file no longer
+carries. Each hook is a hint, not a promise. If the index is missing, locked or
+corrupt the hook does nothing and the daily reconciliation picks the change up as
+it always did.
+
 Files MusicGrabber did not download are indexed too, recorded as not ours. This
 is deliberate and is most of the value: on a typical library the great majority
 of files were never downloaded by MusicGrabber, and without a row saying so they
@@ -895,7 +909,7 @@ Each watched playlist can also:
 
 Artist guest lists are not required to agree word-for-word across Spotify, Navidrome, Lidarr, and the file on disk. MusicGrabber tries the complete credit first, then falls back to the primary artist when a service has written `Primary Artist, Guest` or `Primary Artist feat. Guest`. If a manual Search download discovers that the primary-artist copy already exists, the watched row is reconciled too: it leaves Missing, gains the reusable path where available, and joins the next M3U rebuild. The guest artist has not been erased from history; the databases have merely stopped arguing over the seating plan.
 
-Filename matching is only the fast path. When that misses, MusicGrabber queries the persistent Artist and Title index for audio beneath `music_dir`, excluding trash and system folders. External renames, moves and retags become visible at the next daily reconciliation (`LIBRARY_INDEX_RECONCILE_HOURS`). Until then, a renamed file may escape the tag check. Immediate index updates for MusicGrabber’s own file changes are not yet wired in either; filename and known-path checks still recognise those files where possible. If no usable completed index exists, the background fallback retains its five-minute cache and refresh-on-missing-path behaviour.
+Filename matching is only the fast path. When that misses, MusicGrabber queries the persistent Artist and Title index for audio beneath `music_dir`, excluding trash and system folders. External renames, moves and retags become visible at the next daily reconciliation (`LIBRARY_INDEX_RECONCILE_HOURS`). Until then, a renamed file may escape the tag check. MusicGrabber's own file changes update the index immediately, so a download, trashing, restore, upgrade swap or Queue retag is reflected at once rather than at the next pass. If no usable completed index exists, the background fallback retains its five-minute cache and refresh-on-missing-path behaviour.
 
 With missing-file re-downloads disabled, playlist and watched-artist cards show how many previously downloaded tracks are no longer findable. Append playlists include their retained historical tracks in that count, not just the tracks still present upstream; those departed tracks remain historical and are never re-queued automatically.
 

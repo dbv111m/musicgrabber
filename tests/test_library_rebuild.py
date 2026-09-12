@@ -159,3 +159,42 @@ def test_rebuild_is_idempotent(fresh_db, library):
     _index_everything(library)
     assert app._rebuild_library_index() == 2
     assert app._rebuild_library_index() == 0
+
+
+def test_a_symlinked_library_does_not_get_a_second_history_row(fresh_db, monkeypatch, tmp_path):
+    """`final_path` is written resolved, so the comparison has to be too.
+
+    Reading the index instead of walking lost the per-file `resolve()` along
+    with the walk, which on a library reached through a symlink would have
+    minted a duplicate history row for every file already in the queue. The
+    root is resolved once instead: no scan descends a symlinked directory, so
+    nothing beneath it can resolve anywhere else.
+    """
+    import app
+
+    real = tmp_path / "nas" / "music"
+    singles = real / "Singles" / "Orbital"
+    singles.mkdir(parents=True)
+    (singles / "Halcyon.flac").write_bytes(b"audio")
+    link = tmp_path / "music-link"
+    link.symlink_to(real)
+
+    monkeypatch.setattr(library_index, "LIBRARY_INDEX_DB_PATH", tmp_path / "index.db")
+    library_index.reset_for_tests()
+    monkeypatch.setattr(app, "get_singles_dir", lambda user_id=None: link / "Singles")
+    monkeypatch.setattr(app, "get_albums_dir", lambda user_id=None: None)
+    monkeypatch.setattr(app, "get_playlists_dir", lambda user_id=None: None)
+
+    # The download path stores what `_local_final_path` gave it, which is resolved.
+    with fresh_db.db_conn() as conn:
+        conn.execute(
+            """INSERT INTO jobs (id, artist, title, status, final_path)
+               VALUES ('known-02', 'Orbital', 'Halcyon', 'completed', ?)""",
+            (str((singles / "Halcyon.flac").resolve()),),
+        )
+        conn.commit()
+
+    assert app._rebuild_library_index() == 0
+    _index_everything(link / "Singles")
+    assert app._rebuild_library_index() == 0
+    library_index.reset_for_tests()

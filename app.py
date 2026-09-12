@@ -937,20 +937,25 @@ def _rebuild_library_index() -> int:
         audio_paths = library_index.paths_under(root)
         if audio_paths is None:
             audio_paths = [p for p, _st in iter_library_audio_files(root, AUDIO_EXTENSIONS)]
+        # `final_path` is written resolved, so a library reached through a symlink
+        # has to be compared resolved or every file already in the history gets a
+        # second row. One resolve of the root does the whole job: no scan descends
+        # a symlinked directory, so nothing beneath it can resolve anywhere else.
+        try:
+            base = root.resolve()
+        except OSError:
+            base = root
         for audio_path in audio_paths:
-            # Compared as configured, not as resolved. `final_path` is stored the
-            # same way, so the old per-file resolve() was at best twenty thousand
-            # syscalls to change nothing, and at worst a way to mint duplicate
-            # history for a library reached through a symlink.
-            resolved = str(audio_path)
-            if resolved in known or resolved in seen:
-                continue
-            seen.add(resolved)
             try:
                 relative = audio_path.relative_to(root)
                 artist = relative.parts[-2] if len(relative.parts) > 1 else "Unknown"
+                resolved = str(base / relative)
             except ValueError:
                 artist = "Unknown"
+                resolved = str(audio_path)
+            if resolved in known or resolved in seen:
+                continue
+            seen.add(resolved)
             # Full UUID here, not the usual 8-char job ID. A rebuild can mint tens
             # of thousands of rows in one batch, and 32 bits of birthday paradox
             # says a collision around 50k is a coin toss  -  which would abort the
@@ -3701,6 +3706,17 @@ def patch_job_tags(job_id: str, body: PatchTagsRequest, http_request: Request):
                 (resolved_str, job_id)
             )
         conn.commit()
+
+    # The index holds the artist and title this file used to carry, and duplicate
+    # detection trusts them: leave the old row standing and a later download of
+    # some unrelated track gets refused as a duplicate of a name this file no
+    # longer has. So the row is removed and read again rather than relocated,
+    # because a retag changed the bytes and not merely the name. Unconditionally,
+    # even when nothing was renamed, since an album correction moves no file and
+    # the arrival hook skips re-reading a file whose size and timestamp have not
+    # budged; without this it would happily serve the old album forever.
+    library_index.remove_file(file_path)
+    library_index.index_file(new_file_path)
 
     # Fire-and-forget rescan so library managers pick up the rename/retag
     spawn_daemon_thread(trigger_navidrome_scan, user_id=user_id)

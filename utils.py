@@ -746,6 +746,12 @@ def move_to_trash(file_path: Path, user_id: str | None = None) -> Path | None:
                 break
             parent = parent.parent
 
+        # The bin sits under /data, outside every library root, so the index
+        # reads this as a departure rather than a rename. It works that out for
+        # itself; we just tell it both ends of the journey.
+        from library_index import move_file
+        move_file(file_path, dest)
+
         return dest
     except Exception as e:
         print(f"[trash] Failed to move {file_path} to trash: {e}")
@@ -782,6 +788,11 @@ def restore_from_trash(trash_path: Path, user_id: str | None = None) -> Path | N
             except OSError:
                 break
             parent = parent.parent
+
+        # And back the other way: an arrival, so the index reads the file once
+        # here rather than leaving the next upgrade scan to rediscover it.
+        from library_index import move_file
+        move_file(trash_path, dest)
 
         return dest
     except Exception as e:
