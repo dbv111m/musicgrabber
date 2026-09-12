@@ -19,6 +19,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pytest
 
+import library_index
 import upgrades
 from upgrades import (
     tier_of,
@@ -622,6 +623,10 @@ def _setup_scan(monkeypatch, tmp_path, target=TIER_LOSSLESS):
         calls["hash"] += 1
         return "deadbeef"
 
+    monkeypatch.setattr(
+        library_index, "LIBRARY_INDEX_DB_PATH", tmp_path / "library-index.db"
+    )
+    library_index.reset_for_tests()
     monkeypatch.setattr(upgrades, "db_conn", fake_db_conn)
     monkeypatch.setattr(upgrades, "probe_file", fake_probe)
     monkeypatch.setattr(upgrades, "content_sha256", fake_hash)
@@ -848,3 +853,84 @@ def test_cancelled_scan_keeps_the_work_it_had_already_done(monkeypatch, tmp_path
 
     assert summary["cancelled"] is True
     assert conn.execute("SELECT COUNT(*) FROM upgrade_candidates").fetchone()[0] == 3
+
+
+# --- Phase 3d: the index answers instead of the disk -------------------------
+
+def _seed_index(tmp_path, source="youtube"):
+    """Index the scan's library as if a reconciliation had already run."""
+    library_index.reset_for_tests()
+    summary = library_index.reconcile(tmp_path, probe=lambda path: {
+        "artist": "Fatboy Slim", "title": "Praise You", "album": None,
+        "codec": "mp3", "bitrate_kbps": 128, "duration": 200.0,
+        "source": source, "source_quality": None, "source_codec": None,
+        "source_bitrate_kbps": 0, "file_id": "fid-1",
+    })
+    assert summary["walked"] == 1, summary
+    return summary
+
+
+def test_scan_takes_the_indexs_word_that_a_file_is_not_ours(monkeypatch, tmp_path):
+    """The 19,874-file case. Not ours, never will be, and now not reopened either."""
+    conn, track, calls = _setup_scan(monkeypatch, tmp_path)
+    _seed_index(tmp_path, source=None)
+
+    summary = upgrades.scan_user_library("alice")
+
+    assert calls == {"probe": 0, "hash": 0}
+    assert summary["from_index"] == 1
+    assert summary["eligible"] == 0
+    assert conn.execute("SELECT COUNT(*) FROM upgrade_candidates").fetchone()[0] == 0
+
+
+def test_scan_builds_a_candidate_row_from_the_index_without_a_probe(monkeypatch, tmp_path):
+    conn, track, calls = _setup_scan(monkeypatch, tmp_path)
+    _seed_index(tmp_path)
+
+    summary = upgrades.scan_user_library("alice")
+
+    # The hash still reads the bytes; only files that are genuinely ours pay it,
+    # and only until they have a row of their own.
+    assert calls == {"probe": 0, "hash": 1}
+    assert summary["from_index"] == 1
+    assert summary["eligible"] == 1
+    row = conn.execute("SELECT * FROM upgrade_candidates").fetchone()
+    assert row["codec"] == "mp3"
+    assert row["source"] == "youtube"
+    assert row["file_id"] == "fid-1"
+    assert row["below_target"] == 1
+
+
+def test_scan_ignores_the_index_once_the_file_has_changed(monkeypatch, tmp_path):
+    conn, track, calls = _setup_scan(monkeypatch, tmp_path)
+    _seed_index(tmp_path, source=None)
+    track.write_bytes(b"a completely different recording, and a different size too")
+
+    summary = upgrades.scan_user_library("alice")
+
+    assert calls["probe"] == 1
+    assert summary["from_index"] == 0
+
+
+def test_scan_still_probes_when_there_is_no_index_at_all(monkeypatch, tmp_path):
+    """An unavailable index must cost exactly the behaviour we had before it."""
+    conn, track, calls = _setup_scan(monkeypatch, tmp_path)
+
+    summary = upgrades.scan_user_library("alice")
+
+    assert calls == {"probe": 1, "hash": 1}
+    assert summary["from_index"] == 0
+    assert summary["eligible"] == 1
+
+
+def test_a_cached_row_still_beats_the_index_to_it(monkeypatch, tmp_path):
+    """No point asking the index about a file we were never going to open."""
+    conn, track, calls = _setup_scan(monkeypatch, tmp_path)
+    _seed_index(tmp_path)
+    _seed_cached_row(conn, track)
+
+    summary = upgrades.scan_user_library("alice")
+
+    assert calls == {"probe": 0, "hash": 0}
+    assert summary["skipped_unchanged"] == 1
+    assert summary["from_index"] == 0

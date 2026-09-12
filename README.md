@@ -192,9 +192,16 @@ disk, so nothing is lost; the next reconciliation reads every file once and
 builds it back. Do not delete the main database, which is not derived from
 anything and is not so forgiving.
 
-Stats storage figures and duplicate tag checks now read from the index, retaining
-their existing fallbacks when it cannot answer. Track Upgrades and the admin
-library rebuild still use their existing scans.
+Stats storage figures, duplicate tag checks, the Track Upgrades scan and the
+admin library rebuild all read from the index, retaining their existing scans as
+the fallback for when it cannot answer.
+
+The Track Upgrades scan is the largest beneficiary. Most of a real library was
+never downloaded by MusicGrabber and can never become an upgrade candidate, yet
+every pass used to open all of it to rediscover that. A row carrying the same
+size and nanosecond timestamp now answers instead. Measured on a real library
+over SMB, a steady-state pass over 1,673 files went from 33.6 seconds to 2.2,
+with 1,287 file reads replaced by index lookups.
 
 ## Audio Provenance Audit
 

@@ -113,6 +113,7 @@ from watched_playlists import (
     fetch_listenbrainz_createdfor, start_scheduler, wake_scheduler,
 )
 from watched_artists import refresh_watched_artist, start_artist_scheduler, wake_artist_scheduler, seed_artist_albums
+import library_index
 from library_index import start_library_index_scheduler
 from upgrades import (
     start_upgrade_scheduler, run_scan_all,
@@ -928,8 +929,20 @@ def _rebuild_library_index() -> int:
     for root in roots:
         if root is None or not root.exists():
             continue
-        for audio_path, _st in iter_library_audio_files(root, AUDIO_EXTENSIONS):
-            resolved = str(audio_path.resolve())
+        # The index already holds every audio file under this root, so an admin
+        # rebuild no longer drags the entire library across the mount to be told
+        # what it wrote down yesterday. A root it cannot vouch for falls back to
+        # the walk: "I saw nothing" and "I looked at nothing" must never be the
+        # same answer when the result becomes rows in the jobs table.
+        audio_paths = library_index.paths_under(root)
+        if audio_paths is None:
+            audio_paths = [p for p, _st in iter_library_audio_files(root, AUDIO_EXTENSIONS)]
+        for audio_path in audio_paths:
+            # Compared as configured, not as resolved. `final_path` is stored the
+            # same way, so the old per-file resolve() was at best twenty thousand
+            # syscalls to change nothing, and at worst a way to mint duplicate
+            # history for a library reached through a symlink.
+            resolved = str(audio_path)
             if resolved in known or resolved in seen:
                 continue
             seen.add(resolved)

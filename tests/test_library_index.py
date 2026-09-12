@@ -688,3 +688,154 @@ def test_signed64_is_reversible_and_leaves_ordinary_inodes_alone():
     # Distinctness is the whole contract: no two inodes may collide.
     values = [2 ** 63 - 1, 2 ** 63, 2 ** 64 - 1, 0, 1, 45329555]
     assert len({library_index._signed64(v) for v in values}) == len(values)
+
+
+# --- 3d: spending the negative cache -----------------------------------------
+
+def test_a_hint_answers_for_a_file_the_index_already_opened(index, library):
+    track = _track(library, "Praise You.flac")
+    index.reconcile(library, probe=Probe())
+
+    with index.probe_hints() as hint:
+        info = hint(track, os.stat(track))
+
+    assert info["source"] == "youtube"
+    assert info["codec"] == "flac"
+    assert info["bitrate_kbps"] == 900
+    assert info["duration"] == 300.0
+    assert info["artist"] == "Fatboy Slim"
+    assert info["title"] == "Praise You"
+    assert info["file_id"] == "fid-Praise You"
+
+
+def test_a_hint_declines_once_the_file_has_changed_size(index, library):
+    track = _track(library, "Praise You.flac")
+    index.reconcile(library, probe=Probe())
+    track.write_bytes(b"a rather longer recording than we had before")
+
+    with index.probe_hints() as hint:
+        assert hint(track, os.stat(track)) is None
+
+
+def test_a_hint_declines_when_only_the_timestamp_moved(index, library):
+    """Nanoseconds, not whole seconds. Stricter than the caller's own cache."""
+    track = _track(library, "Praise You.flac")
+    index.reconcile(library, probe=Probe())
+    st = os.stat(track)
+    os.utime(track, ns=(st.st_atime_ns, st.st_mtime_ns + 5_000_000))
+
+    with index.probe_hints() as hint:
+        assert hint(track, os.stat(track)) is None
+
+
+def test_a_hint_declines_for_a_file_it_has_never_seen(index, library):
+    _track(library, "Praise You.flac")
+    index.reconcile(library, probe=Probe())
+    newcomer = _track(library, "Rockafeller Skank.flac")
+
+    with index.probe_hints() as hint:
+        assert hint(newcomer, os.stat(newcomer)) is None
+
+
+def test_a_hint_declines_for_a_file_outside_every_root(index, library, tmp_path):
+    _track(library, "Praise You.flac")
+    index.reconcile(library, probe=Probe())
+    stray = tmp_path / "elsewhere.flac"
+    stray.write_bytes(b"audio")
+
+    with index.probe_hints() as hint:
+        assert hint(stray, os.stat(stray)) is None
+
+
+def test_hints_decline_before_the_first_complete_scan(index, library):
+    track = _track(library, "Praise You.flac")
+
+    with index.probe_hints() as hint:
+        assert hint(track, os.stat(track)) is None
+
+
+def test_a_file_the_index_could_not_read_is_not_offered_for_reopening(index, library):
+    """The clearest negative cache there is: one we already know is unparseable."""
+    track = _track(library, "corrupt.flac")
+    index.reconcile(library, probe=lambda path: None)
+
+    with index.probe_hints() as hint:
+        info = hint(track, os.stat(track))
+
+    assert info is not None
+    assert info["codec"] is None
+    assert info["source"] is None
+
+
+def test_hints_are_answered_without_a_connection_per_file(index, library, monkeypatch):
+    """A connection each would have eaten a good slice of what this saves."""
+    tracks = [_track(library, f"track {n}.flac") for n in range(5)]
+    index.reconcile(library, probe=Probe())
+    opened = []
+    real_conn = index.index_conn
+
+    @contextmanager
+    def counted_conn(**kwargs):
+        opened.append(kwargs)
+        with real_conn(**kwargs) as conn:
+            yield conn
+
+    monkeypatch.setattr(index, "index_conn", counted_conn)
+    with index.probe_hints() as hint:
+        assert all(hint(track, os.stat(track)) is not None for track in tracks)
+
+    assert opened == [{"read_only": True}]
+
+
+def test_hints_survive_an_index_that_throws(index, library, monkeypatch):
+    track = _track(library, "Praise You.flac")
+    index.reconcile(library, probe=Probe())
+
+    def explode(**kwargs):
+        raise sqlite3.OperationalError("disk I/O error")
+
+    monkeypatch.setattr(index, "index_conn", explode)
+    with index.probe_hints() as hint:
+        assert hint(track, os.stat(track)) is None
+
+
+# --- 3e: listing a root without walking it -----------------------------------
+
+def test_paths_under_lists_a_whole_root(index, library):
+    first = _track(library, "Praise You.flac")
+    second = _track(library, "Rockafeller Skank.flac")
+    index.reconcile(library, probe=Probe())
+
+    assert sorted(index.paths_under(library)) == sorted([first, second])
+
+
+def test_paths_under_lists_one_subdirectory(index, library):
+    _track(library, "Praise You.flac")
+    (library / "Albums").mkdir()
+    album_track = library / "Albums" / "Elsewhere.flac"
+    album_track.write_bytes(b"audio")
+    index.reconcile(library, probe=Probe())
+
+    assert index.paths_under(library / "Albums") == [album_track]
+
+
+def test_an_empty_indexed_folder_is_an_answer_not_a_shrug(index, library):
+    """"No audio in there" and "I could not look" must never be the same reply;
+    the caller turns the answer into rows in the jobs table."""
+    _track(library, "Praise You.flac")
+    (library / "Albums").mkdir()
+    index.reconcile(library, probe=Probe())
+
+    assert index.paths_under(library / "Albums") == []
+
+
+def test_paths_under_declines_before_a_complete_scan(index, library):
+    _track(library, "Praise You.flac")
+    assert index.paths_under(library) is None
+
+
+def test_paths_under_declines_for_a_directory_outside_the_index(index, library, tmp_path):
+    _track(library, "Praise You.flac")
+    index.reconcile(library, probe=Probe())
+
+    assert index.paths_under(tmp_path / "somewhere-else") is None

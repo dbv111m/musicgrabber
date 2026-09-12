@@ -23,6 +23,7 @@ import hashlib
 import re
 from pathlib import Path
 
+import library_index
 from audio_probe import probe_file
 from constants import (
     UPGRADE_SCAN_INTERVAL_HOURS,
@@ -287,7 +288,8 @@ def scan_user_library(user_id: str | None = None) -> dict:
     Returns a small summary dict. Network-free, never modifies audio files.
     """
     if not get_setting_bool("enable_track_upgrades", False, user_id=user_id):
-        return {"scanned": 0, "eligible": 0, "below_target": 0, "skipped_unchanged": 0}
+        return {"scanned": 0, "eligible": 0, "below_target": 0,
+                "skipped_unchanged": 0, "from_index": 0}
 
     uid = _norm_user(user_id)
     tgt = target_tier(user_id)
@@ -315,7 +317,7 @@ def scan_user_library(user_id: str | None = None) -> dict:
 
     seen: set[str] = set()
     seen_ids: set[int] = set()
-    scanned = eligible = below = skipped = 0
+    scanned = eligible = below = skipped = from_index = 0
 
     # Row writes are queued and committed in batches. SQLite in WAL mode fsyncs
     # on every commit, and this loop used to commit once per file, so a library
@@ -341,130 +343,147 @@ def scan_user_library(user_id: str | None = None) -> dict:
         if len(pending) >= UPGRADE_SCAN_WRITE_BATCH:
             flush_pending()
 
-    for d in dirs:
-        for path, st in _iter_audio_files(d):
-            if not _wait_for_duplicate_scan_priority(user_id):
-                print("Upgrade scan stopped because Track Upgrades was switched off")
-                flush_pending()
-                return {
-                    "scanned": scanned,
-                    "eligible": eligible,
-                    "below_target": below,
-                    "skipped_unchanged": skipped,
-                    "scrubbed": 0,
-                    "cancelled": True,
-                }
-            scanned += 1
-            spath = str(path)
-            mtime = st.st_mtime
-            cached = cache.get(spath)
+    # One reader, held open for the whole walk. A fresh connection per file
+    # would have quietly eaten a decent slice of what this saves, and twenty
+    # thousand of anything adds up. An unavailable index simply answers None
+    # to everything, which lands us back on the probe we used to do anyway.
+    with library_index.probe_hints() as indexed:
+        for d in dirs:
+            for path, st in _iter_audio_files(d):
+                if not _wait_for_duplicate_scan_priority(user_id):
+                    print("Upgrade scan stopped because Track Upgrades was switched off")
+                    flush_pending()
+                    return {
+                        "scanned": scanned,
+                        "eligible": eligible,
+                        "below_target": below,
+                        "skipped_unchanged": skipped,
+                        "from_index": from_index,
+                        "scrubbed": 0,
+                        "cancelled": True,
+                    }
+                scanned += 1
+                spath = str(path)
+                mtime = st.st_mtime
+                cached = cache.get(spath)
 
-            if _looks_unchanged(cached, st):
-                # The file is where we left it, at the size and timestamp we left
-                # it. The target tier may still have moved under it, so re-rank
-                # from the columns we already hold and leave the disk alone.
+                if _looks_unchanged(cached, st):
+                    # The file is where we left it, at the size and timestamp we left
+                    # it. The target tier may still have moved under it, so re-rank
+                    # from the columns we already hold and leave the disk alone.
+                    eligible += 1
+                    skipped += 1
+                    seen.add(spath)
+                    seen_ids.add(cached["id"])
+                    file_tier = effective_tier(
+                        cached["codec"],
+                        cached["bitrate_kbps"],
+                        cached["source_quality"],
+                        cached["source_codec"],
+                        cached["source_bitrate_kbps"] or 0,
+                    )
+                    is_below = 1 if file_tier < tgt else 0
+                    below += is_below
+                    queue_write(
+                        """UPDATE upgrade_candidates
+                           SET file_tier=?, target_tier=?, below_target=?,
+                               last_scanned=CURRENT_TIMESTAMP
+                           WHERE user_id=? AND id=?""",
+                        (file_tier, tgt, is_below, uid, cached["id"]),
+                    )
+                    continue
+
+                # The index opened this file on its last pass and wrote down
+                # what it found, so a row carrying this exact size and mtime is
+                # as good as the probe that produced it. Which matters because
+                # most of a real library is not ours and never will be, and we
+                # used to reopen all of it daily to rediscover that: 1,287 of
+                # the 1,673 files in this scan's scope on Karl's library, and
+                # 31.4 seconds of the 33.6 a pass used to take.
+                info = indexed(path, st)
+                if info is None:
+                    info = probe_file(path)
+                else:
+                    from_index += 1
+                if info is None or not info.get("source"):
+                    # Not our file (or unreadable). Drop any stale row and move on.
+                    if cached is not None:
+                        queue_write(
+                            "DELETE FROM upgrade_candidates WHERE user_id=? AND path=?",
+                            (uid, spath),
+                        )
+                    continue
+
+                if cached is None and info.get("file_id"):
+                    cached = cache_by_file_id.get(info["file_id"])
+                    if cached is not None:
+                        # Same tagged file, moved within a configured library root.
+                        queue_write(
+                            "UPDATE upgrade_candidates SET path=? WHERE user_id=? AND id=?",
+                            (spath, uid, cached["id"]),
+                        )
+
                 eligible += 1
-                skipped += 1
                 seen.add(spath)
-                seen_ids.add(cached["id"])
+                if cached is not None:
+                    seen_ids.add(cached["id"])
                 file_tier = effective_tier(
-                    cached["codec"],
-                    cached["bitrate_kbps"],
-                    cached["source_quality"],
-                    cached["source_codec"],
-                    cached["source_bitrate_kbps"] or 0,
+                    info["codec"],
+                    info["bitrate_kbps"],
+                    info.get("source_quality"),
+                    info.get("source_codec"),
+                    info.get("source_bitrate_kbps", 0),
                 )
                 is_below = 1 if file_tier < tgt else 0
                 below += is_below
-                queue_write(
-                    """UPDATE upgrade_candidates
-                       SET file_tier=?, target_tier=?, below_target=?,
-                           last_scanned=CURRENT_TIMESTAMP
-                       WHERE user_id=? AND id=?""",
-                    (file_tier, tgt, is_below, uid, cached["id"]),
-                )
-                continue
+                try:
+                    file_hash = content_sha256(path)
+                except OSError:
+                    continue
 
-            info = probe_file(path)
-            if info is None or not info.get("source"):
-                # Not our file (or unreadable). Drop any stale row and move on.
+                # Any byte change lapses dismissals and cached network search results.
+                dismissed = 0
+                dismissed_mtime = None
+                unchanged = bool(cached and cached["content_sha256"] == file_hash)
+                if unchanged and cached["dismissed"]:
+                    dismissed = 1
+                    dismissed_mtime = cached["dismissed_mtime"]
+
                 if cached is not None:
                     queue_write(
-                        "DELETE FROM upgrade_candidates WHERE user_id=? AND path=?",
-                        (uid, spath),
+                        """UPDATE upgrade_candidates SET path=?, mtime=?, file_size=?,
+                           codec=?, bitrate_kbps=?, duration=?, file_tier=?, target_tier=?,
+                           below_target=?, source=?, source_quality=?, source_codec=?,
+                           source_bitrate_kbps=?, file_id=?, content_sha256=?, artist=?,
+                           title=?, dismissed=?, dismissed_mtime=?,
+                           found_searched=CASE WHEN ? THEN found_searched ELSE 0 END,
+                           found_at=CASE WHEN ? THEN found_at ELSE NULL END,
+                           found_source=CASE WHEN ? THEN found_source ELSE NULL END,
+                           last_scanned=CURRENT_TIMESTAMP WHERE user_id=? AND id=?""",
+                        (spath, mtime, st.st_size, info["codec"], info["bitrate_kbps"],
+                         info["duration"], file_tier, tgt, is_below, info["source"],
+                         info.get("source_quality"), info.get("source_codec"),
+                         info.get("source_bitrate_kbps"), info.get("file_id"), file_hash,
+                         info["artist"], info["title"], dismissed, dismissed_mtime,
+                         unchanged, unchanged, unchanged, uid, cached["id"]),
                     )
-                continue
-
-            if cached is None and info.get("file_id"):
-                cached = cache_by_file_id.get(info["file_id"])
-                if cached is not None:
-                    # Same tagged file, moved within a configured library root.
+                else:
+                    # capture_id, because a row we have not pruned is a row the user
+                    # still owns; forgetting a new ID here would delete it minutes later.
                     queue_write(
-                        "UPDATE upgrade_candidates SET path=? WHERE user_id=? AND id=?",
-                        (spath, uid, cached["id"]),
+                        """INSERT INTO upgrade_candidates
+                           (user_id,path,mtime,file_size,codec,bitrate_kbps,duration,
+                            file_tier,target_tier,below_target,source,source_quality,
+                            source_codec,source_bitrate_kbps,file_id,content_sha256,
+                            artist,title,dismissed,dismissed_mtime,last_scanned)
+                           VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)""",
+                        (uid, spath, mtime, st.st_size, info["codec"], info["bitrate_kbps"],
+                         info["duration"], file_tier, tgt, is_below, info["source"],
+                         info.get("source_quality"), info.get("source_codec"),
+                         info.get("source_bitrate_kbps"), info.get("file_id"), file_hash,
+                         info["artist"], info["title"], dismissed, dismissed_mtime),
+                        capture_id=True,
                     )
-
-            eligible += 1
-            seen.add(spath)
-            if cached is not None:
-                seen_ids.add(cached["id"])
-            file_tier = effective_tier(
-                info["codec"],
-                info["bitrate_kbps"],
-                info.get("source_quality"),
-                info.get("source_codec"),
-                info.get("source_bitrate_kbps", 0),
-            )
-            is_below = 1 if file_tier < tgt else 0
-            below += is_below
-            try:
-                file_hash = content_sha256(path)
-            except OSError:
-                continue
-
-            # Any byte change lapses dismissals and cached network search results.
-            dismissed = 0
-            dismissed_mtime = None
-            unchanged = bool(cached and cached["content_sha256"] == file_hash)
-            if unchanged and cached["dismissed"]:
-                dismissed = 1
-                dismissed_mtime = cached["dismissed_mtime"]
-
-            if cached is not None:
-                queue_write(
-                    """UPDATE upgrade_candidates SET path=?, mtime=?, file_size=?,
-                       codec=?, bitrate_kbps=?, duration=?, file_tier=?, target_tier=?,
-                       below_target=?, source=?, source_quality=?, source_codec=?,
-                       source_bitrate_kbps=?, file_id=?, content_sha256=?, artist=?,
-                       title=?, dismissed=?, dismissed_mtime=?,
-                       found_searched=CASE WHEN ? THEN found_searched ELSE 0 END,
-                       found_at=CASE WHEN ? THEN found_at ELSE NULL END,
-                       found_source=CASE WHEN ? THEN found_source ELSE NULL END,
-                       last_scanned=CURRENT_TIMESTAMP WHERE user_id=? AND id=?""",
-                    (spath, mtime, st.st_size, info["codec"], info["bitrate_kbps"],
-                     info["duration"], file_tier, tgt, is_below, info["source"],
-                     info.get("source_quality"), info.get("source_codec"),
-                     info.get("source_bitrate_kbps"), info.get("file_id"), file_hash,
-                     info["artist"], info["title"], dismissed, dismissed_mtime,
-                     unchanged, unchanged, unchanged, uid, cached["id"]),
-                )
-            else:
-                # capture_id, because a row we have not pruned is a row the user
-                # still owns; forgetting a new ID here would delete it minutes later.
-                queue_write(
-                    """INSERT INTO upgrade_candidates
-                       (user_id,path,mtime,file_size,codec,bitrate_kbps,duration,
-                        file_tier,target_tier,below_target,source,source_quality,
-                        source_codec,source_bitrate_kbps,file_id,content_sha256,
-                        artist,title,dismissed,dismissed_mtime,last_scanned)
-                       VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP)""",
-                    (uid, spath, mtime, st.st_size, info["codec"], info["bitrate_kbps"],
-                     info["duration"], file_tier, tgt, is_below, info["source"],
-                     info.get("source_quality"), info.get("source_codec"),
-                     info.get("source_bitrate_kbps"), info.get("file_id"), file_hash,
-                     info["artist"], info["title"], dismissed, dismissed_mtime),
-                    capture_id=True,
-                )
 
     flush_pending()
 
@@ -480,7 +499,7 @@ def scan_user_library(user_id: str | None = None) -> dict:
             conn.commit()
 
     return {"scanned": scanned, "eligible": eligible, "below_target": below,
-            "skipped_unchanged": skipped,
+            "skipped_unchanged": skipped, "from_index": from_index,
             "scrubbed": len(stale_ids) if scanned > 0 else 0}
 
 
@@ -1348,7 +1367,7 @@ _scheduler_lock = threading.Lock()
 def run_scan_all() -> dict:
     """Scan every eligible user once. Safe to call from a route or the scheduler."""
     totals = {"users": 0, "scanned": 0, "eligible": 0, "below_target": 0,
-              "skipped_unchanged": 0}
+              "skipped_unchanged": 0, "from_index": 0}
     for uid in _eligible_user_ids():
         try:
             summary = scan_user_library(uid)
@@ -1360,6 +1379,7 @@ def run_scan_all() -> dict:
         totals["eligible"] += summary["eligible"]
         totals["below_target"] += summary["below_target"]
         totals["skipped_unchanged"] += summary.get("skipped_unchanged", 0)
+        totals["from_index"] += summary.get("from_index", 0)
     return totals
 
 
@@ -1376,7 +1396,8 @@ def upgrade_scan_scheduler():
             if totals["users"]:
                 print(f"Upgrade scan: {totals['below_target']} below-target across "
                       f"{totals['eligible']} eligible files ({totals['users']} user(s)), "
-                      f"{totals['skipped_unchanged']} unchanged and left on disk")
+                      f"{totals['skipped_unchanged']} unchanged and left on disk, "
+                      f"{totals['from_index']} answered by the index")
         except Exception as e:
             print(f"Upgrade scan scheduler error: {e}")
             interval = UPGRADE_SCAN_INTERVAL_HOURS

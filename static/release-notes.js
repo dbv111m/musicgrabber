@@ -44,6 +44,8 @@ const RELEASE_NOTES = {
                     "It lives on its own, away from your jobs and history. If it goes missing or gets confused, everything uses its existing fallback. A completed index still answers while it is being refreshed. No new settings, nothing to switch on.",
                     "Files moved or retagged by another organiser become visible at the next daily scan. Familiar filenames and known paths are still checked immediately.",
                     "Stats storage totals and duplicate checks now use that memory. Finding a renamed track no longer means reading the entire collection again, and restarting MusicGrabber no longer gives duplicate detection amnesia.",
+                    "Track Upgrades uses it too, and this is the big one. Most of your library was never downloaded by MusicGrabber, so it can never be upgraded by MusicGrabber, yet the scan still opened every last file every day to be reminded of that. It now just looks it up. A pass over the same music went from 34 seconds to 2.",
+                    "The admin 'Clean rebuild' button reads it as well, so tidying up your Queue history no longer means trudging through the whole collection first.",
                     "The very first run has to read every file once, which on a big collection takes a while. It now says how it is getting on every thirty seconds, so you can tell the difference between working hard and having quietly died.",
                     "Fixed before anyone else could trip over it: on some network shares the index refused to build at all, quietly, forever, because of one obscure disagreement about how big a number is allowed to be. If your library lives on an SMB share and the storage figures never looked right, they will now.",
                 ]
