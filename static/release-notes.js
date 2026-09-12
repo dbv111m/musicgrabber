@@ -13,6 +13,7 @@ const RELEASE_NOTES = {
             {
                 heading: "Housekeeping",
                 items: [
+                    "Track Upgrades is the only part of MusicGrabber that deliberately replaces a file you already own, so it is now the most thoroughly tested. Nineteen new tests drive the real thing with real audio, checking that a genuine improvement goes through, that a different recording of the same song does not, and that your old file always ends up somewhere you can get it back from. Nothing you will see, everything you would rather we checked.",
                     "Amazon playlist importing used to read the page and also listen in on everything the Amazon app said to its servers, just in case. It turns out the page had it covered all along, so the eavesdropping has been shown the door. Same playlists, same running order, rather less lurking.",
                 ]
             },
