@@ -1,6 +1,6 @@
 # Changelog
 
-## v4.1.2 (DEV)
+## v4.1.2 (2026-09-12)
 
 ### Added
 - **MusicGrabber now remembers what is in your library between scans**: new in this release is a persistent library index, a separate throwaway database that records one row per audio file (size, timestamp, codec, bitrate, tags, and whether MusicGrabber downloaded it). It reconciles itself against the disk once a day, opening only files that are genuinely new or changed. A file that has merely been renamed or moved by another organiser is recognised by its size and timestamp and keeps everything already known about it, so an overnight tidy-up no longer means re-reading the entire collection. The index lives in its own database file on purpose: it shares no locks with the one holding your jobs and history, it can never block a download, and if it is ever damaged the fix is to delete it and let it rebuild. Nothing anywhere waits for it; if it is missing, cold, locked or corrupt, every feature falls back to the behaviour it had before and carries on. Stats storage figures and duplicate detection by Artist/Title now read from it. Completed tag results remain usable during refreshes and regardless of age.
