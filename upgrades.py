@@ -7,8 +7,12 @@ searching and file-swapping (Phase 2) lives elsewhere; the scan never touches a
 file or hits the network.
 
 Ground rules (see docs/upgrades-design.md):
-- The filesystem is the source of truth. We ffprobe... well, mutagen-probe... the
-  real files every scan, so a file the user upgraded themselves self-corrects.
+- The filesystem is the source of truth, and the scan still self-corrects; it no
+  longer opens every file to prove it. Size and modification time gate the
+  expensive work, and the persistent library index answers for files it has
+  already read. Anything that genuinely changes a file moves one of those, so a
+  track the user upgraded themselves is noticed on the next pass. A replacement
+  that preserves both size and timestamp to the byte is not, and has earned it.
 - Only files carrying our SOURCE tag are eligible. No tag = the user's own file =
   hands off. The tag is written at download time by metadata.apply_metadata_to_file.
 - Target quality is derived from the existing download/convert settings, never a
