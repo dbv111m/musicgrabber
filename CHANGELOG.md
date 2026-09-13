@@ -1,6 +1,6 @@
 # Changelog
 
-## v4.2.0 (DEV)
+## v4.2.0 (2026-09-13)
 
 ### Added
 - **The riskiest function in MusicGrabber finally has tests**: `perform_upgrade` is the one place that deliberately overwrites a file you already had, and it was the only part of Track Upgrades with no test at all, because reaching the actual swap needs a candidate row, a staged download, a content hash and an audio fingerprint all lined up at once. It now has nineteen, and they use real audio throughout: ffmpeg generates the files, and the quality comparison, the content hash, the retagging and Chromaprint all run for real rather than being agreed with by a mock. Both the old and new files are encoded from one master, which real Chromaprint scores at 1.0000 similarity, while the "that's a different recording" test uses genuinely different audio, which it scores at 0.5854 against the 0.65 floor it has to clear. Every gate was then checked by breaking it on purpose and confirming a test noticed: the better-than-what-you-have check, the duration and fingerprint identity checks, the pre-swap revalidation, the quarantine record that makes the whole thing undoable, the retagging, the playlist rewrite, the Queue history, and the temporary-folder cleanup. That exercise immediately found a hole in the tests themselves, where the "not actually better" case was being refused a gate earlier for an entirely different reason, so the test passed with the gate it was named after switched off completely.
