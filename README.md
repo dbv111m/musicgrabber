@@ -278,6 +278,10 @@ bridge stays out until the report has earned trust with real libraries.
 
 ## Screenshots
 
+| Find New Artists | Down the Rabbit Hole |
+|:---:|:---:|
+| ![Find New Artists](assets/FindNewArtists.png) | ![Down the Rabbit Hole](assets/RabbitHole.png) |
+
 | Search & Results | Albums | Queue |
 |:---:|:---:|:---:|
 | ![Search and Results](assets/SearchAndResults.png) | ![Album Mode](assets/AlbumMode.png) | ![Queue](assets/Queue.png) |
