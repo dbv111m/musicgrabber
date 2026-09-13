@@ -11,6 +11,14 @@ const RELEASE_NOTES = {
         title: "What's New in v4.1.3",
         sections: [
             {
+                heading: "Finding new music, take one",
+                items: [
+                    "The \u201cfind similar artists\u201d button was quietly useless for most artists. It asked one service, and that service had nothing at all to say about five of the eight artists we tested it with, without ever mentioning as much. It now asks Deezer first and only falls back to the old one, and all eight came back with answers. Ask it about Pendulum and you now get The Qemists, Camo & Krooked and Sub Focus, instead of a shrug.",
+                    "It also picks the right artist now. Searching for Pendulum used to find an unrelated act with eighteen fans; asking for Nirvana found a different band from the sixties. And if it genuinely cannot find who you mean, it now says so rather than guessing, which it previously did with great confidence and, on one memorable occasion, an entire row of Spanish worship music.",
+                    "This is the groundwork for something bigger: proper recommendations based on what is already in your library. More on that soon.",
+                ]
+            },
+            {
                 heading: "Housekeeping",
                 items: [
                     "Track Upgrades is the only part of MusicGrabber that deliberately replaces a file you already own, so it is now the most thoroughly tested. Nineteen new tests drive the real thing with real audio, checking that a genuine improvement goes through, that a different recording of the same song does not, and that your old file always ends up somewhere you can get it back from. Nothing you will see, everything you would rather we checked.",

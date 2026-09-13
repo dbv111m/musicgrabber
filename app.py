@@ -23,7 +23,6 @@ import httpx
 
 from constants import (
     VERSION, MUSIC_DIR, DB_PATH, COOKIES_FILE, ROOT_PATH,
-    TIMEOUT_LISTENBRAINZ,
     TIMEOUT_YTDLP_INFO,
     TIMEOUT_YTDLP_PREVIEW,
     TIMEOUT_SLSKD_SEARCH,
@@ -113,6 +112,7 @@ from watched_playlists import (
     fetch_listenbrainz_createdfor, start_scheduler, wake_scheduler,
 )
 from watched_artists import refresh_watched_artist, start_artist_scheduler, wake_artist_scheduler, seed_artist_albums
+import discovery
 import library_index
 from library_index import start_library_index_scheduler
 from upgrades import (
@@ -2292,57 +2292,18 @@ def search_artwork(artist: str, title: str = "", album: str = ""):
 
 @app.post("/api/explore/similar")
 def explore_similar(request: ExploreRequest):
-    """Return a list of similar artists via MusicBrainz + ListenBrainz Labs.
-    Two-step: MusicBrainz name search → artist MBID, then ListenBrainz Labs
-    similar-artists → ranked list of similar artist names. No auth required.
-    Returns {artist} entries; the frontend searches each artist to find a top track."""
+    """Artists resembling the one asked for, for the Explore bar.
+
+    The sourcing, ranking and identity resolution all live in `discovery`; this
+    is deliberately just the door. It used to be sixty lines of MusicBrainz and
+    ListenBrainz plumbing inline, which answered three of eight real seeds.
+    """
     artist = request.artist.strip()
     if not artist:
         raise HTTPException(status_code=400, detail="Artist name required")
 
-    limit = max(1, min(request.limit, 25))  # Hard cap at 25
-
-    MB_ALGO = "session_based_days_7500_session_300_contribution_5_threshold_10_limit_100_filter_True_skip_30"
-    MB_HEADERS = {"User-Agent": f"MusicGrabber/{VERSION} (self-hosted music tool)"}
-
-    with httpx.Client(timeout=TIMEOUT_LISTENBRAINZ, headers=MB_HEADERS) as client:
-        # Step 1: look up the artist MBID via MusicBrainz search
-        try:
-            mb_resp = client.get(
-                "https://musicbrainz.org/ws/2/artist",
-                params={"query": artist, "limit": 1, "fmt": "json"},
-            )
-            mb_resp.raise_for_status()
-            artists = mb_resp.json().get("artists", [])
-            if not artists:
-                return {"artists": [], "artist": artist}
-            mbid = artists[0]["id"]
-        except httpx.TimeoutException:
-            raise HTTPException(status_code=504, detail="MusicBrainz timed out")
-        except Exception as e:
-            raise HTTPException(status_code=502, detail=f"MusicBrainz lookup failed: {e}")
-
-        # Step 2: ListenBrainz Labs similar-artists  -  fully public, no token needed
-        try:
-            lb_resp = client.get(
-                "https://labs.api.listenbrainz.org/similar-artists/json",
-                params={"artist_mbids": mbid, "algorithm": MB_ALGO},
-            )
-            lb_resp.raise_for_status()
-            similar = lb_resp.json()
-        except httpx.TimeoutException:
-            raise HTTPException(status_code=504, detail="ListenBrainz Labs timed out")
-        except Exception as e:
-            raise HTTPException(status_code=502, detail=f"ListenBrainz Labs failed: {e}")
-
-    # Results are pre-sorted by score descending  -  just take the top N names
-    result_artists = [
-        {"artist": entry["name"]}
-        for entry in similar
-        if entry.get("name")
-    ][:limit]
-
-    return {"artists": result_artists, "artist": artist}
+    names = discovery.similar_artists(artist, limit=max(1, min(request.limit, 25)))
+    return {"artists": [{"artist": name} for name in names], "artist": artist}
 
 
 # =============================================================================
