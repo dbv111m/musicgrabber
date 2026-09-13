@@ -2291,7 +2291,7 @@ def search_artwork(artist: str, title: str = "", album: str = ""):
 
 
 @app.post("/api/explore/similar")
-def explore_similar(request: ExploreRequest):
+def explore_similar(request: ExploreRequest, http_request: Request):
     """Artists resembling the one asked for, for the Explore bar.
 
     The sourcing, ranking and identity resolution all live in `discovery`; this
@@ -2302,8 +2302,12 @@ def explore_similar(request: ExploreRequest):
     if not artist:
         raise HTTPException(status_code=400, detail="Artist name required")
 
-    names = discovery.similar_artists(artist, limit=max(1, min(request.limit, 25)))
-    return {"artists": [{"artist": name} for name in names], "artist": artist}
+    found = discovery.similar_artists(
+        artist,
+        limit=max(1, min(request.limit, 25)),
+        user_id=http_request.state.user_id,
+    )
+    return {"artists": found, "artist": artist}
 
 
 # =============================================================================

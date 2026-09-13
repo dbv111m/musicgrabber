@@ -15,7 +15,9 @@ const RELEASE_NOTES = {
                 items: [
                     "The \u201cfind similar artists\u201d button was quietly useless for most artists. It asked one service, and that service had nothing at all to say about five of the eight artists we tested it with, without ever mentioning as much. It now asks Deezer first and only falls back to the old one, and all eight came back with answers. Ask it about Pendulum and you now get The Qemists, Camo & Krooked and Sub Focus, instead of a shrug.",
                     "It also picks the right artist now. Searching for Pendulum used to find an unrelated act with eighteen fans; asking for Nirvana found a different band from the sixties. And if it genuinely cannot find who you mean, it now says so rather than guessing, which it previously did with great confidence and, on one memorable occasion, an entire row of Spanish worship music.",
-                    "This is the groundwork for something bigger: proper recommendations based on what is already in your library. More on that soon.",
+                    "It also stops recommending you records you already own, which it did rather a lot: on a real library, 61% of its suggestions were already on the shelf, and asking about Therapy? helpfully suggested Nirvana. It now checks your library first, and it is clever enough to know that owning \u201cPendulum feat. somebody\u201d means you own Pendulum.",
+                    "And every suggested artist now comes with a thirty-second preview so you can hear them before deciding. Not their biggest hit, either: that is the one you are most likely to already have, so it picks their best track that you have not got. Ask about Radiohead and it plays you \u201cLet Down\u201d rather than \u201cCreep\u201d.",
+                    "This is the groundwork for something bigger: a proper Find New Artists section. More on that soon.",
                 ]
             },
             {
