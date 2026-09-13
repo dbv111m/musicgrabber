@@ -5677,6 +5677,28 @@ h1 {
     animation: tabFadeUp 0.25s ease both;
 }
 
+/* Just-arrived row: the same accent ring the Queue uses when it jumps you to a
+   job, held for a moment and then faded out rather than snapped off. */
+.discover-row-arrived {
+    /* outline rather than box-shadow purely for outline-offset: it stands the
+       ring off the cards instead of drawing it against their edges, and costs
+       no layout, which a padding change would. */
+    outline: 2px solid var(--accent);
+    outline-offset: 6px;
+    border-radius: 6px;
+    animation: tabFadeUp 0.25s ease both, discover-row-arrived-fade 2.2s ease-out forwards;
+}
+
+@keyframes discover-row-arrived-fade {
+    0%, 55% { outline-color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, transparent); }
+    100%    { outline-color: transparent; background: transparent; }
+}
+
+/* Nobody asked for a light show. */
+@media (prefers-reduced-motion: reduce) {
+    .discover-row-arrived { animation-duration: 0.01s, 0.01s; }
+}
+
 .discover-row-header {
     display: flex;
     align-items: center;
@@ -5734,6 +5756,11 @@ h1 {
 
 .discover-card {
     flex: 0 0 132px;
+    /* A flex item will not shrink below its content, and the artist name is
+       deliberately nowrap, so "Olly Alexander (Years & Years)" was stretching
+       its card to twice the width of its neighbours and making the whole row
+       look drunk. This is what the ellipsis was for. */
+    min-width: 0;
     display: flex;
     flex-direction: column;
     align-items: center;

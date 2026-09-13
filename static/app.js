@@ -2673,6 +2673,59 @@
             }
         }
 
+        // Brings a newly-added row into view and says "over here" about it.
+        //
+        // scrollIntoView was doing two unhelpful things at once: putting the row
+        // flush against the top of the window, which shoves the box you just
+        // typed into off the screen, and moving so fast that the arrival was over
+        // before the eye caught it. This lands the row a little way down instead,
+        // takes its time getting there, and leaves the accent ring on it for a
+        // moment so there is no doubt about which row is the new one.
+        function discoverRevealRow(row, { offset = 110, duration = 850 } = {}) {
+            if (!row) return;
+
+            // Flag it first: even if the scroll is a no-op because the row is
+            // already on screen, the highlight still has to happen.
+            row.classList.add('discover-row-arrived');
+            setTimeout(() => row.classList.remove('discover-row-arrived'), 2200);
+
+            // Whichever ancestor actually scrolls, or the page if none does.
+            let box = row.parentElement;
+            while (box && box !== document.body) {
+                const style = getComputedStyle(box);
+                if (/(auto|scroll)/.test(style.overflowY) && box.scrollHeight > box.clientHeight) break;
+                box = box.parentElement;
+            }
+            if (box === document.body) box = null;
+
+            const from = box ? box.scrollTop : window.scrollY;
+            const easy = window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+            const frame = box ? box.getBoundingClientRect().top : 0;
+            const to = Math.max(0, from + row.getBoundingClientRect().top - frame - offset);
+            if (Math.abs(to - from) < 4) return;
+
+            if (easy) {          // asked not to be swooshed about
+                if (box) box.scrollTop = to; else window.scrollTo(0, to);
+                return;
+            }
+
+            const start = performance.now();
+            let lastSet = from;
+            function step(now) {
+                const here = box ? box.scrollTop : window.scrollY;
+                // Somebody grabbed the wheel. Their scroll wins, always.
+                if (Math.abs(here - lastSet) > 2) return;
+                const t = Math.min(1, (now - start) / duration);
+                // easeInOutCubic: unhurried at both ends, so the movement reads
+                // as "look here" rather than as the page glitching.
+                const eased = t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
+                lastSet = from + (to - from) * eased;
+                if (box) box.scrollTop = lastSet; else window.scrollTo(0, lastSet);
+                if (t < 1) requestAnimationFrame(step);
+            }
+            requestAnimationFrame(step);
+        }
+
         // Builds an empty row shell (heading + spinner) ready for discoverFillRow
         // to drop cards into once the artists for it are known.
         function discoverCreateRow(heading, opts = {}) {
@@ -2985,7 +3038,7 @@
             const row = discoverCreateRow(`Because you asked about ${artist}`, { seed: artist });
             slot.innerHTML = '';
             slot.appendChild(row);
-            row.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            discoverRevealRow(row);
             try {
                 await discoverLoadSimilarInto(row, artist);
             } finally {
@@ -3005,7 +3058,7 @@
 
             const row = discoverCreateRow(`Because you liked the look of ${artist}`, { rabbitHole: true, seed: artist });
             container.appendChild(row);
-            row.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            discoverRevealRow(row);
             discoverLoadSimilarInto(row, artist);
         }
 
@@ -3043,7 +3096,7 @@
             _discoverBreadcrumb = _discoverBreadcrumb.slice(0, keepCount);
             renderDiscoverBreadcrumb();
             if (keepCount > 0) {
-                rabbitRows[keepCount - 1]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                discoverRevealRow(rabbitRows[keepCount - 1]);
             } else {
                 document.getElementById('findNewArtistsPanel')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
             }

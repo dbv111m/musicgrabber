@@ -15,7 +15,8 @@ const RELEASE_NOTES = {
                 items: [
                     "The Artists tab now has two halves: the artists you follow, and a new place to go and find some. It works out what you actually listen to, finds artists like them, quietly bins everyone you already own, and lays the rest out in rows that tell you why each one is there. Every suggestion has a thirty-second preview, so you can hear them before you decide, and a Grab it button that downloads them exactly like anything else.",
                     "Click an artist\u2019s name and you get their lookalikes as a new row, then theirs, and so on for as long as you like. There is a breadcrumb to climb back out when you surface. Consider the evening gone.",
-                    "There is also a \u201crecommend based on\u201d box, for when you already have a specific lead you fancy chasing.",
+                    "There is also a \u201crecommend based on\u201d box, for when you already have a specific lead you fancy chasing. The new row now glides into view rather than snapping to it, and wears a highlight for a moment so you can see where it went.",
+                    "You get a different set of rows every time you come back. It used to build them from your top five artists and nothing else, which is fine the first time and dull by the third; it now picks from the forty you play most, so your favourites still turn up often but the page is never quite the same twice.",
                     "Found a whole row you like the look of? \u201cGrab the lot\u201d takes the entire row in one go and saves it as a playlist named after whatever inspired it. It picks a proper track for each artist, skips anything you already have, and leaves you where you were rather than marching you off to the Queue.",
                 ]
             },

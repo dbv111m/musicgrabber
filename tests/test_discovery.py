@@ -508,11 +508,14 @@ def test_navidrome_seeds_win_when_available(monkeypatch):
     seeds, signal = discovery.taste_seeds()
 
     assert signal == "navidrome"
-    assert seeds[0] == {
+    # Order is a random draw (see pick_seeds), so ask whether it is there, not
+    # where. Both artists are in a pool far shorter than the twelve requested,
+    # so both must come back regardless of the draw.
+    assert {
         "artist": "Pendulum",
         "reason": "Because you listen to Pendulum",
         "weight": 15,
-    }
+    } in seeds
     assert all(s["artist"] != "Various Artists" for s in seeds)
 
 
@@ -524,11 +527,11 @@ def test_falls_back_to_the_library_when_navidrome_is_not_configured(monkeypatch)
     seeds, signal = discovery.taste_seeds()
 
     assert signal == "library"
-    assert seeds[0] == {
+    assert {
         "artist": "Metallica",
         "reason": "Because your library is full of Metallica",
         "weight": 200,
-    }
+    } in seeds
     assert all(s["artist"] != "Various Artists" for s in seeds)
 
 
@@ -543,11 +546,11 @@ def test_falls_back_to_downloads_when_neither_navidrome_nor_the_library_answer(m
     seeds, signal = discovery.taste_seeds()
 
     assert signal == "downloads"
-    assert seeds[0] == {
+    assert {
         "artist": "jawed",
         "reason": "Because you downloaded jawed",
         "weight": 1078,
-    }
+    } in seeds
     assert all(s["artist"] != "Various Artists" for s in seeds)
 
 
@@ -569,7 +572,7 @@ def test_a_navidrome_error_falls_through_to_the_library_rather_than_giving_up(mo
     seeds, signal = discovery.taste_seeds()
 
     assert signal == "library"
-    assert seeds[0]["artist"] == "Metallica"
+    assert [s["artist"] for s in seeds] == ["Metallica"]
 
 
 def test_a_totally_dead_set_of_sources_returns_the_none_signal(monkeypatch):
@@ -578,6 +581,64 @@ def test_a_totally_dead_set_of_sources_returns_the_none_signal(monkeypatch):
     monkeypatch.setattr(db, "db_conn", _broken_db_conn)
 
     assert discovery.taste_seeds() == ([], "none")
+
+
+# ---------------------------------------------------------------------------
+# Picking seeds: the same five rows every visit is how a feature goes stale
+# ---------------------------------------------------------------------------
+
+def _pool(n):
+    return [{"artist": f"Artist {i}", "reason": "r", "weight": n - i} for i in range(n)]
+
+
+def test_the_same_pool_does_not_produce_the_same_five_every_time():
+    """The whole point. Twenty visits to a forty-artist pool must not be
+    twenty identical pages."""
+    draws = {tuple(s["artist"] for s in discovery.pick_seeds(_pool(40), 5)) for _ in range(20)}
+    assert len(draws) > 1, "seed selection is deterministic, which is what we just fixed"
+
+    seen = {a for draw in draws for a in draw}
+    assert len(seen) > 5, f"only ever saw {seen}, which is the old behaviour wearing a hat"
+
+
+def test_the_draw_still_favours_what_you_actually_listen_to():
+    """Random, but not indifferent: your top artist should turn up far more
+    often than your fortieth, or this is just a shuffle of everything you own."""
+    pool = _pool(40)
+    counts = {"Artist 0": 0, "Artist 39": 0}
+    for _ in range(400):
+        for seed in discovery.pick_seeds(pool, 5):
+            if seed["artist"] in counts:
+                counts[seed["artist"]] += 1
+    assert counts["Artist 0"] > counts["Artist 39"] * 3, counts
+
+
+def test_a_draw_never_repeats_an_artist():
+    for _ in range(50):
+        picked = [s["artist"] for s in discovery.pick_seeds(_pool(40), 12)]
+        assert len(picked) == len(set(picked))
+
+
+def test_a_pool_smaller_than_the_draw_comes_back_whole():
+    """Three artists and a request for twelve is a new install, not an error."""
+    picked = discovery.pick_seeds(_pool(3), 12)
+    assert sorted(s["artist"] for s in picked) == ["Artist 0", "Artist 1", "Artist 2"]
+    assert discovery.pick_seeds([], 12) == []
+
+
+def test_seeds_are_drawn_from_a_pool_deeper_than_the_page_needs(monkeypatch):
+    """Asking the library for five and drawing five from it would change nothing;
+    the depth is where the variety comes from."""
+    asked = []
+    monkeypatch.setattr(discovery, "get_setting", _settings({}))
+    monkeypatch.setattr(discovery, "_library_seeds",
+                        lambda user_id, limit: asked.append(limit) or _pool(40))
+
+    seeds, signal = discovery.taste_seeds(limit=5)
+
+    assert asked == [discovery._SEED_POOL]
+    assert discovery._SEED_POOL > 5
+    assert len(seeds) == 5
 
 
 # ---------------------------------------------------------------------------

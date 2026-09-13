@@ -51,6 +51,7 @@ Design notes, because the measurements behind them are not obvious from the code
    albums on one real library alone.
 """
 
+import random
 import threading
 import time
 from pathlib import Path
@@ -81,6 +82,12 @@ _SEARCH_CANDIDATES = 10
 # matters because the point of this feature is clicking through artist after
 # artist, which would otherwise be one API round trip per click.
 _CACHE_TTL_SECONDS = 3600
+
+# How deep into someone's listening to go looking for seeds. Rows are built from
+# a random draw out of this, so it wants to be comfortably bigger than the five
+# rows on screen; forty is deep enough that a well-stocked library keeps turning
+# up something different, and shallow enough that it is still music you like.
+_SEED_POOL = 40
 
 _USER_AGENT = {"User-Agent": f"MusicGrabber/{VERSION} (self-hosted music tool)"}
 
@@ -511,6 +518,29 @@ def _download_seeds(limit: int) -> list[dict]:
     return seeds
 
 
+def pick_seeds(pool: list[dict], limit: int) -> list[dict]:
+    """`limit` seeds drawn from a ranked pool, favouring the top without marrying it.
+
+    Handing back the same top five every time means the same five rows every
+    time, which goes stale in roughly two visits. Drawing purely at random goes
+    too far the other way and buries what you actually listen to under the one
+    album you bought by mistake in 2009.
+
+    So the draw is weighted by *rank*, not by the play count itself: one artist
+    with ten times everyone else's plays would otherwise win every single draw,
+    which is how we ended up here. Your favourite comes up often, the long tail
+    comes up sometimes, and the page is different on every refresh.
+    """
+    remaining = list(pool)
+    picked: list[dict] = []
+    while remaining and len(picked) < limit:
+        # 1/2, 1/3, 1/4 ... against position in what is left, so the top of the
+        # pile stays the likeliest without ever being a foregone conclusion.
+        weights = [1.0 / (i + 2) for i in range(len(remaining))]
+        picked.append(remaining.pop(random.choices(range(len(remaining)), weights=weights)[0]))
+    return picked
+
+
 def taste_seeds(user_id: str | None = None, limit: int = 12) -> tuple[list[dict], str]:
     """Artists to build "Find New Artists" rows from, and which source they came from.
 
@@ -520,21 +550,25 @@ def taste_seeds(user_id: str | None = None, limit: int = 12) -> tuple[list[dict]
     inventing a ranking none of them actually gave us. See the module
     docstring, point 6, for the measurements behind the ordering.
 
+    Whichever source answers is asked for a deep pool and then drawn from at
+    random by `pick_seeds`, so two visits are not the same five rows. Ranking
+    still matters; it decides the odds, not the outcome.
+
     Never raises. A source that cannot answer is skipped, not fatal; if
     nothing can answer at all, that is `([], "none")`, which is a normal
     result here, not an error.
     """
     for signal, source in (
-        ("navidrome", lambda: _navidrome_seeds(user_id, limit)),
-        ("library", lambda: _library_seeds(user_id, limit)),
-        ("downloads", lambda: _download_seeds(limit)),
+        ("navidrome", lambda: _navidrome_seeds(user_id, _SEED_POOL)),
+        ("library", lambda: _library_seeds(user_id, _SEED_POOL)),
+        ("downloads", lambda: _download_seeds(_SEED_POOL)),
     ):
         try:
             seeds = source()
         except Exception:
             seeds = []
         if seeds:
-            return seeds, signal
+            return pick_seeds(seeds, limit), signal
     return [], "none"
 
 
