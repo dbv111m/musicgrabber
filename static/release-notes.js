@@ -7,6 +7,10 @@
 // changelog dump.
 
 const RELEASE_NOTES = {
+    "4.2.1": {
+        title: "What's New in v4.2.1",
+        sections: []
+    },
     "4.2.0": {
         title: "What's New in v4.2.0",
         sections: [
