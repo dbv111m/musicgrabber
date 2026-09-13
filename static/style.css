@@ -38,6 +38,8 @@
    30.  Settings - Security / Change Password ~ 2769
    31.  Settings - Save/actions row           ~ 2805
    32.  Release Notes modal                   ~ 2813
+   33.  Pills / segmented control              ~ 5591
+   34.  Find New Artists (discover)            ~ 5620
    33.  Report / blacklist modal              ~ 2888
    34.  Spotify cookies expired banner        ~ 2987
    35.  Cookie expiry hint                    ~ 3001
@@ -5586,5 +5588,287 @@ h1 {
     .quality-filter-count {
         margin-left: 0;
         width: 100%;
+    }
+}
+
+/* --------------------------------------------------------------------------
+   Pills / segmented control
+   Reusable two-or-more option switch. One .pill-group holds any number of
+   .pill buttons plus a single .pill-indicator that JS (initPillGroup in
+   app.js) slides underneath whichever one is active, measured in pixels so
+   uneven label widths and narrow screens both behave.
+   -------------------------------------------------------------------------- */
+
+.pill-group {
+    position: relative;
+    display: inline-flex;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-pill);
+    padding: 3px;
+    gap: 2px;
+    max-width: 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+}
+
+.pill-group::-webkit-scrollbar {
+    display: none;
+}
+
+.pill {
+    position: relative;
+    z-index: 1;
+    padding: 7px 16px;
+    font-size: 13px;
+    font-family: inherit;
+    font-weight: 600;
+    background: transparent;
+    color: var(--text-secondary);
+    border: none;
+    border-radius: var(--radius-pill);
+    cursor: pointer;
+    transition: color 0.2s;
+    white-space: nowrap;
+}
+
+.pill:hover:not(.active) {
+    color: var(--text-primary);
+}
+
+.pill.active {
+    color: #000;
+}
+
+.pill-indicator {
+    position: absolute;
+    top: 3px;
+    bottom: 3px;
+    left: 0;
+    width: 0;
+    border-radius: var(--radius-pill);
+    background: var(--accent);
+    transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), width 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    z-index: 0;
+}
+
+@media (max-width: 480px) {
+    .pill {
+        padding: 7px 12px;
+        font-size: 12px;
+    }
+}
+
+/* --------------------------------------------------------------------------
+   Find New Artists (Artists tab -> "Find New Artists" pill)
+   Horizontal rows of artist cards, seeded from listening/library/download
+   history, a manual "recommend based on" box, and the rabbit hole (click a
+   name, get a new row of their own similar artists). Rows scroll sideways
+   rather than squashing cards on narrow screens.
+   -------------------------------------------------------------------------- */
+
+.discover-rows {
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+}
+
+.discover-row {
+    animation: tabFadeUp 0.25s ease both;
+}
+
+.discover-row-heading {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin: 0 0 10px;
+}
+
+.discover-row-empty {
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
+.discover-row-retry-btn {
+    margin-left: 4px;
+}
+
+.discover-row-scroll {
+    display: flex;
+    gap: 14px;
+    overflow-x: auto;
+    padding: 2px 2px 10px;
+    scroll-snap-type: x proximity;
+    -webkit-overflow-scrolling: touch;
+}
+
+.discover-card {
+    flex: 0 0 132px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+    padding: 12px 10px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    text-align: center;
+    scroll-snap-align: start;
+    transition: transform 0.15s ease, border-color 0.15s ease;
+}
+
+.discover-card:hover {
+    transform: translateY(-2px);
+    border-color: var(--accent);
+}
+
+.discover-card-art {
+    position: relative;
+    width: 72px;
+    height: 72px;
+    border-radius: 50%;
+    overflow: hidden;
+    background: var(--bg-tertiary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.discover-card-art-fallback {
+    font-size: 26px;
+    opacity: 0.4;
+}
+
+.discover-card-img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+/* "Now playing" gets a gently pulsing accent ring; "loading" gets a duller,
+   faster one so the two states don't feel identical while you're waiting. */
+.discover-card-loading .discover-card-art {
+    animation: discover-pulse-loading 0.9s ease-in-out infinite;
+}
+
+.discover-card-playing .discover-card-art {
+    animation: discover-pulse-playing 1.6s ease-in-out infinite;
+}
+
+@keyframes discover-pulse-playing {
+    0%, 100% { box-shadow: 0 0 0 2px var(--accent); }
+    50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent) 35%, transparent); }
+}
+
+@keyframes discover-pulse-loading {
+    0%, 100% { box-shadow: 0 0 0 2px var(--border); }
+    50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--text-secondary) 30%, transparent); }
+}
+
+.discover-card-name {
+    width: 100%;
+    padding: 0;
+    background: none;
+    border: none;
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+    cursor: pointer;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    transition: color 0.15s;
+}
+
+.discover-card-name:hover {
+    color: var(--accent);
+    text-decoration: underline;
+}
+
+.discover-owned-badge {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--accent);
+    opacity: 0.85;
+}
+
+.discover-card-title {
+    font-size: 11px;
+    color: var(--text-secondary);
+    min-height: 14px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 100%;
+}
+
+.discover-card-actions {
+    display: flex;
+    gap: 6px;
+    margin-top: 2px;
+}
+
+.discover-play-btn,
+.discover-dl-btn {
+    padding: 4px 10px;
+    font-size: 12px;
+}
+
+.discover-breadcrumb {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding: 8px 12px;
+    margin-bottom: 16px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 12px;
+}
+
+.discover-breadcrumb-label {
+    color: var(--text-secondary);
+    white-space: nowrap;
+}
+
+.discover-breadcrumb-item {
+    padding: 2px 4px;
+    background: none;
+    border: none;
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-primary);
+    cursor: pointer;
+    border-radius: 4px;
+    transition: color 0.15s;
+}
+
+.discover-breadcrumb-item:hover {
+    color: var(--accent);
+}
+
+.discover-breadcrumb-sep {
+    color: var(--text-secondary);
+    opacity: 0.6;
+}
+
+.discover-breadcrumb-exit {
+    margin-left: auto;
+}
+
+@media (max-width: 480px) {
+    .discover-card {
+        flex: 0 0 112px;
+    }
+
+    .discover-card-art {
+        width: 60px;
+        height: 60px;
     }
 }

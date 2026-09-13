@@ -329,13 +329,19 @@
 
         <div id="artistsTabContainer" class="tab-panel">
             <div class="bulk-intro">
-                <p class="bulk-intro-text">Find an artist, then pick what you want from them: their singles as they land, their albums, or just one album right now.</p>
+                <p class="bulk-intro-text" id="artistsIntroText">Find an artist, then pick what you want from them: their singles as they land, their albums, or just one album right now.</p>
             </div>
 
             <div class="queue-header">
-                <h2 class="queue-section-heading">Followed Artists</h2>
+                <div class="pill-group" id="artistsModePills">
+                    <button type="button" class="pill active" data-value="followed">Followed Artists</button>
+                    <button type="button" class="pill" data-value="discover">Find New Artists</button>
+                    <span class="pill-indicator"></span>
+                </div>
                 <button class="btn accent-btn" id="refreshAllArtistsBtn">Check All Now</button>
             </div>
+
+            <div id="followedArtistsPanel">
             <div class="watched-add-panel">
                 <p class="watched-panel-text">
                     Search MusicBrainz for an artist, then choose what to do with them.
@@ -461,6 +467,39 @@
                 </label>
                 <div id="artistKnownAlbums" class="results"></div>
                 <div id="artistAlbumBrowserMount"></div>
+            </div>
+            </div>
+            <!-- /followedArtistsPanel -->
+
+            <!-- Find New Artists: recommendations from listening/library/download history,
+                 with a manual "recommend based on" box and an artist-name rabbit hole.
+                 Hidden by default; the pill above swaps it in, and its first showing
+                 lazily triggers the /api/discover/rows fetch (see initDiscoverPanel). -->
+            <div id="findNewArtistsPanel" style="display: none;">
+                <div class="watched-add-panel">
+                    <p class="watched-panel-text">
+                        Fancy chasing a specific lead? Name an artist and we'll dig up some lookalikes.
+                    </p>
+                    <div class="watched-url-row input-action">
+                        <input
+                            type="text"
+                            id="discoverSimilarInput"
+                            placeholder="Recommend based on..."
+                            class="panel-text-input"
+                        >
+                        <button
+                            type="button"
+                            id="discoverSimilarBtn"
+                            class="btn btn-primary input-action-btn panel-action-btn"
+                        >Find Similar</button>
+                    </div>
+                </div>
+
+                <div id="discoverBreadcrumb" class="discover-breadcrumb" style="display: none;"></div>
+                <div id="discoverManualRowSlot"></div>
+                <div id="discoverRowsContainer" class="discover-rows">
+                    <div class="loading"><div class="spinner"></div></div>
+                </div>
             </div>
 
         </div>

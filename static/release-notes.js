@@ -11,6 +11,14 @@ const RELEASE_NOTES = {
         title: "What's New in v4.1.3",
         sections: [
             {
+                heading: "Find New Artists",
+                items: [
+                    "The Artists tab now has two halves: the artists you follow, and a new place to go and find some. It works out what you actually listen to, finds artists like them, quietly bins everyone you already own, and lays the rest out in rows that tell you why each one is there. Every suggestion has a thirty-second preview, so you can hear them before you decide, and a Grab it button that downloads them exactly like anything else.",
+                    "Click an artist\u2019s name and you get their lookalikes as a new row, then theirs, and so on for as long as you like. There is a breadcrumb to climb back out when you surface. Consider the evening gone.",
+                    "There is also a \u201crecommend based on\u201d box, for when you already have a specific lead you fancy chasing.",
+                ]
+            },
+            {
                 heading: "Finding new music, take one",
                 items: [
                     "The \u201cfind similar artists\u201d button was quietly useless for most artists. It asked one service, and that service had nothing at all to say about five of the eight artists we tested it with, without ever mentioning as much. It now asks Deezer first and only falls back to the old one, and all eight came back with answers. Ask it about Pendulum and you now get The Qemists, Camo & Krooked and Sub Focus, instead of a shrug.",

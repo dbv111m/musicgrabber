@@ -2310,6 +2310,34 @@ def explore_similar(request: ExploreRequest, http_request: Request):
     return {"artists": found, "artist": artist}
 
 
+@app.get("/api/discover/rows")
+def discover_rows(http_request: Request, limit: int = 5, per_row: int = 10):
+    """Rows of "artists like X" for the Find New Artists page.
+
+    Seed-picking, sourcing and ranking all live in `discovery`; this just
+    clamps the query params and hands back what it is given.
+    """
+    user_id = http_request.state.user_id
+    limit = max(1, min(limit, 10))
+    per_row = max(1, min(per_row, 20))
+
+    rows, signal = discovery.discovery_rows(user_id=user_id, limit=limit, per_row=per_row)
+    return {"rows": rows, "signal": signal}
+
+
+@app.get("/api/discover/taster")
+def discover_taster(http_request: Request, artist: str, deezer_id: int | None = None):
+    """One preview track to introduce an artist by, for hovering over a discovery card."""
+    taster = discovery.artist_taster(
+        artist,
+        deezer_id=deezer_id,
+        user_id=http_request.state.user_id,
+    )
+    if taster is None:
+        raise HTTPException(status_code=404, detail="No preview available for that artist")
+    return taster
+
+
 # =============================================================================
 # Download API
 # =============================================================================

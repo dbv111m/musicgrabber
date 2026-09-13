@@ -1519,6 +1519,10 @@
                 if (currentTab !== 'results') {
                     stopPreview();
                 }
+                // Same idea for the Find New Artists taster preview
+                if (currentTab !== 'artists') {
+                    _stopDiscoverPreview();
+                }
 
                 if (currentTab === 'artists') {
                     // Defer one tick so direct album links can populate their richer
@@ -2519,6 +2523,455 @@
                 showToast(`Could not queue downloads: ${e.message}`, true);
             }
         }
+
+        // -----------------------------------------------------------------------
+        // Reusable pill / segmented control
+        //
+        // A .pill-group holds any number of .pill buttons plus one .pill-indicator
+        // span. Clicking a pill toggles .active and slides the indicator underneath
+        // it (measured in pixels, so it copes fine with pills of different widths,
+        // narrow screens, whatever). Fires a "pillchange" CustomEvent on the group
+        // with { value } set from the clicked pill's data-value, so callers don't
+        // need to know or care how the control itself works.
+        // -----------------------------------------------------------------------
+
+        function initPillGroup(group) {
+            if (!group || group.dataset.pillInit) return;
+            group.dataset.pillInit = '1';
+
+            const pills = Array.from(group.querySelectorAll('.pill'));
+            const indicator = group.querySelector('.pill-indicator');
+
+            function moveIndicator() {
+                const active = group.querySelector('.pill.active');
+                if (!active || !indicator) return;
+                indicator.style.width = `${active.offsetWidth}px`;
+                indicator.style.transform = `translateX(${active.offsetLeft}px)`;
+            }
+
+            pills.forEach(pill => {
+                pill.addEventListener('click', () => {
+                    if (pill.classList.contains('active')) return;
+                    pills.forEach(p => p.classList.remove('active'));
+                    pill.classList.add('active');
+                    moveIndicator();
+                    group.dispatchEvent(new CustomEvent('pillchange', { detail: { value: pill.dataset.value } }));
+                });
+            });
+
+            // Pills can reflow at narrow widths, so keep the indicator honest.
+            window.addEventListener('resize', moveIndicator);
+            // Defer so layout has actually settled before we measure it.
+            requestAnimationFrame(moveIndicator);
+        }
+
+        // -----------------------------------------------------------------------
+        // Find New Artists (Artists tab -> "Find New Artists" pill)
+        //
+        // Three ways in: the auto-generated rows from /api/discover/rows (seeded
+        // from Navidrome history, library contents, or past downloads, in that
+        // order of preference), a manual "recommend based on" box that hits the
+        // existing /api/explore/similar, and the rabbit hole - click an artist's
+        // name and their own similar artists land in a new row underneath. Falling
+        // down a Discogs hole at 1am, but on purpose and with a way back out.
+        // -----------------------------------------------------------------------
+
+        let _discoverLoaded = false;       // have we ever fetched /api/discover/rows
+        let _discoverAudio = null;         // the one taster <audio> allowed to play at a time
+        let _discoverPlayingCard = null;   // card element currently sounding off
+        let _discoverBreadcrumb = [];      // trail of artist names for the rabbit hole
+
+        function _stopDiscoverPreview() {
+            if (_discoverAudio) {
+                _discoverAudio.pause();
+                _discoverAudio.src = '';
+                _discoverAudio = null;
+            }
+            if (_discoverPlayingCard) {
+                _discoverPlayingCard.classList.remove('discover-card-playing');
+                _discoverPlayingCard = null;
+            }
+        }
+
+        function setArtistsMode(mode) {
+            const followedPanel = document.getElementById('followedArtistsPanel');
+            const discoverPanel = document.getElementById('findNewArtistsPanel');
+            const refreshBtn = document.getElementById('refreshAllArtistsBtn');
+            if (!followedPanel || !discoverPanel) return;
+            const isDiscover = mode === 'discover';
+            followedPanel.style.display = isDiscover ? 'none' : '';
+            discoverPanel.style.display = isDiscover ? '' : 'none';
+            if (refreshBtn) refreshBtn.style.display = isDiscover ? 'none' : '';
+            // The blurb above the pills describes whichever half you are looking
+            // at; leaving the Followed wording up while showing discoveries just
+            // reads as the page talking about something else entirely.
+            const intro = document.getElementById('artistsIntroText');
+            if (intro) {
+                intro.textContent = isDiscover
+                    ? "Artists you have not got yet, worked out from what you actually listen to. Have a listen, grab the good ones, and follow the trail as far as it goes."
+                    : "Find an artist, then pick what you want from them: their singles as they land, their albums, or just one album right now.";
+            }
+            if (isDiscover) {
+                initDiscoverPanel();
+            } else {
+                _stopDiscoverPreview();
+            }
+        }
+
+        function initDiscoverPanel() {
+            if (_discoverLoaded) return;
+            _discoverLoaded = true;
+            loadDiscoverRows();
+        }
+
+        async function loadDiscoverRows() {
+            const container = document.getElementById('discoverRowsContainer');
+            if (!container) return;
+            container.innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+            try {
+                const resp = await apiFetch('/api/discover/rows?limit=5&per_row=10');
+                if (!resp.ok) throw new Error('Could not reach the discovery service');
+                const data = await resp.json();
+                const rows = data.rows || [];
+                if (data.signal === 'none' || !rows.length) {
+                    container.innerHTML = `
+                        <div class="empty-state">
+                            <div class="empty-state-icon">🔇</div>
+                            <p>Nothing to go on yet, you've been suspiciously well-behaved.</p>
+                            <small>Listen to something in Navidrome, or download a track or two, and we'll start digging up lookalikes for you.</small>
+                        </div>`;
+                    return;
+                }
+                container.innerHTML = '';
+                rows.forEach(row => {
+                    const rowEl = discoverCreateRow(row.reason || `Because you listen to ${row.seed}`);
+                    container.appendChild(rowEl);
+                    discoverFillRow(rowEl, row.artists || []);
+                });
+            } catch (e) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <div class="empty-state-icon">🕳️</div>
+                        <p>Could not load recommendations: ${escapeHtml(e.message)}</p>
+                        <button type="button" class="btn btn-primary" id="discoverRetryBtn">Try again</button>
+                    </div>`;
+                document.getElementById('discoverRetryBtn')?.addEventListener('click', () => {
+                    _discoverLoaded = false;
+                    initDiscoverPanel();
+                });
+            }
+        }
+
+        // Builds an empty row shell (heading + spinner) ready for discoverFillRow
+        // to drop cards into once the artists for it are known.
+        function discoverCreateRow(heading, opts = {}) {
+            const row = document.createElement('div');
+            row.className = 'discover-row';
+            if (opts.rabbitHole) row.dataset.rabbitHole = '1';
+            row.innerHTML = `
+                <h3 class="discover-row-heading">${escapeHtml(heading)}</h3>
+                <div class="discover-row-body"><div class="loading"><div class="spinner"></div></div></div>
+            `;
+            return row;
+        }
+
+        function discoverFillRow(row, artists) {
+            const body = row.querySelector('.discover-row-body');
+            if (!body) return;
+            if (!artists || !artists.length) {
+                body.innerHTML = '<p class="discover-row-empty">Nothing came back for this one, dead end in the tunnel.</p>';
+                return;
+            }
+            const scroll = document.createElement('div');
+            scroll.className = 'discover-row-scroll';
+            artists.forEach(a => scroll.appendChild(discoverBuildCard(a)));
+            body.innerHTML = '';
+            body.appendChild(scroll);
+        }
+
+        function discoverRowError(row, message, retryFn) {
+            const body = row.querySelector('.discover-row-body');
+            if (!body) return;
+            body.innerHTML = `<p class="discover-row-empty">Could not load this one: ${escapeHtml(message)}. <button type="button" class="btn btn-ghost btn-sm discover-row-retry-btn">Try again</button></p>`;
+            const retryBtn = body.querySelector('.discover-row-retry-btn');
+            if (retryBtn && retryFn) retryBtn.addEventListener('click', retryFn);
+        }
+
+        // One artist card: art (with a graceful fallback), name (the rabbit hole),
+        // a play button for the 30-second taster, and a download button.
+        function discoverBuildCard(a) {
+            const wrap = document.createElement('div');
+            wrap.className = 'discover-card';
+            wrap.innerHTML = `
+                <div class="discover-card-art">
+                    <span class="discover-card-art-fallback">🎵</span>
+                    ${a.picture ? `<img class="discover-card-img" src="${escapeHtml(a.picture)}" alt="" loading="lazy">` : ''}
+                </div>
+                <button type="button" class="discover-card-name" title="See what's similar to ${escapeHtml(a.artist)}">${escapeHtml(a.artist)}</button>
+                <span class="discover-owned-badge" hidden>Already got it</span>
+                <div class="discover-card-title"></div>
+                <div class="discover-card-actions">
+                    <button type="button" class="btn btn-sm discover-play-btn" title="Preview">&#9654;</button>
+                    <button type="button" class="btn btn-sm btn-primary discover-dl-btn" title="Download">Grab it</button>
+                </div>
+            `;
+
+            const img = wrap.querySelector('.discover-card-img');
+            // A dud picture URL should just fall back to the music-note glyph
+            // underneath, not sit there as a broken-image icon looking sorry for itself.
+            if (img) img.addEventListener('error', () => img.remove());
+
+            const playBtn = wrap.querySelector('.discover-play-btn');
+            const dlBtn = wrap.querySelector('.discover-dl-btn');
+            const nameBtn = wrap.querySelector('.discover-card-name');
+
+            playBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                discoverPlayPreview(a.artist, a.deezer_id, wrap);
+            });
+            dlBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                discoverDownload(a.artist, a.deezer_id, wrap);
+            });
+            nameBtn.addEventListener('click', () => discoverRabbitHole(a.artist));
+
+            return wrap;
+        }
+
+        // Resolves (and caches on the card itself) the taster for one artist.
+        // Returns null on a 404 (no preview available), which callers treat as
+        // "nothing to play", not as an error worth shouting about.
+        async function discoverResolveTaster(artist, deezerId, cardEl) {
+            if (cardEl._taster) return cardEl._taster;
+            if (cardEl._taster404) return null;
+
+            // No Deezer id is not a dead end. Suggestions that came from
+            // ListenBrainz rather than Deezer arrive without one, and those are
+            // precisely the artists Deezer had never heard of, so refusing to
+            // look them up would leave the most obscure finds unplayable. The
+            // backend resolves by name when no id is given.
+            let url = `/api/discover/taster?artist=${encodeURIComponent(artist)}`;
+            if (deezerId) url += `&deezer_id=${encodeURIComponent(deezerId)}`;
+            const resp = await apiFetch(url);
+            if (resp.status === 404) {
+                cardEl._taster404 = true;
+                return null;
+            }
+            if (!resp.ok) throw new Error('Lookup failed');
+            const data = await resp.json();
+            cardEl._taster = data;
+
+            const titleEl = cardEl.querySelector('.discover-card-title');
+            if (titleEl && data.title) titleEl.textContent = data.title;
+            const badge = cardEl.querySelector('.discover-owned-badge');
+            if (badge && data.owned) badge.hidden = false;
+
+            return data;
+        }
+
+        async function discoverPlayPreview(artist, deezerId, cardEl) {
+            const playBtn = cardEl.querySelector('.discover-play-btn');
+            if (!playBtn || playBtn.disabled) return;
+
+            const wasPlayingThis = _discoverPlayingCard === cardEl;
+            stopPreview();          // only one thing gets to make noise at a time
+            _stopDiscoverPreview();
+            if (wasPlayingThis) return; // clicking the active card's play button again just stops it
+
+            cardEl.classList.add('discover-card-loading');
+            try {
+                const data = await discoverResolveTaster(artist, deezerId, cardEl);
+                cardEl.classList.remove('discover-card-loading');
+                if (!data || !data.preview_url) {
+                    playBtn.disabled = true;
+                    playBtn.title = 'No preview available for this one';
+                    return;
+                }
+                _discoverAudio = new Audio(data.preview_url);
+                _discoverAudio.volume = 0.9;
+                _discoverAudio.addEventListener('ended', () => {
+                    if (_discoverPlayingCard === cardEl) _stopDiscoverPreview();
+                });
+                await _discoverAudio.play().catch(() => {});
+                cardEl.classList.add('discover-card-playing');
+                _discoverPlayingCard = cardEl;
+            } catch (e) {
+                cardEl.classList.remove('discover-card-loading');
+                showToast(`Preview failed: ${e.message}`, true);
+            }
+        }
+
+        // Resolve the taster for its title (if we don't already have it), search
+        // for "{artist} - {title}", and hand the top result to the same download
+        // call the main search results use. Same trick as exploreSimilar's
+        // searchOne, just for one card instead of a whole batch.
+        async function discoverDownload(artist, deezerId, cardEl) {
+            const dlBtn = cardEl.querySelector('.discover-dl-btn');
+            if (!dlBtn || dlBtn.disabled) return;
+            const originalLabel = dlBtn.textContent;
+            dlBtn.disabled = true;
+            dlBtn.textContent = 'Queuing...';
+
+            try {
+                let title = cardEl._taster?.title;
+                if (!title) {
+                    const resolved = await discoverResolveTaster(artist, deezerId, cardEl).catch(() => null);
+                    title = resolved?.title;
+                }
+                // Searching for a specific track rather than just a name is the
+                // whole reason the taster exists: it gives the matcher something
+                // precise to score against, and is how a discovery comes back as
+                // a lossless copy instead of whatever turned up first.
+                const query = title ? `${artist} - ${title}` : artist;
+
+                const searchResp = await apiFetch('/api/search', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ query, limit: 1, source: currentSource })
+                });
+                if (!searchResp.ok) throw new Error('Search failed');
+                const searchData = await searchResp.json();
+                const top = searchData.results && searchData.results[0];
+                if (!top) throw new Error('Nothing found to download');
+
+                const payload = {
+                    video_id: top.video_id,
+                    title: top.title,
+                    convert_audio: convertAudioCheckbox.checked,
+                    source: top.source || 'youtube'
+                };
+                if (top.artist || top.channel) payload.artist = top.artist || top.channel;
+                if ((top.source === 'soundcloud' || top.source === 'mp3phoenix' || top.source === 'zvu4no' || top.source === 'freemp3cloud' || top.source === 'monochrome') && top.source_url) {
+                    payload.source_url = top.source_url;
+                }
+                if (top.source === 'soulseek') {
+                    payload.slskd_username = top.slskd_username;
+                    payload.slskd_filename = top.slskd_filename;
+                    payload.slskd_size = top.slskd_size || top.size || null;
+                }
+
+                const downloadResp = await apiFetch('/api/download', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(payload)
+                });
+                if (!downloadResp.ok) throw new Error('Download failed');
+
+                dlBtn.textContent = 'Queued';
+                showToast(`Queued ${artist}${title ? ` - ${title}` : ''}`);
+            } catch (e) {
+                dlBtn.disabled = false;
+                dlBtn.textContent = originalLabel;
+                showToast(`Could not queue: ${e.message}`, true);
+            }
+        }
+
+        // Fetches similar artists for one name and drops them into an existing
+        // row shell. Used by the manual "recommend based on" box, the rabbit
+        // hole, and both of their retry buttons.
+        async function discoverLoadSimilarInto(row, artist) {
+            try {
+                const resp = await apiFetch('/api/explore/similar', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ artist, limit: 25 })
+                });
+                if (!resp.ok) throw new Error('Could not reach similar-artists service');
+                const data = await resp.json();
+                discoverFillRow(row, (data.artists || []).slice(0, 10));
+            } catch (e) {
+                discoverRowError(row, e.message, () => {
+                    row.querySelector('.discover-row-body').innerHTML = '<div class="loading"><div class="spinner"></div></div>';
+                    discoverLoadSimilarInto(row, artist);
+                });
+            }
+        }
+
+        async function discoverManualSearch() {
+            const input = document.getElementById('discoverSimilarInput');
+            const btn = document.getElementById('discoverSimilarBtn');
+            const slot = document.getElementById('discoverManualRowSlot');
+            const artist = input?.value.trim();
+            if (!artist || !slot) return;
+
+            btn.disabled = true;
+            const row = discoverCreateRow(`Because you asked about ${artist}`);
+            slot.innerHTML = '';
+            slot.appendChild(row);
+            row.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            try {
+                await discoverLoadSimilarInto(row, artist);
+            } finally {
+                btn.disabled = false;
+            }
+        }
+
+        // The fun bit: click an artist's name and their own similar artists
+        // land in a new row at the bottom, with a breadcrumb trail so nobody
+        // gets lost down there.
+        function discoverRabbitHole(artist) {
+            const container = document.getElementById('discoverRowsContainer');
+            if (!container) return;
+
+            _discoverBreadcrumb.push(artist);
+            renderDiscoverBreadcrumb();
+
+            const row = discoverCreateRow(`Because you liked the look of ${artist}`, { rabbitHole: true });
+            container.appendChild(row);
+            row.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            discoverLoadSimilarInto(row, artist);
+        }
+
+        function renderDiscoverBreadcrumb() {
+            const bc = document.getElementById('discoverBreadcrumb');
+            if (!bc) return;
+            if (!_discoverBreadcrumb.length) {
+                bc.style.display = 'none';
+                bc.innerHTML = '';
+                return;
+            }
+            bc.style.display = 'flex';
+            bc.innerHTML = `
+                <span class="discover-breadcrumb-label">Down the rabbit hole:</span>
+                ${_discoverBreadcrumb.map((name, i) => `<button type="button" class="discover-breadcrumb-item" data-depth="${i}">${escapeHtml(name)}</button>`).join('<span class="discover-breadcrumb-sep">/</span>')}
+                <button type="button" class="btn btn-ghost btn-sm discover-breadcrumb-exit" id="discoverExitHoleBtn">Climb out</button>
+            `;
+            bc.querySelectorAll('.discover-breadcrumb-item').forEach(item => {
+                item.addEventListener('click', () => discoverTrimTrail(parseInt(item.dataset.depth, 10)));
+            });
+            document.getElementById('discoverExitHoleBtn')?.addEventListener('click', () => discoverTrimTrail(-1));
+        }
+
+        // Trims the rabbit-hole rows (and breadcrumb) back to `depth`; -1 climbs
+        // all the way out. Rabbit-hole rows are always appended in the same
+        // order as the breadcrumb, so index-matching the two is safe.
+        function discoverTrimTrail(depth) {
+            const container = document.getElementById('discoverRowsContainer');
+            if (!container) return;
+            const rabbitRows = container.querySelectorAll('.discover-row[data-rabbit-hole="1"]');
+            const keepCount = depth < 0 ? 0 : depth + 1;
+            rabbitRows.forEach((row, i) => {
+                if (i >= keepCount) row.remove();
+            });
+            _discoverBreadcrumb = _discoverBreadcrumb.slice(0, keepCount);
+            renderDiscoverBreadcrumb();
+            if (keepCount > 0) {
+                rabbitRows[keepCount - 1]?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            } else {
+                document.getElementById('findNewArtistsPanel')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }
+        }
+
+        const artistsModePills = document.getElementById('artistsModePills');
+        if (artistsModePills) {
+            initPillGroup(artistsModePills);
+            artistsModePills.addEventListener('pillchange', (e) => setArtistsMode(e.detail.value));
+        }
+
+        document.getElementById('discoverSimilarBtn')?.addEventListener('click', discoverManualSearch);
+        document.getElementById('discoverSimilarInput')?.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') discoverManualSearch();
+        });
 
         // ---------------------------------------------------------------
         // Minimum-quality filter

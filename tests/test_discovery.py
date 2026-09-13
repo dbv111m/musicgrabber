@@ -11,10 +11,12 @@ ranking and de-duplication are the real thing.
 
 import os
 import sys
+from contextlib import contextmanager
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import discovery
+import db
 
 
 class _Resp:
@@ -168,8 +170,8 @@ def test_nothing_at_all_is_an_answer(monkeypatch):
 def test_similar_artists_returns_the_related_list(monkeypatch):
     _deezer(monkeypatch,
             search=[_artist("Pendulum", 371612, id=281)],
-            related=[_artist("The Qemists", 1), _artist("Camo & Krooked", 2),
-                     _artist("Sub Focus", 3)])
+            related=[_artist("The Qemists", 300, id=1), _artist("Camo & Krooked", 200, id=2),
+                     _artist("Sub Focus", 100, id=3)])
 
     assert _names(discovery.similar_artists("Pendulum")) == [
         "The Qemists", "Camo & Krooked", "Sub Focus"]
@@ -178,7 +180,7 @@ def test_similar_artists_returns_the_related_list(monkeypatch):
 def test_the_artist_you_asked_about_is_not_a_discovery(monkeypatch):
     _deezer(monkeypatch,
             search=[_artist("Orbital", 5000, id=9)],
-            related=[_artist("Orbital", 1), _artist("The Orb", 2)])
+            related=[_artist("Orbital", 200, id=9), _artist("The Orb", 100, id=10)])
 
     assert _names(discovery.similar_artists("Orbital")) == ["The Orb"]
 
@@ -210,7 +212,7 @@ def test_deezer_answering_saves_troubling_musicbrainz(monkeypatch):
 def test_duplicates_across_sources_appear_once(monkeypatch):
     _deezer(monkeypatch,
             search=[_artist("Pendulum", 371612, id=281)],
-            related=[_artist("Netsky", 1)])
+            related=[_artist("Netsky", 100)])
     monkeypatch.setattr(discovery, "_listenbrainz_related",
                         lambda name: [{"artist": "netsky", "deezer_id": None, "picture": None},
                                       {"artist": "Sub Focus", "deezer_id": None, "picture": None}])
@@ -274,8 +276,8 @@ def test_artists_already_in_the_library_are_not_offered_as_new(monkeypatch):
     """
     _deezer(monkeypatch,
             search=[_artist("Therapy?", 15418, id=1)],
-            related=[_artist("Nirvana", 1, id=2), _artist("Life of Agony", 2, id=3),
-                     _artist("Faith No More", 3, id=4), _artist("L7", 4, id=5)],
+            related=[_artist("Nirvana", 400, id=2), _artist("Life of Agony", 300, id=3),
+                     _artist("Faith No More", 200, id=4), _artist("L7", 100, id=5)],
             owned={"nirvana", "faith no more"})
 
     assert _names(discovery.similar_artists("Therapy?")) == ["Life of Agony", "L7"]
@@ -290,7 +292,7 @@ def test_an_index_that_cannot_answer_does_not_empty_the_page(monkeypatch):
     """
     _deezer(monkeypatch,
             search=[_artist("Therapy?", 15418, id=1)],
-            related=[_artist("Nirvana", 1, id=2), _artist("L7", 2, id=3)],
+            related=[_artist("Nirvana", 200, id=2), _artist("L7", 100, id=3)],
             owned=None)
 
     assert _names(discovery.similar_artists("Therapy?")) == ["Nirvana", "L7"]
@@ -299,7 +301,7 @@ def test_an_index_that_cannot_answer_does_not_empty_the_page(monkeypatch):
 def test_ownership_filtering_can_be_turned_off(monkeypatch):
     _deezer(monkeypatch,
             search=[_artist("Therapy?", 15418, id=1)],
-            related=[_artist("Nirvana", 1, id=2), _artist("L7", 2, id=3)],
+            related=[_artist("Nirvana", 200, id=2), _artist("L7", 100, id=3)],
             owned={"nirvana"})
 
     assert _names(discovery.similar_artists("Therapy?", exclude_owned=False)) == ["Nirvana", "L7"]
@@ -314,7 +316,7 @@ def test_owning_a_collaboration_counts_as_owning_the_artist(monkeypatch):
     """
     _deezer(monkeypatch,
             search=[_artist("Sub Focus", 5000, id=1)],
-            related=[_artist("Pendulum", 1, id=2), _artist("Netsky", 2, id=3)],
+            related=[_artist("Pendulum", 200, id=2), _artist("Netsky", 100, id=3)],
             owned={"pendulum"})     # as expanded from "Pendulum feat. Jasmine Yee"
 
     assert _names(discovery.similar_artists("Sub Focus")) == ["Netsky"]
@@ -418,3 +420,248 @@ def test_a_failing_upstream_is_not_cached_as_an_answer(monkeypatch):
     first = len(calls)
     discovery.resolve_artist("Pendulum")
     assert len(calls) > first, "a transient failure must not be remembered"
+
+
+# ---------------------------------------------------------------------------
+# Taste seeds: Navidrome, then the library, then downloads, never blended
+# ---------------------------------------------------------------------------
+
+def _settings(values):
+    """A fake get_setting that answers from a dict, falling back to the schema default.
+
+    Real get_setting also consults env vars and the DB; taste_seeds only cares
+    that it gets a string back for a given key, so this is all the tests need.
+    """
+    def fake(key, default="", user_id=None):
+        return values.get(key, default)
+    return fake
+
+
+class _FakeCursor:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def fetchall(self):
+        return self._rows
+
+
+class _FakeConn:
+    """Stands in for a sqlite3 connection; every query gets the same canned rows.
+
+    Fine here because each test only ever runs one query through a given fake
+    connection: the library-artist tally or the jobs-artist tally, never both.
+    """
+    def __init__(self, rows):
+        self._rows = rows
+
+    def execute(self, query, params=None):
+        return _FakeCursor(self._rows)
+
+
+def _fake_index_conn(rows):
+    @contextmanager
+    def _ctx(*, read_only=False):
+        yield _FakeConn(rows)
+    return _ctx
+
+
+def _fake_db_conn(rows):
+    @contextmanager
+    def _ctx():
+        yield _FakeConn(rows)
+    return _ctx
+
+
+def _broken_index_conn(*, read_only=False):
+    raise RuntimeError("no library index in this test")
+
+
+def _broken_db_conn():
+    raise RuntimeError("no database in this test")
+
+
+def test_navidrome_seeds_win_when_available(monkeypatch):
+    """Navidrome, when configured at all, beats the library and downloads outright.
+
+    Play counts are the cleanest weighted signal on offer (see
+    docs/music-discovery-research.md section 9), so it goes first and, if it
+    answers, nothing else gets a look-in.
+    """
+    monkeypatch.setattr(discovery, "get_setting", _settings({
+        "navidrome_url": "http://nav.example",
+        "navidrome_user": "karl",
+        "navidrome_pass": "hunter2",
+    }))
+    payload = {
+        "subsonic-response": {
+            "status": "ok",
+            "albumList2": {"album": [
+                {"artist": "Pendulum", "playCount": 12},
+                {"artist": "Pendulum", "playCount": 3},
+                {"artist": "Various Artists", "playCount": 999},
+                {"artist": "Chase & Status", "playCount": 5},
+            ]},
+        }
+    }
+    monkeypatch.setattr(discovery.httpx, "get", lambda *a, **k: _Resp(payload))
+
+    seeds, signal = discovery.taste_seeds()
+
+    assert signal == "navidrome"
+    assert seeds[0] == {
+        "artist": "Pendulum",
+        "reason": "Because you listen to Pendulum",
+        "weight": 15,
+    }
+    assert all(s["artist"] != "Various Artists" for s in seeds)
+
+
+def test_falls_back_to_the_library_when_navidrome_is_not_configured(monkeypatch):
+    monkeypatch.setattr(discovery, "get_setting", _settings({}))
+    rows = [("Metallica", 200), ("Various Artists", 999), ("Green Day", 150)]
+    monkeypatch.setattr(discovery.library_index, "index_conn", _fake_index_conn(rows))
+
+    seeds, signal = discovery.taste_seeds()
+
+    assert signal == "library"
+    assert seeds[0] == {
+        "artist": "Metallica",
+        "reason": "Because your library is full of Metallica",
+        "weight": 200,
+    }
+    assert all(s["artist"] != "Various Artists" for s in seeds)
+
+
+def test_falls_back_to_downloads_when_neither_navidrome_nor_the_library_answer(monkeypatch):
+    """The weakest signal, but a real one. On a real box `jawed`, a YouTube test
+    video, topped this list, which is exactly why it is tried last."""
+    monkeypatch.setattr(discovery, "get_setting", _settings({}))
+    monkeypatch.setattr(discovery.library_index, "index_conn", _broken_index_conn)
+    rows = [("jawed", 1078), ("Various Artists", 40), ("Test Artist", 12)]
+    monkeypatch.setattr(db, "db_conn", _fake_db_conn(rows))
+
+    seeds, signal = discovery.taste_seeds()
+
+    assert signal == "downloads"
+    assert seeds[0] == {
+        "artist": "jawed",
+        "reason": "Because you downloaded jawed",
+        "weight": 1078,
+    }
+    assert all(s["artist"] != "Various Artists" for s in seeds)
+
+
+def test_a_navidrome_error_falls_through_to_the_library_rather_than_giving_up(monkeypatch):
+    """Rule 5 again: a dead Navidrome must not sink the library seed too."""
+    monkeypatch.setattr(discovery, "get_setting", _settings({
+        "navidrome_url": "http://nav.example",
+        "navidrome_user": "karl",
+        "navidrome_pass": "hunter2",
+    }))
+
+    def exploding_get(*a, **k):
+        raise RuntimeError("Navidrome is having a day")
+
+    monkeypatch.setattr(discovery.httpx, "get", exploding_get)
+    monkeypatch.setattr(discovery.library_index, "index_conn",
+                        _fake_index_conn([("Metallica", 200)]))
+
+    seeds, signal = discovery.taste_seeds()
+
+    assert signal == "library"
+    assert seeds[0]["artist"] == "Metallica"
+
+
+def test_a_totally_dead_set_of_sources_returns_the_none_signal(monkeypatch):
+    monkeypatch.setattr(discovery, "get_setting", _settings({}))
+    monkeypatch.setattr(discovery.library_index, "index_conn", _broken_index_conn)
+    monkeypatch.setattr(db, "db_conn", _broken_db_conn)
+
+    assert discovery.taste_seeds() == ([], "none")
+
+
+# ---------------------------------------------------------------------------
+# Discovery rows: one row of suggestions per seed
+# ---------------------------------------------------------------------------
+
+def test_discovery_rows_skips_a_seed_whose_suggestions_are_all_filtered_out(monkeypatch):
+    """A seed `similar_artists` had nothing new to offer for should not become
+    an empty row; it should simply not appear."""
+    monkeypatch.setattr(discovery, "taste_seeds", lambda user_id=None, limit=12: (
+        [
+            {"artist": "Fully Owned Artist", "reason": "Because you listen to Fully Owned Artist", "weight": 10},
+            {"artist": "Pendulum", "reason": "Because you listen to Pendulum", "weight": 5},
+        ],
+        "navidrome",
+    ))
+
+    def fake_similar(name, limit=25, *, user_id=None, exclude_owned=True):
+        if name == "Fully Owned Artist":
+            return []          # everything on offer was already in the library
+        return [{"artist": "The Qemists", "deezer_id": 1, "picture": None}]
+
+    monkeypatch.setattr(discovery, "similar_artists", fake_similar)
+
+    rows, signal = discovery.discovery_rows(limit=5)
+
+    assert signal == "navidrome"
+    assert [r["seed"] for r in rows] == ["Pendulum"]
+    assert rows[0]["reason"] == "Because you listen to Pendulum"
+    assert rows[0]["artists"] == [{"artist": "The Qemists", "deezer_id": 1, "picture": None}]
+
+
+def test_discovery_rows_honours_the_limit(monkeypatch):
+    """Eight seeds all answer; only three rows should come back."""
+    seeds = [
+        {"artist": f"Artist {i}", "reason": f"Because you listen to Artist {i}", "weight": 10 - i}
+        for i in range(8)
+    ]
+    monkeypatch.setattr(discovery, "taste_seeds", lambda user_id=None, limit=12: (seeds, "navidrome"))
+    monkeypatch.setattr(
+        discovery, "similar_artists",
+        lambda name, limit=25, *, user_id=None, exclude_owned=True:
+            [{"artist": f"{name} fan", "deezer_id": 1, "picture": None}],
+    )
+
+    rows, signal = discovery.discovery_rows(limit=3)
+
+    assert signal == "navidrome"
+    assert len(rows) == 3
+
+
+def test_the_rows_report_where_their_seeds_came_from(monkeypatch):
+    """The empty-page message depends on knowing this.
+
+    "You have not listened to anything yet" and "we found nothing new for you"
+    are different problems with different answers, and the caller cannot tell
+    them apart from an empty list alone. Returning the signal alongside the rows
+    also stops the route picking seeds twice, which meant two trips to Navidrome
+    or the database for an answer it already had.
+    """
+    monkeypatch.setattr(discovery, "taste_seeds",
+                        lambda user_id=None, limit=12: ([], "none"))
+
+    rows, signal = discovery.discovery_rows()
+
+    assert rows == []
+    assert signal == "none"
+
+
+def test_a_row_leads_with_the_artists_people_have_heard_of(monkeypatch):
+    """Deezer's own order is neither similarity nor popularity.
+
+    Asking it about Shaboozey really does return Gareth (971 fans) ahead of
+    Jelly Roll (227,785), and Gareth's biggest track is a cover of somebody
+    else's song off an album called "Covers (From Across The Pond)". A row is a
+    shelf you scroll along, so whoever is on the far left decides whether anyone
+    trusts the rest of it. The obscure ones are kept, just further along.
+    """
+    _deezer(monkeypatch,
+            search=[_artist("Shaboozey", 50000, id=1)],
+            related=[_artist("Gareth", 971, id=2),
+                     _artist("Warren Zeiders", 32372, id=3),
+                     _artist("Jelly Roll", 227785, id=4),
+                     _artist("Josh Ross", 406, id=5)])
+
+    assert _names(discovery.similar_artists("Shaboozey")) == [
+        "Jelly Roll", "Warren Zeiders", "Gareth", "Josh Ross"]
