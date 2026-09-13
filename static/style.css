@@ -5677,11 +5677,41 @@ h1 {
     animation: tabFadeUp 0.25s ease both;
 }
 
+.discover-row-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    margin: 0 0 10px;
+}
+
 .discover-row-heading {
     font-size: 14px;
     font-weight: 600;
     color: var(--text-primary);
-    margin: 0 0 10px;
+    margin: 0;
+}
+
+/* Hangs back until you hover the row, so five of them don't shout at once. */
+.discover-row-grab-btn {
+    flex-shrink: 0;
+    opacity: 0.45;
+    transition: opacity 0.2s;
+}
+
+.discover-row:hover .discover-row-grab-btn,
+.discover-row-grab-btn:focus-visible {
+    opacity: 1;
+}
+
+.discover-row-grab-btn:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+}
+
+/* No hover on a phone, so a permanently half-faded button would just look broken. */
+@media (hover: none) {
+    .discover-row-grab-btn { opacity: 1; }
 }
 
 .discover-row-empty {

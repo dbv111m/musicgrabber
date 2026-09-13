@@ -2347,6 +2347,15 @@
             if (!artist) return;
             stopPreview();
 
+            // The search that put these results on screen may still be streaming
+            // (Soulseek takes its sweet time), and its later source events would
+            // cheerfully re-render the original query straight over the top of
+            // our similar-artist results. Bumping the token retires it exactly
+            // as starting a new search would: the stream, its per-source retries
+            // and the artwork fetches all check this before touching the DOM.
+            const runToken = ++currentSearchToken;
+            hideSearchProgress();
+
             // Stash current results so "Back" can restore them
             _exploreOriginalResults = lastResults ? [...lastResults] : [];
 
@@ -2378,6 +2387,7 @@
                     lastError = e;
                 }
             }
+            if (runToken !== currentSearchToken) return;  // user moved on
             if (lastError) {
                 resultsTab.innerHTML = `<div class="empty-state"><p>Could not load similar artists: ${escapeHtml(lastError.message)}</p></div>`;
                 return;
@@ -2414,6 +2424,7 @@
             for (let i = 0; i < tracks.length; i += 5) {
                 const batch = tracks.slice(i, i + 5);
                 const batchResults = await Promise.all(batch.map(searchOne));
+                if (runToken !== currentSearchToken) return;  // a new search (or explore) owns the pane now
                 batchResults.forEach(r => {
                     if (r) {
                         exploreResults.push(r);
@@ -2644,7 +2655,7 @@
                 }
                 container.innerHTML = '';
                 rows.forEach(row => {
-                    const rowEl = discoverCreateRow(row.reason || `Because you listen to ${row.seed}`);
+                    const rowEl = discoverCreateRow(row.reason || `Because you listen to ${row.seed}`, { seed: row.seed });
                     container.appendChild(rowEl);
                     discoverFillRow(rowEl, row.artists || []);
                 });
@@ -2668,18 +2679,27 @@
             const row = document.createElement('div');
             row.className = 'discover-row';
             if (opts.rabbitHole) row.dataset.rabbitHole = '1';
+            if (opts.seed) row.dataset.seed = opts.seed;
             row.innerHTML = `
-                <h3 class="discover-row-heading">${escapeHtml(heading)}</h3>
+                <div class="discover-row-header">
+                    <h3 class="discover-row-heading">${escapeHtml(heading)}</h3>
+                    <button type="button" class="btn btn-sm discover-row-grab-btn" disabled
+                            title="Queue every artist in this row as one playlist">Grab the lot</button>
+                </div>
                 <div class="discover-row-body"><div class="loading"><div class="spinner"></div></div></div>
             `;
+            row.querySelector('.discover-row-grab-btn')
+               .addEventListener('click', () => discoverRowGrabAll(row));
             return row;
         }
 
         function discoverFillRow(row, artists) {
             const body = row.querySelector('.discover-row-body');
+            const grabBtn = row.querySelector('.discover-row-grab-btn');
             if (!body) return;
             if (!artists || !artists.length) {
                 body.innerHTML = '<p class="discover-row-empty">Nothing came back for this one, dead end in the tunnel.</p>';
+                if (grabBtn) grabBtn.remove();  // nothing to grab, so stop advertising it
                 return;
             }
             const scroll = document.createElement('div');
@@ -2687,6 +2707,7 @@
             artists.forEach(a => scroll.appendChild(discoverBuildCard(a)));
             body.innerHTML = '';
             body.appendChild(scroll);
+            if (grabBtn) grabBtn.disabled = false;
         }
 
         function discoverRowError(row, message, retryFn) {
@@ -2702,6 +2723,7 @@
         function discoverBuildCard(a) {
             const wrap = document.createElement('div');
             wrap.className = 'discover-card';
+            wrap._artist = a;  // the row-wide "Grab the lot" needs these back
             wrap.innerHTML = `
                 <div class="discover-card-art">
                     <span class="discover-card-art-fallback">🎵</span>
@@ -2866,6 +2888,71 @@
             }
         }
 
+        // "Grab the lot": resolve a track for every artist in the row and hand
+        // the lot to bulk import as one playlist. The tasters are what make this
+        // worth doing; a list of bare artist names would just fetch whatever each
+        // source happened to think was their finest hour.
+        async function discoverRowGrabAll(row) {
+            const btn = row.querySelector('.discover-row-grab-btn');
+            const cards = Array.from(row.querySelectorAll('.discover-card'));
+            if (!btn || !cards.length) return;
+            const originalLabel = btn.textContent;
+            btn.disabled = true;
+            btn.textContent = 'Rounding up...';
+
+            try {
+                const lines = [];
+                // Five at a time, same as the Similar search. Deezer is free and
+                // we would quite like it to stay that way.
+                for (let i = 0; i < cards.length; i += 5) {
+                    const batch = cards.slice(i, i + 5);
+                    const resolved = await Promise.all(batch.map(async card => {
+                        const a = card._artist || {};
+                        // Already queued from its own button, or the only track we
+                        // could find is one you already own: either way, skip it.
+                        if (card.querySelector('.discover-dl-btn')?.textContent === 'Queued') return null;
+                        const data = await discoverResolveTaster(a.artist, a.deezer_id, card).catch(() => null);
+                        if (!data || !data.title || data.owned) return null;
+                        return `${a.artist} - ${data.title}`;
+                    }));
+                    resolved.forEach(line => { if (line) lines.push(line); });
+                    btn.textContent = `Rounding up... ${lines.length}`;
+                }
+
+                if (!lines.length) {
+                    btn.disabled = false;
+                    btn.textContent = originalLabel;
+                    showToast('Nothing left to grab in that row, you have the lot already', true);
+                    return;
+                }
+
+                const seed = row.dataset.seed || 'your taste';
+                const now = new Date();
+                const dateSuffix = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+                const playlistName = `Similar to ${seed} (${dateSuffix})`;
+
+                const resp = await apiFetch('/api/bulk-import-async', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        songs: lines.join('\n'),
+                        convert_audio: convertAudioCheckbox.checked,
+                        create_playlist: true,
+                        playlist_name: playlistName,
+                        use_playlists_dir: true
+                    })
+                });
+                if (!resp.ok) throw new Error('Bulk import failed');
+
+                btn.textContent = `Queued ${lines.length}`;
+                showToast(`Queued ${lines.length} track${lines.length === 1 ? '' : 's'} as "${playlistName}"`);
+            } catch (e) {
+                btn.disabled = false;
+                btn.textContent = originalLabel;
+                showToast(`Could not queue that row: ${e.message}`, true);
+            }
+        }
+
         // Fetches similar artists for one name and drops them into an existing
         // row shell. Used by the manual "recommend based on" box, the rabbit
         // hole, and both of their retry buttons.
@@ -2895,7 +2982,7 @@
             if (!artist || !slot) return;
 
             btn.disabled = true;
-            const row = discoverCreateRow(`Because you asked about ${artist}`);
+            const row = discoverCreateRow(`Because you asked about ${artist}`, { seed: artist });
             slot.innerHTML = '';
             slot.appendChild(row);
             row.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -2916,7 +3003,7 @@
             _discoverBreadcrumb.push(artist);
             renderDiscoverBreadcrumb();
 
-            const row = discoverCreateRow(`Because you liked the look of ${artist}`, { rabbitHole: true });
+            const row = discoverCreateRow(`Because you liked the look of ${artist}`, { rabbitHole: true, seed: artist });
             container.appendChild(row);
             row.scrollIntoView({ behavior: 'smooth', block: 'start' });
             discoverLoadSimilarInto(row, artist);

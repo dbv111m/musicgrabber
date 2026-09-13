@@ -16,6 +16,7 @@ const RELEASE_NOTES = {
                     "The Artists tab now has two halves: the artists you follow, and a new place to go and find some. It works out what you actually listen to, finds artists like them, quietly bins everyone you already own, and lays the rest out in rows that tell you why each one is there. Every suggestion has a thirty-second preview, so you can hear them before you decide, and a Grab it button that downloads them exactly like anything else.",
                     "Click an artist\u2019s name and you get their lookalikes as a new row, then theirs, and so on for as long as you like. There is a breadcrumb to climb back out when you surface. Consider the evening gone.",
                     "There is also a \u201crecommend based on\u201d box, for when you already have a specific lead you fancy chasing.",
+                    "Found a whole row you like the look of? \u201cGrab the lot\u201d takes the entire row in one go and saves it as a playlist named after whatever inspired it. It picks a proper track for each artist, skips anything you already have, and leaves you where you were rather than marching you off to the Queue.",
                 ]
             },
             {
@@ -32,6 +33,7 @@ const RELEASE_NOTES = {
                 heading: "Housekeeping",
                 items: [
                     "Track Upgrades is the only part of MusicGrabber that deliberately replaces a file you already own, so it is now the most thoroughly tested. Nineteen new tests drive the real thing with real audio, checking that a genuine improvement goes through, that a different recording of the same song does not, and that your old file always ends up somewhere you can get it back from. Nothing you will see, everything you would rather we checked.",
+                    "Clicking \u201cSimilar\u201d while a search was still finishing used to end with the old search redrawing itself over the top of your similar artists, which looked for all the world like it had found the same track twenty times. It had not; it had been elbowed out of the way. It no longer is.",
                     "Amazon playlist importing used to read the page and also listen in on everything the Amazon app said to its servers, just in case. It turns out the page had it covered all along, so the eavesdropping has been shown the door. Same playlists, same running order, rather less lurking.",
                 ]
             },
