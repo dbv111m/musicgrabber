@@ -5422,8 +5422,15 @@
                     `).join('')}
                 </div>` : '';
 
-            bulkImportJobsContainer.innerHTML = pendingHtml + '<div id="bulkImportJobCards"></div>';
-            renderJobs(jobsInOrder, document.getElementById('bulkImportJobCards'));
+            // Skip handing an empty array to renderJobs here: its empty state is
+            // sized for a whole quiet Queue tab, not a gap under a live pending
+            // list, and every track starts with no job_id anyway.
+            bulkImportJobsContainer.innerHTML = jobsInOrder.length
+                ? pendingHtml + '<div id="bulkImportJobCards"></div>'
+                : pendingHtml;
+            if (jobsInOrder.length) {
+                renderJobs(jobsInOrder, document.getElementById('bulkImportJobCards'));
+            }
         }
 
         function startBulkImportPolling(importId) {
