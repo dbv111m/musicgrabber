@@ -133,6 +133,25 @@ def test_duplicate_scan_never_blocks_and_worker_is_shared(tag_cache, monkeypatch
     assert len(calls) == 1
 
 
+def test_declines_fallback_walk_while_reconciliation_owns_the_root(tag_cache, monkeypatch):
+    """The legacy tag crawl must not fight the persistent index's own walk for
+    the same disk, or a big library's first build never finishes (#93)."""
+    import library_index
+
+    calls = []
+
+    def scan(**kwargs):
+        calls.append(1)
+        return {}
+
+    monkeypatch.setattr(utils, 'build_library_tag_index', scan)
+    monkeypatch.setattr(library_index, 'reconcile_in_progress', lambda root: True)
+
+    assert utils._tagged_duplicate('Blur', 'Song 2', 'alice') is None
+    assert not calls
+    assert not utils._tag_index_running
+
+
 def test_failed_tag_scan_does_not_publish_empty_index(tag_cache, monkeypatch):
     def fail(**kwargs):
         raise OSError('NAS unavailable')

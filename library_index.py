@@ -277,6 +277,19 @@ def is_ready(root: Path | str) -> bool:
     return bool(state and state.get("last_complete_scan_at"))
 
 
+def reconcile_in_progress(root: Path | str) -> bool:
+    """True while a reconciliation walk owns this root.
+
+    A cheap in-memory check, no disk I/O, so callers can ask on every request
+    without needing a backoff of their own. Exists so the legacy full-library
+    fallback (`utils.build_library_tag_index`) can decline to start a second
+    walk that would only fight the first one for the same disk: see #93, where
+    the two starved each other badly enough that the first build never finished.
+    """
+    with _scan_state_lock:
+        return str(root) in _scans_running
+
+
 def storage_totals(directories) -> dict | None:
     """`{storage_bytes, file_count}` for these directories, or None if we cannot.
 

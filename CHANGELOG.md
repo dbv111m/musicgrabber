@@ -2,6 +2,9 @@
 
 ## v4.2.1 (DEV)
 
+### Fixed
+- **The persistent library index's first build could starve itself to death on a big library**: while a root's very first reconciliation was still running, the old full-library duplicate-check fallback would happily start its own competing walk of the same disk every time a bulk import checked a track for a match. Reported against a 34,428-file library, where the two scans fought each other over disk I/O so badly that the reconciliation never finished, `library_roots` stayed empty, and bulk imports sat at "Checking for duplicates" while the array pegged at 95-99% utilisation. The fallback now checks whether a reconciliation already owns the root before starting a second walk, and simply declines (serving whatever it already has cached) rather than piling on. Thanks to russelljennings for the diagnosis and reference fix (GitLab #93).
+
 ## v4.2.0 (2026-09-13)
 
 ### Added

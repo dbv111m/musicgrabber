@@ -102,6 +102,22 @@ def test_stale_persistent_index_answers_during_refresh(index, duplicate_library,
     assert utils._tag_index_running == {}
 
 
+def test_first_build_in_progress_declines_the_legacy_fallback_walk(index, duplicate_library, monkeypatch):
+    """Regression for #93: on a not-yet-indexed root, the legacy tag crawl used
+    to start right alongside the persistent index's own first walk, and the two
+    starved each other over disk I/O badly enough that the first build never
+    completed. While a reconciliation owns the root, the fallback must decline
+    rather than pile on."""
+    scans = []
+    monkeypatch.setattr(utils, "build_library_tag_index", lambda **kw: scans.append(1) or {})
+    assert index.reconcile_in_progress(duplicate_library) is False
+    index._scans_running.add(str(duplicate_library))
+    assert index.reconcile_in_progress(duplicate_library) is True
+    assert utils._tagged_duplicate("Fatboy Slim", "Praise You", "alice") is None
+    assert scans == []
+    assert utils._tag_index_running == {}
+
+
 @pytest.mark.parametrize("invalid", ["missing", "symlink", "outside", "excluded"])
 def test_duplicate_skips_unsafe_indexed_candidates(index, duplicate_library, tmp_path, invalid):
     first = _track(duplicate_library, "a.flac")

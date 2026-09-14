@@ -548,7 +548,7 @@ def build_library_tag_index(user_id: str | None = None) -> dict[tuple[str, str],
 
 def _tagged_duplicate(artist: str, title: str, user_id: str | None = None) -> Optional[Path]:
     """Query persistent tags first; retain the background fallback if unavailable."""
-    from library_index import find_by_tags
+    from library_index import find_by_tags, reconcile_in_progress
 
     root = str(Path(get_setting("music_dir", str(MUSIC_DIR), user_id=user_id)))
     variants = artist_credit_lookup_variants(artist) or [artist]
@@ -590,9 +590,15 @@ def _tagged_duplicate(artist: str, title: str, user_id: str | None = None) -> Op
             else:
                 failure = _tag_index_errors.get(cache_key)
                 ready = _tag_index_running.get(cache_key)
+                # The persistent index's own reconciliation already owns the disk
+                # for this root; starting our full-library crawl alongside it just
+                # makes both slower, and on a big enough library stops the first
+                # one ever finishing. Decline and serve whatever snapshot (however
+                # stale) is already cached, per #93.
                 if (
                     ready is None
                     and not (failure and now - failure < LIBRARY_SCAN_RETRY_SECONDS)
+                    and not reconcile_in_progress(root)
                 ):
                     ready = threading.Event()
                     _tag_index_running[cache_key] = ready
