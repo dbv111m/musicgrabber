@@ -78,6 +78,27 @@ def test_bulk_import_status_shape(api, base_url):
 
     assert s["total_tracks"] == 1, f"expected 1 track, got {s['total_tracks']}"
 
+
+def test_bulk_import_status_carries_every_track_with_job_id(api, base_url):
+    """The Bulk Import tab's live job list needs job_id per track to fetch the
+    real job card, and needs every track (not just a handful), or a big
+    playlist's tail end would simply be missing from the view."""
+    songs = "Radiohead - Creep\nNirvana - Come As You Are\nThe Beatles - Let It Be"
+    r = api.post(
+        f"{base_url}/api/bulk-import-async",
+        json={"songs": songs, "convert_to_flac": True},
+        timeout=15,
+    )
+    import_id = r.json()["import_id"]
+
+    s = api.get(f"{base_url}/api/bulk-import/{import_id}/status", timeout=10).json()
+    assert "recent_tracks" not in s, "recent_tracks was replaced by the full 'tracks' list"
+    tracks = s["tracks"]
+    assert len(tracks) == 3
+    for track in tracks:
+        for key in ("artist", "song", "status", "error", "job_id"):
+            assert key in track, f"track missing key: {key}"
+
 def test_bulk_import_multiline_track_count(api, base_url):
     """total_tracks should match the number of submitted lines."""
     songs = "Radiohead - Creep\nNirvana - Come As You Are\nThe Beatles - Let It Be"
@@ -108,6 +129,29 @@ def test_bulk_import_bad_format_graceful(api, base_url):
 def test_bulk_import_status_404_unknown_id(api, base_url):
     r = api.get(f"{base_url}/api/bulk-import/doesnotexist/status", timeout=10)
     assert r.status_code == 404
+
+
+def test_jobs_filtered_by_import_id_scopes_to_that_import(api, base_url):
+    """GET /api/jobs?import_id=... is what the Bulk Import tab uses to draw the
+    exact same job cards the Queue tab does. Freshly submitted tracks haven't
+    reached a job yet, so this should come back empty rather than erroring,
+    and it must never bleed in jobs from someone else's import."""
+    r = api.post(
+        f"{base_url}/api/bulk-import-async",
+        json={"songs": "Test Artist - Test Song", "convert_to_flac": True},
+        timeout=15,
+    )
+    import_id = r.json()["import_id"]
+
+    jobs_resp = api.get(f"{base_url}/api/jobs?import_id={import_id}", timeout=10)
+    assert jobs_resp.status_code == 200
+    body = jobs_resp.json()
+    assert "jobs" in body
+    assert isinstance(body["jobs"], list)
+
+    other = api.get(f"{base_url}/api/jobs?import_id=doesnotexist", timeout=10)
+    assert other.status_code == 200
+    assert other.json()["jobs"] == []
 
 
 @pytest.mark.slow

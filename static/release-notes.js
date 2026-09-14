@@ -17,6 +17,13 @@ const RELEASE_NOTES = {
                 ]
             },
             {
+                heading: "Bulk Import grew a proper progress list",
+                items: [
+                    "Each track in a bulk import now gets its own row as it works through the list, and once a track actually has a download behind it, that row is the very same card you see in the Queue tab, so Retry, Re-download, Report and Edit Tags all just work from right there. No more digging through the Queue tab to sort out one stubborn track from a big playlist.",
+                    "And it no longer loses the plot if you wander off: reload the page, or come back an hour later, and a still-running import picks up exactly where it left off instead of the tab pretending nothing is happening. Suggested by dodonut on GitLab.",
+                ]
+            },
+            {
                 heading: "Fixed",
                 items: [
                     "Fixed a nasty case for anyone with a very large library: the first-ever build of the library index could get stuck fighting itself over disk access and never finish, leaving bulk imports stuck on “Checking for duplicates”. It now politely waits its turn instead. Thanks to a sharp-eyed user who spotted this on a 34,000+ file library and told us exactly where to look.",

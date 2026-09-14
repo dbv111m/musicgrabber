@@ -1008,6 +1008,8 @@ The app will:
 - Offer **Cancel**, which lets up to two active files finish and cancels everything untouched without deleting Queue rows
 - Optionally create a playlist and route files into Playlists or a custom watched-playlist folder
 
+Each track gets its own row as the import works through the list. Once a track has an actual download behind it, its row becomes the exact same job card the Queue tab shows, complete with Retry, Re-download, Report and Edit Tags, so a stubborn track can be sorted out without leaving the tab. A track still being searched shows a simple placeholder row until it reaches that point. Reloading the page or coming back later reconnects to a still-running import automatically rather than losing track of it.
+
 Supports various dash formats: `-`, `–`, `--`
 
 ### Queue Management
@@ -1250,7 +1252,7 @@ music.yourdomain.com {
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `POST` | `/api/download` | Queue download (`{"video_id": "...", "title": "...", "source": "youtube/soundcloud/mp3phoenix/zvu4no/freemp3cloud/monochrome/soulseek", "download_type": "single/playlist"}`). The Tracks UI also returns its valid `search_token` and numeric `selected_duration_secs`; together they enable manual-result completeness checking |
-| `GET` | `/api/jobs` | List recent jobs, including metadata provenance plus persistent acquisition cycle/attempt summaries and the latest 20 attempt records for linked tracks |
+| `GET` | `/api/jobs` | List recent jobs, including metadata provenance plus persistent acquisition cycle/attempt summaries and the latest 20 attempt records for linked tracks. `?import_id=...` instead returns every job belonging to one bulk import, in input order and unlimited, for the Bulk Import tab's live progress list |
 | `GET` | `/api/jobs/downloadable` | Paginated list of completed jobs available to save to device (`?page=1&per_page=50`) |
 | `GET` | `/api/jobs/{id}` | Get job status, metadata/source provenance, and persistent acquisition attempt history |
 | `GET` | `/api/jobs/{id}/download` | Download the audio file to browser (completed jobs only; use bearer auth, a short-lived `download_token`, or `X-API-Key`) |

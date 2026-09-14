@@ -429,6 +429,7 @@
         const bulkInput = document.getElementById('bulkInput');
         const bulkImportBtn = document.getElementById('bulkImportBtn');
         const bulkResults = document.getElementById('bulkResults');
+        const bulkImportJobsContainer = document.getElementById('bulkImportJobsContainer');
         const fileUpload = document.getElementById('fileUpload');
         const fileName = document.getElementById('fileName');
         const spotifyUrlInput = document.getElementById('spotifyUrlInput');
@@ -1105,6 +1106,7 @@
             populateSourceChips();
             startSourceHealthPolling();
             if (config) loadPlaylists();
+            reattachBulkImportIfActive();
           } finally {
             dismissBootPanel();
           }
@@ -4006,10 +4008,10 @@
             renderQueuePage();
         }
 
-        function renderJobs(jobs) {
+        function renderJobs(jobs, container = queueTab) {
             if (!jobs.length) {
-                expandedJobIds.clear();
-                queueTab.innerHTML = `
+                if (container === queueTab) expandedJobIds.clear();
+                container.innerHTML = `
                     <div class="empty-state">
                         <div class="empty-state-icon"><i class="fa-solid fa-inbox"></i></div>
                         <p>No downloads yet</p>
@@ -4020,11 +4022,16 @@
             }
 
             const visibleJobIds = new Set(jobs.map(j => j.id));
-            for (const id of Array.from(expandedJobIds)) {
-                if (!visibleJobIds.has(id)) expandedJobIds.delete(id);
+            if (container === queueTab) {
+                // expandedJobIds tracks the Queue tab's own card state; a render
+                // into a different container (e.g. Bulk Import) must not prune
+                // ids just because they're not part of its own smaller job set.
+                for (const id of Array.from(expandedJobIds)) {
+                    if (!visibleJobIds.has(id)) expandedJobIds.delete(id);
+                }
             }
 
-            queueTab.innerHTML = jobs.map(job => {
+            container.innerHTML = jobs.map(job => {
                 const hasDetails = job.status === 'completed' || job.status === 'completed_with_errors' || job.status === 'failed';
                 const isExpanded = hasDetails && expandedJobIds.has(job.id);
                 const sourceLabel = getSourceLabel(job.source || 'youtube');
@@ -4110,14 +4117,14 @@
                 </div>`;
             }).join('');
 
-            queueTab.querySelectorAll('.delete-file-btn').forEach((btn) => {
+            container.querySelectorAll('.delete-file-btn').forEach((btn) => {
                 btn.addEventListener('click', (event) => {
                     event.stopPropagation();
                     deleteJobFile(btn.dataset.jobId || '', btn.dataset.trackName || '');
                 });
             });
 
-            queueTab.querySelectorAll('.report-btn').forEach((btn) => {
+            container.querySelectorAll('.report-btn').forEach((btn) => {
                 btn.addEventListener('click', (event) => {
                     event.stopPropagation();
                     openReportDialog(
@@ -4129,7 +4136,7 @@
                 });
             });
 
-            queueTab.querySelectorAll('.force-accept-btn').forEach((btn) => {
+            container.querySelectorAll('.force-accept-btn').forEach((btn) => {
                 btn.addEventListener('click', async (event) => {
                     event.stopPropagation();
                     btn.disabled = true;
@@ -4150,7 +4157,7 @@
                 });
             });
 
-            queueTab.querySelectorAll('.edit-tags-btn').forEach((btn) => {
+            container.querySelectorAll('.edit-tags-btn').forEach((btn) => {
                 btn.addEventListener('click', (event) => {
                     event.stopPropagation();
                     openTagEditor({
@@ -5222,6 +5229,7 @@
 
                 const data = await response.json();
                 currentBulkImportId = data.import_id;
+                localStorage.setItem(userStorageKey('activeBulkImportId'), data.import_id);
 
                 // Clear the textarea
                 bulkInput.value = '';
@@ -5328,37 +5336,6 @@
                 </div>
             `;
 
-            // Show recent tracks
-            if (data.recent_tracks && data.recent_tracks.length > 0) {
-                html += `
-                    <div style="padding: 14px; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 12px;">
-                        <div style="font-size: 13px; font-weight: 600; margin-bottom: 8px; color: var(--text-secondary);">Recent Activity</div>
-                        ${data.recent_tracks.slice(0, 5).map(track => {
-                            let icon = '...';
-                            let color = 'var(--text-secondary)';
-                            if (track.status === 'queued') {
-                                icon = '+';
-                                color = 'var(--accent)';
-                            } else if (track.status === 'failed') {
-                                icon = 'x';
-                                color = 'var(--error)';
-                            } else if (track.status === 'cancelled') {
-                                icon = '-';
-                            } else if (track.status === 'searching') {
-                                icon = '?';
-                            }
-                            return `
-                                <div style="font-size: 12px; color: var(--text-secondary); margin-bottom: 4px; display: flex; align-items: center; gap: 8px;">
-                                    <span style="color: ${color}; width: 16px;">${icon}</span>
-                                    <span>${escapeHtml(track.artist)} - ${escapeHtml(track.song)}</span>
-                                    ${track.error ? `<span style="color: var(--error); font-size: 11px;">(${escapeHtml(track.error)})</span>` : ''}
-                                </div>
-                            `;
-                        }).join('')}
-                    </div>
-                `;
-            }
-
             // Show error if any
             if (data.error) {
                 html += `
@@ -5401,6 +5378,54 @@
             }
         }
 
+        // Draws each bulk import track as the exact same job card the Queue tab
+        // uses (same retry/report/edit-tags buttons, same click wiring), rather
+        // than a second copy of that UI. A track that hasn't reached a job yet
+        // (still being searched) has nothing for renderJobs to draw, so it gets
+        // a plain placeholder row instead; it swaps for the real card the moment
+        // a job_id shows up on the next poll.
+        async function renderBulkImportJobList(importId, tracks) {
+            if (!bulkImportJobsContainer) return;
+            if (!tracks || !tracks.length) {
+                bulkImportJobsContainer.innerHTML = '';
+                return;
+            }
+
+            let jobsById = new Map();
+            try {
+                const resp = await apiFetch(`/api/jobs?import_id=${encodeURIComponent(importId)}`);
+                if (resp.ok) {
+                    const data = await resp.json();
+                    jobsById = new Map((data.jobs || []).map(j => [String(j.id), j]));
+                }
+            } catch {
+                // Transient; the next poll tick tries the fetch again.
+            }
+
+            const pending = tracks.filter(t => !t.job_id || !jobsById.has(String(t.job_id)));
+            const jobsInOrder = tracks
+                .filter(t => t.job_id && jobsById.has(String(t.job_id)))
+                .map(t => jobsById.get(String(t.job_id)));
+
+            const pendingLabels = { pending: 'Waiting to search…', searching: 'Searching…', cancelled: 'Cancelled' };
+            const pendingHtml = pending.length ? `
+                <div class="bulk-import-pending-list">
+                    ${pending.map(track => `
+                        <div class="job-item bulk-import-pending-row">
+                            <div class="job-status ${track.status === 'failed' ? 'failed' : 'queued'}"></div>
+                            <div class="job-info">
+                                <div class="job-title">${escapeHtml(track.artist ? `${track.artist} - ${track.song}` : (track.song || ''))}</div>
+                                <div class="job-meta"><span class="job-status-label">${escapeHtml(pendingLabels[track.status] || track.status || 'Waiting…')}</span></div>
+                                ${track.error ? `<div class="job-error">${escapeHtml(track.error)}</div>` : ''}
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>` : '';
+
+            bulkImportJobsContainer.innerHTML = pendingHtml + '<div id="bulkImportJobCards"></div>';
+            renderJobs(jobsInOrder, document.getElementById('bulkImportJobCards'));
+        }
+
         function startBulkImportPolling(importId) {
             // Clear any existing polling
             if (bulkImportPollInterval) {
@@ -5417,18 +5442,49 @@
 
                     const data = await response.json();
                     showBulkImportProgress(data);
+                    renderBulkImportJobList(importId, data.tracks);
 
                     // Stop polling when complete
                     if (data.complete) {
                         clearInterval(bulkImportPollInterval);
                         bulkImportPollInterval = null;
                         currentBulkImportId = null;
+                        localStorage.removeItem(userStorageKey('activeBulkImportId'));
                     }
                 } catch (error) {
                     console.error('Polling error:', error);
                     // Keep polling, might be a transient error
                 }
             }, 2000);
+        }
+
+        // A reload used to lose track of an import that was still running in
+        // the background entirely: the download carried on fine, the UI just
+        // forgot it was ever watching anything. currentBulkImportId now has a
+        // localStorage backup, so this picks the thread back up on load if
+        // there's one to find, rather than leaving it to be discovered by
+        // accident in the Queue tab.
+        async function reattachBulkImportIfActive() {
+            const storedId = localStorage.getItem(userStorageKey('activeBulkImportId'));
+            if (!storedId) return;
+            try {
+                const response = await apiFetch(`/api/bulk-import/${storedId}/status`);
+                if (!response.ok) {
+                    localStorage.removeItem(userStorageKey('activeBulkImportId'));
+                    return;
+                }
+                const data = await response.json();
+                if (data.complete) {
+                    localStorage.removeItem(userStorageKey('activeBulkImportId'));
+                    return;
+                }
+                currentBulkImportId = storedId;
+                showBulkImportProgress(data);
+                renderBulkImportJobList(storedId, data.tracks);
+                startBulkImportPolling(storedId);
+            } catch {
+                // Transient; leave the stored id alone and try again next load.
+            }
         }
 
         // =============================================================

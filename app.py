@@ -2671,18 +2671,34 @@ def _attach_acquisition_summaries(conn, jobs: list[dict]) -> None:
 
 
 @app.get("/api/jobs")
-def get_jobs(limit: int = 20, http_request: Request = None):
-    """Get recent jobs"""
+def get_jobs(limit: int = 20, import_id: str | None = None, http_request: Request = None):
+    """Get recent jobs.
+
+    import_id scopes the result to one bulk import's tracks instead of the
+    general recent list, ordered to match the original input rather than
+    creation time, and without the usual limit truncating a big playlist.
+    Lets the Bulk Import tab draw its progress with the exact same job cards
+    (and retry buttons) as the Queue tab, rather than a second copy of them.
+    """
     from pathlib import Path as _Path
     user_id = http_request.state.user_id if http_request else None
     is_admin = http_request.state.is_admin if http_request else True
     with db_conn() as conn:
         conn.row_factory = sqlite3.Row
         _scope_frag, _scope_params = _user_scope(user_id, is_admin)
-        rows = conn.execute(
-            f"SELECT * FROM jobs WHERE {_scope_frag} ORDER BY created_at DESC LIMIT ?",
-            (*_scope_params, limit)
-        ).fetchall()
+        if import_id:
+            rows = conn.execute(
+                f"""SELECT j.* FROM jobs j
+                    JOIN bulk_import_tracks t ON t.job_id = j.id
+                    WHERE t.import_id = ? AND {_scope_frag}
+                    ORDER BY t.line_num ASC""",
+                (import_id, *_scope_params)
+            ).fetchall()
+        else:
+            rows = conn.execute(
+                f"SELECT * FROM jobs WHERE {_scope_frag} ORDER BY created_at DESC LIMIT ?",
+                (*_scope_params, limit)
+            ).fetchall()
 
         # Pre-fetch resolved_paths for all jobs in one query.
         # check_duplicate only walks Singles; playlist-folder tracks would be
@@ -4297,22 +4313,17 @@ def get_bulk_import_status(import_id: str, http_request: Request):
 
         import_row = _expose_conversion_intent(dict(import_row))
 
-        # Get recent track statuses for display
+        # Every track in input order, job_id included. The frontend uses job_id
+        # to fetch the real job cards (GET /api/jobs?import_id=...) for anything
+        # already queued, and falls back to a plain "searching" row for anything
+        # that hasn't reached a job yet.
         cursor = conn.execute(
-            """SELECT artist, song, status, error FROM bulk_import_tracks
+            """SELECT artist, song, status, error, job_id FROM bulk_import_tracks
                WHERE import_id = ?
-               ORDER BY
-                   CASE status
-                       WHEN 'queued' THEN 0
-                       WHEN 'failed' THEN 0
-                       WHEN 'searching' THEN 1
-                       ELSE 2
-                   END,
-                   line_num DESC
-               LIMIT 10""",
+               ORDER BY line_num ASC""",
             (import_id,)
         )
-        recent_tracks = [dict(row) for row in cursor.fetchall()]
+        tracks = [dict(row) for row in cursor.fetchall()]
 
         # Count download statuses by joining bulk_import_tracks with jobs.
         # dupe_skipped: completed jobs whose error field starts with "Already exists"
@@ -4354,7 +4365,7 @@ def get_bulk_import_status(import_id: str, http_request: Request):
         "dupe_skipped": dupe_skipped_count,
         "rate_limited": import_row["rate_limited_until"] is not None,
         "error": import_row["error"],
-        "recent_tracks": recent_tracks,
+        "tracks": tracks,
         "complete": all_done
     }
 
