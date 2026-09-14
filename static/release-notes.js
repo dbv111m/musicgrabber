@@ -11,6 +11,12 @@ const RELEASE_NOTES = {
         title: "What's New in v4.2.1",
         sections: [
             {
+                heading: "New setting: Convert lossless sources only",
+                items: [
+                    "If you convert downloads to Opus, MP3 or lossy ALAC, there's a new toggle next to the format picker in Settings. Switch it on and only genuinely lossless sources (FLAC, ALAC, WAV) get converted; anything that already arrived lossy (MP3, AAC, an existing Opus) is left exactly as it was, instead of being squeezed through another lossy encode for nothing. Off by default. Thanks to dynAdZ for the suggestion, and for putting the problem better than we would have.",
+                ]
+            },
+            {
                 heading: "Fixed",
                 items: [
                     "Fixed a nasty case for anyone with a very large library: the first-ever build of the library index could get stuck fighting itself over disk access and never finish, leaving bulk imports stuck on “Checking for duplicates”. It now politely waits its turn instead. Thanks to a sharp-eyed user who spotted this on a 34,000+ file library and told us exactly where to look.",

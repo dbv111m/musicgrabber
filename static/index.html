@@ -998,6 +998,16 @@
                                 </div>
                                 <span class="settings-hint settings-hint-full">Lossless gives you proper Apple Lossless. The kbps options switch the encoder to AAC inside the same .m4a wrapper, so they are lossy but iPod-friendly.</span>
                             </div>
+                            <div id="convertLosslessOnlyRow" style="display:none;margin-top:6px;">
+                                <label class="settings-label settings-label-wrap" style="margin:0;">
+                                    <span>Convert lossless sources only</span>
+                                    <div class="toggle-switch">
+                                        <input type="checkbox" id="settingConvertLosslessOnly" onchange="saveSettings();">
+                                        <span class="toggle-slider"></span>
+                                    </div>
+                                    <span class="settings-hint settings-hint-full">Only re-encodes FLAC, ALAC and WAV sources. A source that's already lossy (MP3, AAC, an existing Opus...) is kept exactly as delivered instead of being hopped into another lossy format for no quality gain.</span>
+                                </label>
+                            </div>
                         </div>
                         <span class="settings-hint settings-hint-full"><strong>Keep source</strong> stores the audio in the format supplied by the provider and avoids an unnecessary re-encode. <strong>Convert to</strong> re-encodes each download to your selected format.</span>
                         <span class="settings-hint settings-hint-full"><strong>Quality note:</strong> FLAC and ALAC can preserve a lossless source, but converting lossy MP3, AAC, Opus, YouTube, or SoundCloud audio to them cannot restore lost quality.</span>

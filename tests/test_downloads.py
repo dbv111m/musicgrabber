@@ -1743,3 +1743,129 @@ def test_per_user_cookie_file_is_actually_reached(tmp_path, monkeypatch):
         use_cookies=True, user_id="bob",
     )
     assert str(everyones) in cmd, "bob has none of his own, so the global file"
+
+
+# ---------------------------------------------------------------------------
+# "Convert lossless sources only" (GitLab #92): a lossy source with a lossy
+# target should be left alone rather than hopped into a different lossy codec.
+# ---------------------------------------------------------------------------
+
+def _settings_lookup(monkeypatch, downloads, values):
+    """Point downloads.get_setting/get_setting_bool at a plain dict, default-aware."""
+    monkeypatch.setattr(downloads, "get_setting", lambda key, default="", **kw: values.get(key, default))
+    monkeypatch.setattr(downloads, "get_setting_bool", lambda key, default=False, **kw: values.get(key, default))
+
+
+def test_target_format_is_lossy_classifies_each_format(monkeypatch):
+    downloads = _import_downloads_or_skip()
+    _settings_lookup(monkeypatch, downloads, {"alac_bitrate": "lossless"})
+
+    assert downloads._target_format_is_lossy("mp3") is True
+    assert downloads._target_format_is_lossy("opus") is True
+    assert downloads._target_format_is_lossy("flac") is False
+    assert downloads._target_format_is_lossy("alac") is False  # true ALAC is lossless
+
+
+def test_target_format_is_lossy_for_aac_in_m4a_alac(monkeypatch):
+    downloads = _import_downloads_or_skip()
+    _settings_lookup(monkeypatch, downloads, {"alac_bitrate": "256k"})
+    assert downloads._target_format_is_lossy("alac") is True
+
+
+def test_skip_lossy_to_lossy_only_when_setting_target_and_source_all_agree(monkeypatch):
+    downloads = _import_downloads_or_skip()
+
+    # Setting off: never declines, whatever the codecs are.
+    _settings_lookup(monkeypatch, downloads, {"convert_lossless_only": False, "alac_bitrate": "lossless"})
+    assert downloads._skip_lossy_to_lossy("MP3", "opus") is False
+
+    # Setting on, but the target is lossless: nothing for it to skip.
+    _settings_lookup(monkeypatch, downloads, {"convert_lossless_only": True, "alac_bitrate": "lossless"})
+    assert downloads._skip_lossy_to_lossy("MP3", "flac") is False
+
+    # Setting on, lossy target, lossless source: still a normal conversion.
+    assert downloads._skip_lossy_to_lossy("FLAC", "opus") is False
+    assert downloads._skip_lossy_to_lossy("ALAC", "mp3") is False
+
+    # Setting on, lossy target, lossy source: exactly the hop it exists to skip.
+    assert downloads._skip_lossy_to_lossy("MP3", "opus") is True
+    assert downloads._skip_lossy_to_lossy("AAC", "mp3") is True
+
+    # Unknown source codec: don't guess either way.
+    assert downloads._skip_lossy_to_lossy(None, "opus") is False
+
+
+def test_ytdlp_cmd_skips_audio_format_for_a_lossy_source_when_setting_on(monkeypatch):
+    downloads = _import_downloads_or_skip()
+    _settings_lookup(monkeypatch, downloads, {
+        "audio_format": "opus", "convert_lossless_only": True, "alac_bitrate": "lossless",
+    })
+
+    cmd = downloads._build_ytdlp_download_cmd(
+        "abc", "/tmp/o.%(ext)s", True, use_cookies=False, source_codec="MP3",
+    )
+    assert "--audio-format" not in cmd
+    assert "-x" in cmd  # still extracts the audio track, just keeps its codec
+
+
+def test_ytdlp_cmd_still_converts_a_lossless_source_with_the_setting_on(monkeypatch):
+    downloads = _import_downloads_or_skip()
+    _settings_lookup(monkeypatch, downloads, {
+        "audio_format": "opus", "convert_lossless_only": True, "alac_bitrate": "lossless",
+    })
+
+    cmd = downloads._build_ytdlp_download_cmd(
+        "abc", "/tmp/o.%(ext)s", True, use_cookies=False, source_codec="FLAC",
+    )
+    assert "--audio-format" in cmd
+    assert "opus" in cmd
+
+
+def test_ytdlp_cmd_converts_a_lossy_source_when_the_setting_is_off(monkeypatch):
+    downloads = _import_downloads_or_skip()
+    _settings_lookup(monkeypatch, downloads, {
+        "audio_format": "opus", "convert_lossless_only": False, "alac_bitrate": "lossless",
+    })
+
+    cmd = downloads._build_ytdlp_download_cmd(
+        "abc", "/tmp/o.%(ext)s", True, use_cookies=False, source_codec="MP3",
+    )
+    assert "--audio-format" in cmd
+
+
+def test_enforce_target_format_declines_a_lossy_to_lossy_hop(tmp_path, monkeypatch):
+    downloads = _import_downloads_or_skip()
+    _settings_lookup(monkeypatch, downloads, {
+        "audio_format": "opus", "convert_lossless_only": True, "alac_bitrate": "lossless",
+    })
+    monkeypatch.setattr(downloads, "probe_audio_quality", lambda path, **kw: ("MP3 128kbps", 128))
+
+    def _no_conversion_allowed(*a, **kw):
+        raise AssertionError("ffmpeg should never be invoked for a declined conversion")
+    monkeypatch.setattr(downloads.subprocess, "run", _no_conversion_allowed)
+
+    audio_file = tmp_path / "track.mp3"
+    audio_file.write_bytes(b"not really mp3, just needs to exist")
+
+    result = downloads._enforce_target_format(audio_file, True)
+    assert result == audio_file
+    assert audio_file.exists()
+
+
+def test_enforce_target_format_still_converts_a_lossless_source(tmp_path, monkeypatch):
+    downloads = _import_downloads_or_skip()
+    _settings_lookup(monkeypatch, downloads, {
+        "audio_format": "mp3", "convert_lossless_only": True, "mp3_bitrate": "v2",
+    })
+    monkeypatch.setattr(downloads, "probe_audio_quality", lambda path, **kw: ("FLAC", 0))
+
+    def _fake_run(cmd, **kw):
+        pathlib.Path(cmd[-1]).write_bytes(b"converted")
+        return type("R", (), {"returncode": 0, "stderr": ""})()
+    monkeypatch.setattr(downloads.subprocess, "run", _fake_run)
+
+    audio_file = tmp_path / "track.flac"
+    audio_file.write_bytes(b"fake flac bytes")
+
+    result = downloads._enforce_target_format(audio_file, True)
+    assert result.suffix == ".mp3"

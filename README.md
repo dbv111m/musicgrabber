@@ -85,6 +85,8 @@ MusicGrabber keeps the provider's source format by default. This avoids unnecess
 
 If you prefer a uniform library, choose **Convert to** and select FLAC, ALAC, Opus, or MP3. Opus, MP3, and the bitrate-limited AAC-in-M4A choices are lossy; when one is selected the Settings screen warns that converting a lossless source will permanently discard quality. FLAC and true ALAC preserve genuinely lossless input, but converting YouTube, SoundCloud, MP3, AAC, or Opus audio to a lossless container cannot restore information that has already gone missing. Monochrome and Soulseek may provide native lossless files; MusicGrabber records the known source and stored formats separately so the distinction survives the trip into your library.
 
+When the chosen target format is itself lossy, the **Convert lossless sources only** toggle (`CONVERT_LOSSLESS_ONLY`) skips the re-encode for a source that was already lossy: an MP3 or AAC file, or a track already delivered as Opus, is kept exactly as downloaded rather than being hopped into a different lossy codec for no quality gain. Only genuinely lossless sources (FLAC, ALAC, WAV) are converted. Off by default, and irrelevant when the target format is FLAC or true ALAC, since those never had anything to skip.
+
 ## Library scans and slow network shares
 
 The playlist destination selector and Stats storage totals refresh in the background.
@@ -482,6 +484,7 @@ Settings are stored in the database and persist across container restarts.
 | `MP3_BITRATE` | `v2` | MP3 quality preset: `v2`, `v0`, `320k`, `256k`, `192k`, or `128k` |
 | `OPUS_BITRATE` | `256k` | Opus bitrate: `256k`, `192k`, `128k`, or `96k` |
 | `ALAC_BITRATE` | `lossless` | ALAC/M4A quality: `lossless` for true ALAC, or `320k`, `256k`, `192k`, `128k` for AAC-in-M4A |
+| `CONVERT_LOSSLESS_ONLY` | `false` | When conversion is enabled and the target format is lossy (Opus, MP3, or AAC-in-M4A ALAC), only re-encode lossless sources (FLAC/ALAC/WAV). A source that's already lossy is kept as delivered instead of being re-encoded into a different lossy format |
 | `MIN_AUDIO_BITRATE` | `0` | Minimum audio bitrate in kbps. Downloads below this are rejected. 0 = disabled. Lossless (FLAC) always passes |
 | `REJECT_LIVE_VERSIONS` | `false` | Reject a confidently identified live recording when the query did not request one |
 | `NORMALISE_LOSSY_AUDIO` | `false` | Apply two-pass EBU R128 loudness normalisation to lossy web sources; lossless sources are untouched |

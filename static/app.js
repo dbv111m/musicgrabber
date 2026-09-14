@@ -874,6 +874,14 @@
                 warning.style.display = conversionEnabled && conversionTargetIsLossy() ? 'block' : 'none';
             }
 
+            // Only meaningful when there's a lossy target to potentially skip
+            // re-encoding into; a lossless target (FLAC, real ALAC) has nothing
+            // for this toggle to do.
+            const losslessOnlyRow = document.getElementById('convertLosslessOnlyRow');
+            if (losslessOnlyRow) {
+                losslessOnlyRow.style.display = conversionEnabled && conversionTargetIsLossy() ? 'block' : 'none';
+            }
+
             const headerControl = document.querySelector('.header-format-label');
             const headerWouldDowngrade = convertAudioCheckbox?.checked && conversionTargetIsLossy();
             // The label itself does the warning: amber, bold, and wearing a triangle.
@@ -10847,6 +10855,7 @@
             'mp3_bitrate': 'settingMp3Bitrate',
             'opus_bitrate': 'settingOpusBitrate',
             'alac_bitrate': 'settingAlacBitrate',
+            'convert_lossless_only': 'settingConvertLosslessOnly',
             'normalise_lossy_audio': 'settingNormaliseLossyAudio',
             'enable_replaygain': 'settingEnableReplaygain',
             'replaygain_replace_existing': 'settingReplaygainReplaceExisting',

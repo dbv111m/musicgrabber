@@ -2,6 +2,9 @@
 
 ## v4.2.1 (DEV)
 
+### Added
+- **"Convert lossless sources only"**: a new toggle next to the audio format picker, for when "Convert to" is set to a lossy format (Opus, MP3, or AAC-in-M4A ALAC). Switch it on and only genuinely lossless sources (FLAC, ALAC, WAV) get re-encoded; a source that arrived already lossy (MP3, AAC, an existing Opus) is kept exactly as delivered instead of being hopped into a different lossy format for no quality gain, and occasionally for a bigger file than it started as. Off by default, so nothing changes unless you flip it. Requested by dynAdZ on GitLab (#92), who put it rather well: converting a lossy source to a different lossy codec "cannot improve the original quality and introduces another lossy encoding generation."
+
 ### Fixed
 - **The persistent library index's first build could starve itself to death on a big library**: while a root's very first reconciliation was still running, the old full-library duplicate-check fallback would happily start its own competing walk of the same disk every time a bulk import checked a track for a match. Reported against a 34,428-file library, where the two scans fought each other over disk I/O so badly that the reconciliation never finished, `library_roots` stayed empty, and bulk imports sat at "Checking for duplicates" while the array pegged at 95-99% utilisation. The fallback now checks whether a reconciliation already owns the root before starting a second walk, and simply declines (serving whatever it already has cached) rather than piling on. Thanks to russelljennings for the diagnosis and reference fix (GitLab #93).
 

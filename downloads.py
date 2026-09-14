@@ -1545,8 +1545,7 @@ def probe_audio_quality(
             # Check if this FLAC was converted from a lossy source
             if source_info:
                 src_codec, src_bitrate = source_info
-                lossless_codecs = {"FLAC", "ALAC", "WAV", "PCM_S16LE", "PCM_S24LE"}
-                if src_codec and src_codec.upper() not in lossless_codecs:
+                if src_codec and src_codec.upper() not in _LOSSLESS_CODECS:
                     src_kbps = f" {src_bitrate}kbps" if src_bitrate else ""
                     label = f"FLAC (from {src_codec}{src_kbps})"
                     return label, src_bitrate  # Source bitrate for quality gate
@@ -1565,8 +1564,7 @@ def probe_audio_quality(
                 if src_codec and src_codec.upper() != codec:
                     src_kbps = f" {src_bitrate}kbps" if src_bitrate else ""
                     label = f"{label} (from {src_codec}{src_kbps})"
-                    lossless_codecs = {"FLAC", "ALAC", "WAV", "PCM_S16LE", "PCM_S24LE"}
-                    if src_codec.upper() not in lossless_codecs:
+                    if src_codec.upper() not in _LOSSLESS_CODECS:
                         return label, src_bitrate
             return label, bitrate_kbps
     except Exception:
@@ -1622,6 +1620,7 @@ def _build_ytdlp_download_cmd(
     source_url: str = None,
     use_cookies: bool = True,
     user_id: str | None = None,
+    source_codec: str | None = None,
 ) -> list[str]:
     """Build yt-dlp args for audio extraction, metadata, and thumbnail embedding.
 
@@ -1629,14 +1628,24 @@ def _build_ytdlp_download_cmd(
     use_cookies=False skips cookie/player-client args (not needed for SoundCloud).
     user_id picks up the per-user format choice, so yt-dlp converts straight to
     the right format rather than transcoding twice (lossy-to-lossy is a war crime).
+    source_codec, when known from a prior --dump-json lookup's acodec field,
+    lets "Convert lossless sources only" skip forcing a second lossy codec on
+    a source that was never lossless to begin with; omit it and this call
+    simply has nothing for that setting to act on.
     """
     if convert_audio:
         fmt = get_setting("audio_format", "opus", user_id=user_id)
         fmt = fmt if fmt in ("flac", "opus", "mp3", "alac") else "opus"
+        if _skip_lossy_to_lossy(source_codec, fmt, user_id=user_id):
+            # Already lossy, and the user asked not to hop it into another
+            # lossy codec. -x below still extracts the audio track; simply
+            # not forcing --audio-format leaves it exactly as delivered.
+            fmt = None
+            format_args = []
         # ALAC with a non-lossless bitrate means "lossy AAC in an .m4a container".
         # yt-dlp has no first-class option for that, so we ask it for "m4a" and
         # let the AAC encoder do its thing at the chosen kbps.
-        if fmt == "alac" and get_setting("alac_bitrate", "lossless", user_id=user_id) != "lossless":
+        elif fmt == "alac" and get_setting("alac_bitrate", "lossless", user_id=user_id) != "lossless":
             format_args = ["--audio-format", "m4a"]
         else:
             format_args = ["--audio-format", fmt]
@@ -2805,6 +2814,44 @@ def _cbr_target_kbps(fmt: str, user_id: str | None = None) -> int | None:
     return None
 
 
+# Codecs ffprobe reports for genuinely lossless audio. Shared with
+# probe_audio_quality's own "was this really a lossless source" check below,
+# so the two never quietly disagree about what "lossless" means.
+_LOSSLESS_CODECS = {"FLAC", "ALAC", "WAV", "PCM_S16LE", "PCM_S24LE"}
+
+
+def _target_format_is_lossy(fmt: str, user_id: str | None = None) -> bool:
+    """Whether the configured convert-to format is itself a lossy encode."""
+    if fmt in ("mp3", "opus"):
+        return True
+    if fmt == "alac":
+        return get_setting("alac_bitrate", "lossless", user_id=user_id) != "lossless"
+    return False  # flac
+
+
+def _skip_lossy_to_lossy(source_codec: str | None, target_fmt: str, user_id: str | None = None) -> bool:
+    """True when "Convert lossless sources only" should leave this file alone.
+
+    Only ever declines a conversion that would otherwise happen: a source
+    that's already lossy, about to be re-encoded into a different lossy
+    format, with the setting on. A lossless target (FLAC, real ALAC) is
+    untouched by this - upconverting a lossy source into a lossless
+    container was never what GitLab #92 asked for, only the pointless
+    lossy-to-lossy hop was.
+    """
+    if not get_setting_bool("convert_lossless_only", False, user_id=user_id):
+        return False
+    if not _target_format_is_lossy(target_fmt, user_id=user_id):
+        return False
+    return bool(source_codec) and source_codec.upper() not in _LOSSLESS_CODECS
+
+
+def _probe_codec_label(path: Path) -> str | None:
+    """The codec name probe_audio_quality would report for this file, alone."""
+    quality, _bitrate = probe_audio_quality(path)
+    return quality.split()[0] if quality else None
+
+
 def _enforce_target_format(audio_file: Path, convert_audio: bool, user_id: str | None = None) -> Path:
     """If the downloaded file isn't in the target format, convert it.
 
@@ -2822,6 +2869,9 @@ def _enforce_target_format(audio_file: Path, convert_audio: bool, user_id: str |
     codec, extra_args, target_ext = _get_lossy_codec_args(target_fmt, user_id=user_id)
     if audio_file.suffix.lower() == target_ext:
         return audio_file  # Already the right format
+
+    if _skip_lossy_to_lossy(_probe_codec_label(audio_file), target_fmt, user_id=user_id):
+        return audio_file  # Lossy source, lossy target: declined per "Convert lossless sources only"
 
     converted_path = audio_file.with_suffix(target_ext)
     convert_cmd = [
@@ -3903,7 +3953,10 @@ def process_playlist_download(job_id: str, playlist_id: str, playlist_name: str,
                 # same song at once don't fight over each other's temp files.
                 staging = _make_staging_dir(f"{job_id}-{video_id}", user_id=user_id)
                 output_template = str(staging / f"{safe_title}.%(ext)s")
-                download_cmd = _build_ytdlp_download_cmd(video_id, output_template, convert_audio, user_id=user_id)
+                source_codec = _extract_source_format_from_info(info)[0] if convert_audio else None
+                download_cmd = _build_ytdlp_download_cmd(
+                    video_id, output_template, convert_audio, user_id=user_id, source_codec=source_codec,
+                )
                 has_cookies = "--cookies" in download_cmd
 
                 download_result, download_timed_out = _run_ytdlp_with_retries(
@@ -4427,13 +4480,16 @@ def process_slskd_download(job_id: str, username: str, filename: str, artist: st
             sanitized_title = _output_stem(forced_album_artist or artist, forced_track_title or title, Path(filename).stem or job_id, user_id=user_id)
         source_ext = downloaded_file.suffix.lower()
 
-        # Probe the source file BEFORE conversion so we know the real quality
+        # Probe the source file BEFORE conversion so we know the real quality.
+        # FLAC needs no probe to know it's lossless; the extension already says so.
         source_format_info = None
+        source_codec_label = "FLAC" if source_ext == '.flac' else None
         if convert_audio and source_ext != '.flac':
             src_quality_str, src_bitrate = probe_audio_quality(downloaded_file)
             if src_quality_str:
                 src_codec = src_quality_str.split()[0]
                 source_format_info = (src_codec, src_bitrate)
+                source_codec_label = src_codec
 
         # Determine final filename
         audio_fmt = get_setting("audio_format", "opus", user_id=user_id) if convert_audio else None
@@ -4442,7 +4498,10 @@ def process_slskd_download(job_id: str, username: str, filename: str, artist: st
 
         # ALAC lives in an .m4a container
         target_ext = ".m4a" if audio_fmt == "alac" else (f".{audio_fmt}" if audio_fmt else source_ext)
-        needs_convert = convert_audio and source_ext != target_ext
+        needs_convert = (
+            convert_audio and source_ext != target_ext
+            and not _skip_lossy_to_lossy(source_codec_label, audio_fmt, user_id=user_id)
+        )
 
         if needs_convert:
             _update_job(job_id, progress_stage="Converting audio")
@@ -4954,8 +5013,10 @@ def _process_direct_mp3_download(job_id: str, download_url: str, artist_hint: st
             if audio_fmt not in _FORMAT_CODEC_MAP:
                 audio_fmt = "flac"
             codec, extra_args, target_ext = _get_lossy_codec_args(audio_fmt, user_id=user_id)
-            if target_ext == source_path.suffix.lower():
-                # Already in the requested format, no conversion needed.
+            if target_ext == source_path.suffix.lower() or _skip_lossy_to_lossy(raw_codec, audio_fmt, user_id=user_id):
+                # Already in the requested format, or a lossy source that
+                # "Convert lossless sources only" declines to re-encode into
+                # another lossy one.
                 output_path = source_path
             else:
                 output_path = source_path.with_suffix(target_ext)
@@ -5495,6 +5556,7 @@ def process_download(job_id: str, video_id: str, convert_audio: bool = True, sou
             source_url=source_url,
             use_cookies=use_youtube_cookies,
             user_id=user_id,
+            source_codec=source_format_info[0] if source_format_info else None,
         )
         has_cookies = "--cookies" in download_cmd
 

@@ -151,7 +151,7 @@ SENSITIVE_SETTINGS = {
 # Settings that belong to each user (stored in user_settings table)
 USER_SETTINGS_KEYS = {
     "singles_subdir", "playlists_subdir", "albums_subdir", "organise_by_artist", "include_track_number_in_filename", "auto_album_singles", "auto_album_singles_use_albums_dir", "playlist_album_as_name",
-    "audio_format", "mp3_bitrate", "opus_bitrate", "alac_bitrate", "normalise_lossy_audio", "auto_import_dir",
+    "audio_format", "mp3_bitrate", "opus_bitrate", "alac_bitrate", "convert_lossless_only", "normalise_lossy_audio", "auto_import_dir",
     "enable_replaygain", "replaygain_replace_existing",
     "navidrome_url", "navidrome_user", "navidrome_pass", "navidrome_dupe_check",
     "jellyfin_url", "jellyfin_api_key",
@@ -189,6 +189,11 @@ SETTINGS_SCHEMA = {
     "mp3_bitrate": {"type": "str", "default": "v2", "env": "MP3_BITRATE"},
     "opus_bitrate": {"type": "str", "default": "256k", "env": "OPUS_BITRATE"},
     "alac_bitrate": {"type": "str", "default": "lossless", "env": "ALAC_BITRATE"},
+    # When converting, leave already-lossy sources (MP3, AAC, an existing Opus...)
+    # exactly as delivered rather than re-encoding them into another lossy format.
+    # Only lossless sources (FLAC, ALAC, WAV) get converted. Off by default, since
+    # "Convert to" has always meant "convert everything" until now (GitLab #92).
+    "convert_lossless_only": {"type": "bool", "default": False, "env": "CONVERT_LOSSLESS_ONLY"},
     "min_audio_bitrate": {"type": "int", "default": 0, "env": "MIN_AUDIO_BITRATE"},
     # Reject live versions. Off by default; opt-in, and deliberately so since it's
     # destructive (bins a confidently-identified live recording and tries again).

@@ -179,6 +179,7 @@ class SettingsUpdate(BaseModel):
     mp3_bitrate: Optional[str] = None    # "v0", "v2", or "320k"/"256k"/"192k"/"128k"
     opus_bitrate: Optional[str] = None   # "320k"/"256k"/"192k"/"128k"/"96k"
     alac_bitrate: Optional[str] = None   # "lossless" (true ALAC) or AAC kbps "320k"/"256k"/"192k"/"128k"
+    convert_lossless_only: Optional[bool] = None
     min_audio_bitrate: Optional[int] = None
     normalise_lossy_audio: Optional[bool] = None
     enable_replaygain: Optional[bool] = None
