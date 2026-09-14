@@ -1,6 +1,6 @@
 # Changelog
 
-## v4.2.1 (DEV)
+## v4.2.1 (2026-09-14)
 
 ### Added
 - **"Convert lossless sources only"**: a new toggle next to the audio format picker, for when "Convert to" is set to a lossy format (Opus, MP3, or AAC-in-M4A ALAC). Switch it on and only genuinely lossless sources (FLAC, ALAC, WAV) get re-encoded; a source that arrived already lossy (MP3, AAC, an existing Opus) is kept exactly as delivered instead of being hopped into a different lossy format for no quality gain, and occasionally for a bigger file than it started as. Off by default, so nothing changes unless you flip it. Requested by dynAdZ on GitLab (#92), who put it rather well: converting a lossy source to a different lossy codec "cannot improve the original quality and introduces another lossy encoding generation."
