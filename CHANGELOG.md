@@ -1,6 +1,6 @@
 # Changelog
 
-## v4.2.2 (DEV)
+## v4.2.2 (2026-09-15)
 
 ### Added
 - **Search the queue**: the Queue tab now has a search box, for the entirely reasonable case of "I imported 900 tracks, one of them came back as the wrong song, and I am not scrolling through 90 pages to find it." Type a few letters of the artist, title, album or playlist name and the queue narrows to the matches, with a count so you know where you stand. Crucially it searches the *whole* job history rather than just the newest 250 jobs the tab has loaded, which is the bit that makes it useful at all: on a real 2,794-job queue a search for "creep" turned up 212 jobs that the Queue tab previously had no way of reaching. Clear it with the x, or with Escape. Suggested by Snuupy on Reddit, who asked the obvious follow-up question to "just find it in the queue tab".
