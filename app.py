@@ -2698,10 +2698,10 @@ def get_jobs(limit: int = 20, import_id: str | None = None, q: str | None = None
         escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
         pattern = f"%{escaped}%"
         search_frag = (
-            " AND (COALESCE(artist, '') LIKE ? ESCAPE '\\'"
-            " OR COALESCE(title, '') LIKE ? ESCAPE '\\'"
-            " OR COALESCE(album_name, '') LIKE ? ESCAPE '\\'"
-            " OR COALESCE(playlist_name, '') LIKE ? ESCAPE '\\')"
+            " AND (COALESCE(j.artist, '') LIKE ? ESCAPE '\\'"
+            " OR COALESCE(j.title, '') LIKE ? ESCAPE '\\'"
+            " OR COALESCE(j.album_name, '') LIKE ? ESCAPE '\\'"
+            " OR COALESCE(j.playlist_name, '') LIKE ? ESCAPE '\\')"
         )
         search_params = (pattern, pattern, pattern, pattern)
 
@@ -2718,7 +2718,7 @@ def get_jobs(limit: int = 20, import_id: str | None = None, q: str | None = None
             ).fetchall()
         else:
             rows = conn.execute(
-                f"SELECT * FROM jobs WHERE {_scope_frag}{search_frag} ORDER BY created_at DESC LIMIT ?",
+                f"SELECT j.* FROM jobs j WHERE {_scope_frag}{search_frag} ORDER BY created_at DESC LIMIT ?",
                 (*_scope_params, *search_params, limit)
             ).fetchall()
 

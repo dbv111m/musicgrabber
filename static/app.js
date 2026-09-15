@@ -3853,6 +3853,7 @@
         async function loadJobs(showLoading = true) {
             if (queueLoadInFlight) return;
             queueLoadInFlight = true;
+            const requestedTerm = queueSearchTerm;
             if (showLoading) {
                 queueTab.innerHTML = `
                     <div class="loading loading-with-copy" role="status">
@@ -3863,13 +3864,14 @@
             }
 
             try {
-                const url = queueSearchTerm
-                    ? `/api/jobs?limit=${QUEUE_SEARCH_LIMIT}&q=${encodeURIComponent(queueSearchTerm)}`
+                const url = requestedTerm
+                    ? `/api/jobs?limit=${QUEUE_SEARCH_LIMIT}&q=${encodeURIComponent(requestedTerm)}`
                     : `/api/jobs?limit=${QUEUE_SEARCH_LIMIT}`;
                 const response = await apiFetch(url);
                 if (!response.ok) throw new Error('Failed to load jobs');
 
                 const data = await response.json();
+                if (requestedTerm !== queueSearchTerm) return;
                 allQueueJobs = data.jobs;
                 queueTotals = data.queue_totals || null;
                 queueLastUpdatedAt = Date.now();
@@ -3879,7 +3881,7 @@
                 renderQueueSummary();
                 renderQueuePage();
             } catch (error) {
-                if (showLoading) {
+                if (showLoading && requestedTerm === queueSearchTerm) {
                     queueTab.innerHTML = `
                         <div class="empty-state">
                             <div class="empty-state-icon"><i class="fa-solid fa-circle-exclamation"></i></div>
@@ -3889,6 +3891,9 @@
                 }
             } finally {
                 queueLoadInFlight = false;
+                // A search changed while we waited; fetch it now, however long
+                // the previous request took to make up its mind.
+                if (requestedTerm !== queueSearchTerm) await loadJobs(false);
             }
         }
 
@@ -6622,17 +6627,6 @@
         const queueSearchInput = document.getElementById('queueSearchInput');
         const queueSearchClearBtn = document.getElementById('queueSearchClearBtn');
         if (queueSearchInput) {
-            // loadJobs refuses to start while a poll is already in flight. Without
-            // this the search would sit there doing nothing until the next poll
-            // came round, which reads as "the search box is broken".
-            const loadQueueWhenFree = (attempt = 0) => {
-                if (queueLoadInFlight && attempt < 25) {
-                    setTimeout(() => loadQueueWhenFree(attempt + 1), 120);
-                    return;
-                }
-                loadJobs(false);
-            };
-
             const applyQueueSearch = (term) => {
                 const next = (term || '').trim();
                 if (next === queueSearchTerm) return;
@@ -6641,7 +6635,7 @@
                 if (queueSearchClearBtn) {
                     queueSearchClearBtn.style.display = queueSearchTerm ? 'flex' : 'none';
                 }
-                loadQueueWhenFree();
+                loadJobs(false);
             };
 
             queueSearchInput.addEventListener('input', () => {

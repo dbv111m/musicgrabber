@@ -20,6 +20,7 @@ const RELEASE_NOTES = {
             {
                 heading: "Fixed",
                 items: [
+                    "Changing or clearing a queue search while it is loading no longer lets yesterday's answer borrow today's label. Searches within a bulk import also work reliably through the API.",
                     "The \"x on the workbench, y waiting\" banner was only counting the most recent chunk of the queue, so a really big queue was selling itself short. It now counts the lot.",
                     "The row of buttons above the queue no longer wanders off the edge of the screen on a phone.",
                 ]

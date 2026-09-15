@@ -134,3 +134,27 @@ def test_blank_search_is_no_search(fresh_db, term):
     _add_job(fresh_db, "b", artist="Someone", title="Something")
 
     assert _ids(app.get_jobs(limit=20, q=term, http_request=_request())) == {"a", "b"}
+
+
+@pytest.mark.parametrize("term", ["boards", "Roygbiv", "Geogaddi", "Tuesday Mix"])
+def test_search_within_bulk_import_uses_job_fields_and_user_scope(fresh_db, term):
+    import app
+
+    with fresh_db.db_conn() as conn:
+        conn.execute("INSERT INTO bulk_imports (id) VALUES ('import-a')")
+        conn.commit()
+    for job_id, user_id in [("mine", "alice"), ("theirs", "bob"), ("outside", "alice")]:
+        _add_job(fresh_db, job_id, artist="Boards of Canada", title="Roygbiv",
+                 album_name="Geogaddi", playlist_name="Tuesday Mix", user_id=user_id)
+        if job_id != "outside":
+            with fresh_db.db_conn() as conn:
+                conn.execute(
+                    "INSERT INTO bulk_import_tracks (import_id, job_id, artist, line_num) "
+                    "VALUES ('import-a', ?, 'Original artist', 1)", (job_id,),
+                )
+                conn.commit()
+
+    result = app.get_jobs(import_id="import-a", q=term,
+                          http_request=_request(is_admin=False))
+    assert _ids(result) == {"mine"}
+    assert result["queue_totals"] is None
