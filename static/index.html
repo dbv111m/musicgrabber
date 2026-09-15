@@ -732,6 +732,20 @@
             <div class="queue-header">
                 <h2 class="queue-section-heading">Download Queue / <a href="#downloadableSection" title="Jump to Downloadable to Device">Downloadable to Device &#8595;</a></h2>
                 <div class="queue-header-actions">
+                    <div class="queue-search" role="search">
+                        <i class="fa-solid fa-magnifying-glass queue-search-icon" aria-hidden="true"></i>
+                        <input
+                            type="text"
+                            id="queueSearchInput"
+                            class="queue-search-input"
+                            placeholder="Search the queue..."
+                            aria-label="Search the download queue by artist, title, album or playlist"
+                            autocomplete="off"
+                            autocapitalize="off"
+                            spellcheck="false"
+                        >
+                        <button type="button" class="queue-search-clear" id="queueSearchClearBtn" title="Clear search" aria-label="Clear queue search" style="display:none;">&#x2715;</button>
+                    </div>
                     <label class="watched-control-label" for="queueHistorySort" title="Choose which finished status appears first. Queued and downloading work always remains at the top.">
                         History:
                         <select id="queueHistorySort" class="watched-select">
@@ -745,6 +759,7 @@
                 </div>
             </div>
             <div id="queueLiveSummary" class="queue-live-summary" style="display:none;" role="status" aria-live="polite" aria-atomic="false"></div>
+            <div id="queueSearchStatus" class="queue-search-status" style="display:none;" role="status" aria-live="polite"></div>
             <div id="queueTab" class="results"></div>
             <div id="queuePager" style="display:none;" class="downloadable-pager">
                 <button class="btn btn-ghost" id="queuePrevBtn" onclick="changeQueuePage(-1)" disabled>&#8592; Prev</button>

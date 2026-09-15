@@ -9,7 +9,22 @@
 const RELEASE_NOTES = {
     "4.2.2": {
         title: "What's New in v4.2.2",
-        sections: []
+        sections: [
+            {
+                heading: "You can search the queue now",
+                items: [
+                    "There's a search box at the top of the Queue tab. Type a bit of the artist, title, album or playlist name and the queue narrows down to just the matches. Escape or the little x clears it again.",
+                    "It searches your whole download history, not just the page you happen to be looking at, so finding one wrong track in a 900-track playlist import is now a five second job rather than a scrolling marathon. Thanks to Snuupy on Reddit for asking the awkward question.",
+                ]
+            },
+            {
+                heading: "Fixed",
+                items: [
+                    "The \"x on the workbench, y waiting\" banner was only counting the most recent chunk of the queue, so a really big queue was selling itself short. It now counts the lot.",
+                    "The row of buttons above the queue no longer wanders off the edge of the screen on a phone.",
+                ]
+            }
+        ]
     },
     "4.2.1": {
         title: "What's New in v4.2.1",

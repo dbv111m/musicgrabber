@@ -1185,9 +1185,16 @@
         })();
         const MAX_QUEUE_SIZE = 100;
         const QUEUE_PAGE_SIZE = 10;
+        // How many jobs the Queue tab pulls down in one go, searching or not.
+        const QUEUE_SEARCH_LIMIT = 250;
         let queuePage = 1;
         let allQueueJobs = [];
         let queueHistorySortMode = 'recent';
+        let queueSearchTerm = '';
+        let queueSearchDebounce = null;
+        // Whole-queue status counts from the server, so the live summary keeps
+        // telling the truth while a search has the visible list down to one card.
+        let queueTotals = null;
         let currentBulkImportId = null;
         let bulkImportPollInterval = null;
         let longformSplitPollInterval = null;
@@ -3792,16 +3799,27 @@
             }
         }
 
+        function activeCountFromTotals() {
+            if (!queueTotals) return null;
+            return (queueTotals.queued || 0) + (queueTotals.downloading || 0);
+        }
+
         async function getQueueSize() {
-            // Use cached queue data if available, otherwise fetch
-            const jobs = allQueueJobs.length > 0 ? allQueueJobs : await (async () => {
+            // Server totals when we have them: counting the cached page of jobs
+            // undercounts the moment a search is on, or the queue outgrows the window.
+            const fromTotals = activeCountFromTotals();
+            if (fromTotals !== null) return fromTotals;
+            const jobs = allQueueJobs.length > 0 && !queueSearchTerm ? allQueueJobs : await (async () => {
                 try {
                     const response = await apiFetch('/api/jobs?limit=250');
                     if (!response.ok) return [];
                     const data = await response.json();
+                    if (data.queue_totals) queueTotals = data.queue_totals;
                     return data.jobs;
                 } catch { return []; }
             })();
+            const retry = activeCountFromTotals();
+            if (retry !== null) return retry;
             return jobs.filter(j => j.status === 'queued' || j.status === 'downloading').length;
         }
 
@@ -3819,7 +3837,10 @@
         function scheduleQueuePoll() {
             if (currentTab !== 'queue') return;
             if (queuePollInterval) clearTimeout(queuePollInterval);
-            const hasActiveJobs = allQueueJobs.some(job => ['queued', 'downloading'].includes(job.status));
+            const activeTotal = activeCountFromTotals();
+            const hasActiveJobs = activeTotal !== null
+                ? activeTotal > 0
+                : allQueueJobs.some(job => ['queued', 'downloading'].includes(job.status));
             // Stay snappy while work is moving, then back off when the queue is idle.
             const delay = hasActiveJobs ? 1500 : 5000;
             queuePollInterval = setTimeout(async () => {
@@ -3842,11 +3863,15 @@
             }
 
             try {
-                const response = await apiFetch('/api/jobs?limit=250');
+                const url = queueSearchTerm
+                    ? `/api/jobs?limit=${QUEUE_SEARCH_LIMIT}&q=${encodeURIComponent(queueSearchTerm)}`
+                    : `/api/jobs?limit=${QUEUE_SEARCH_LIMIT}`;
+                const response = await apiFetch(url);
                 if (!response.ok) throw new Error('Failed to load jobs');
 
                 const data = await response.json();
                 allQueueJobs = data.jobs;
+                queueTotals = data.queue_totals || null;
                 queueLastUpdatedAt = Date.now();
                 // Clamp page in case jobs were cleared
                 const totalPages = Math.max(1, Math.ceil(allQueueJobs.length / QUEUE_PAGE_SIZE));
@@ -3889,13 +3914,20 @@
 
         function renderQueueSummary() {
             if (!queueLiveSummary) return;
-            if (!allQueueJobs.length) {
+            const totalJobs = queueTotals
+                ? Object.values(queueTotals).reduce((sum, n) => sum + n, 0)
+                : allQueueJobs.length;
+            if (!totalJobs) {
                 queueLiveSummary.style.display = 'none';
                 queueSummarySignature = '';
                 return;
             }
-            const downloading = allQueueJobs.filter(job => job.status === 'downloading').length;
-            const queued = allQueueJobs.filter(job => job.status === 'queued').length;
+            const downloading = queueTotals
+                ? (queueTotals.downloading || 0)
+                : allQueueJobs.filter(job => job.status === 'downloading').length;
+            const queued = queueTotals
+                ? (queueTotals.queued || 0)
+                : allQueueJobs.filter(job => job.status === 'queued').length;
             const active = downloading + queued;
             const signature = `${downloading}:${queued}`;
             if (signature !== queueSummarySignature) {
@@ -3960,12 +3992,37 @@
             const nextBtn = document.getElementById('queueNextBtn');
             if (allQueueJobs.length > 1) {
                 pagerEl.style.display = 'flex';
-                infoEl.textContent = `Page ${queuePage} of ${totalPages} (${allQueueJobs.length} jobs)`;
+                const noun = queueSearchTerm ? 'matches' : 'jobs';
+                infoEl.textContent = `Page ${queuePage} of ${totalPages} (${allQueueJobs.length} ${noun})`;
                 prevBtn.disabled = queuePage <= 1;
                 nextBtn.disabled = queuePage >= totalPages;
             } else {
                 pagerEl.style.display = 'none';
             }
+
+            renderQueueSearchStatus();
+        }
+
+        function renderQueueSearchStatus() {
+            const statusEl = document.getElementById('queueSearchStatus');
+            if (!statusEl) return;
+            if (!queueSearchTerm) {
+                statusEl.style.display = 'none';
+                statusEl.innerHTML = '';
+                return;
+            }
+            const count = allQueueJobs.length;
+            const term = escapeHtml(queueSearchTerm);
+            if (!count) {
+                statusEl.innerHTML = `Nothing in the queue matches &ldquo;${term}&rdquo;.`;
+            } else if (count >= QUEUE_SEARCH_LIMIT) {
+                // Claiming "250 matches" when we stopped counting at 250 is the sort
+                // of small fib that gets found out.
+                statusEl.innerHTML = `First <strong>${QUEUE_SEARCH_LIMIT}</strong> matches for &ldquo;${term}&rdquo;. Add a word or two to narrow it down.`;
+            } else {
+                statusEl.innerHTML = `<strong>${count}</strong> match${count === 1 ? '' : 'es'} for &ldquo;${term}&rdquo; across the whole queue.`;
+            }
+            statusEl.style.display = 'block';
         }
 
         function getSortedQueueJobs() {
@@ -4011,6 +4068,18 @@
         function renderJobs(jobs, container = queueTab) {
             if (!jobs.length) {
                 if (container === queueTab) expandedJobIds.clear();
+                // A search that found nothing is not an empty queue, and saying so
+                // has sent more than one person hunting for a bug that isn't there.
+                if (container === queueTab && queueSearchTerm) {
+                    container.innerHTML = `
+                        <div class="empty-state">
+                            <div class="empty-state-icon"><i class="fa-solid fa-magnifying-glass"></i></div>
+                            <p>No matches for &ldquo;${escapeHtml(queueSearchTerm)}&rdquo;</p>
+                            <small>Try less of the title, or check the spelling. We all do it.</small>
+                        </div>
+                    `;
+                    return;
+                }
                 container.innerHTML = `
                     <div class="empty-state">
                         <div class="empty-state-icon"><i class="fa-solid fa-inbox"></i></div>
@@ -6546,6 +6615,64 @@
                 queuePage = 1;
                 renderQueuePage();
             });
+        }
+
+        // Queue search. Deliberately not remembered between visits: a sticky filter
+        // you forgot you set is how an empty Queue tab starts looking like a crisis.
+        const queueSearchInput = document.getElementById('queueSearchInput');
+        const queueSearchClearBtn = document.getElementById('queueSearchClearBtn');
+        if (queueSearchInput) {
+            // loadJobs refuses to start while a poll is already in flight. Without
+            // this the search would sit there doing nothing until the next poll
+            // came round, which reads as "the search box is broken".
+            const loadQueueWhenFree = (attempt = 0) => {
+                if (queueLoadInFlight && attempt < 25) {
+                    setTimeout(() => loadQueueWhenFree(attempt + 1), 120);
+                    return;
+                }
+                loadJobs(false);
+            };
+
+            const applyQueueSearch = (term) => {
+                const next = (term || '').trim();
+                if (next === queueSearchTerm) return;
+                queueSearchTerm = next;
+                queuePage = 1;
+                if (queueSearchClearBtn) {
+                    queueSearchClearBtn.style.display = queueSearchTerm ? 'flex' : 'none';
+                }
+                loadQueueWhenFree();
+            };
+
+            queueSearchInput.addEventListener('input', () => {
+                if (queueSearchClearBtn) {
+                    queueSearchClearBtn.style.display = queueSearchInput.value ? 'flex' : 'none';
+                }
+                clearTimeout(queueSearchDebounce);
+                // Long enough not to hammer SQLite on every keystroke, short enough
+                // that it still feels like typing rather than posting a letter.
+                queueSearchDebounce = setTimeout(() => applyQueueSearch(queueSearchInput.value), 250);
+            });
+
+            queueSearchInput.addEventListener('keydown', (event) => {
+                if (event.key === 'Escape') {
+                    clearTimeout(queueSearchDebounce);
+                    queueSearchInput.value = '';
+                    applyQueueSearch('');
+                } else if (event.key === 'Enter') {
+                    clearTimeout(queueSearchDebounce);
+                    applyQueueSearch(queueSearchInput.value);
+                }
+            });
+
+            if (queueSearchClearBtn) {
+                queueSearchClearBtn.addEventListener('click', () => {
+                    clearTimeout(queueSearchDebounce);
+                    queueSearchInput.value = '';
+                    applyQueueSearch('');
+                    queueSearchInput.focus();
+                });
+            }
         }
 
         // Minimum-quality filter: remembered between searches, since somebody who

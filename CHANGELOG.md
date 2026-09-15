@@ -2,6 +2,13 @@
 
 ## v4.2.2 (DEV)
 
+### Added
+- **Search the queue**: the Queue tab now has a search box, for the entirely reasonable case of "I imported 900 tracks, one of them came back as the wrong song, and I am not scrolling through 90 pages to find it." Type a few letters of the artist, title, album or playlist name and the queue narrows to the matches, with a count so you know where you stand. Crucially it searches the *whole* job history rather than just the newest 250 jobs the tab has loaded, which is the bit that makes it useful at all: on a real 2,794-job queue a search for "creep" turned up 212 jobs that the Queue tab previously had no way of reaching. Clear it with the x, or with Escape. Suggested by Snuupy on Reddit, who asked the obvious follow-up question to "just find it in the queue tab".
+
+### Fixed
+- **The live queue summary no longer counts only what it can see**: the "3 on the workbench, 40 waiting" banner and the queue-size limit were both counting the newest 250 jobs rather than the queue, so a genuinely enormous queue quietly under-reported itself. Both now use real totals from the server, which also means searching the queue down to a single card no longer convinces the banner that everything else has emigrated.
+- **The Queue tab header no longer runs off the side of a phone**: the row of controls above the queue has been overflowing at narrow widths for a while; it now wraps like a civilised thing.
+
 ## v4.2.1 (2026-09-14)
 
 ### Added

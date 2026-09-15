@@ -1844,6 +1844,116 @@ h1 {
     gap: 10px;
 }
 
+/* The Download Queue header carries a search box now, which is more than the
+   column can hold on one line without folding the heading into origami. Let it
+   wrap instead; scoped to the Queue tab so every other .queue-header is left
+   exactly as it was. */
+#queueTabContainer > .queue-header {
+    flex-wrap: wrap;
+    gap: var(--space-2);
+}
+
+#queueTabContainer > .queue-header .queue-section-heading {
+    flex: 1 1 260px;
+}
+
+/* Queue search: finding one track in a 900-track import without the scroll wheel
+   going the way of a Spitfire's propeller. */
+.queue-search {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.queue-search-icon {
+    position: absolute;
+    left: var(--space-2);
+    font-size: 12px;
+    color: var(--text-secondary);
+    pointer-events: none;
+    transition: color 180ms ease;
+}
+
+.queue-search-input {
+    width: 220px;
+    max-width: 100%;
+    padding: 6px var(--space-2) 6px var(--space-5);
+    font-size: 13px;
+    font-family: inherit;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-primary);
+    transition: border-color 180ms ease, box-shadow 180ms ease, width 180ms ease;
+}
+
+.queue-search-input::placeholder {
+    color: var(--text-secondary);
+}
+
+.queue-search-input:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.queue-search:focus-within .queue-search-icon {
+    color: var(--accent);
+}
+
+.queue-search-clear {
+    position: absolute;
+    right: var(--space-1);
+    width: 20px;
+    height: 20px;
+    border: none;
+    border-radius: 50%;
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 11px;
+    line-height: 1;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 150ms ease, color 150ms ease;
+}
+
+.queue-search-clear:hover {
+    background: var(--border);
+    color: var(--text-primary);
+}
+
+/* Match count under the header, so a fruitless search says so rather than
+   leaving you staring at an empty box wondering if it is broken. */
+.queue-search-status {
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin-bottom: var(--space-3);
+}
+
+.queue-search-status strong {
+    color: var(--text-primary);
+}
+
+@media (max-width: 768px) {
+    .queue-search-input {
+        width: 100%;
+    }
+
+    .queue-search {
+        flex: 1 1 160px;
+    }
+
+    /* The actions row already ran off the side of a phone before the search box
+       turned up; letting it wrap stops us making an old mess a slightly bigger one. */
+    .queue-header-actions {
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: var(--space-2);
+    }
+}
+
 .queue-live-summary {
     align-items: center;
     gap: 10px;

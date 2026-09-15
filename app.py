@@ -2671,7 +2671,8 @@ def _attach_acquisition_summaries(conn, jobs: list[dict]) -> None:
 
 
 @app.get("/api/jobs")
-def get_jobs(limit: int = 20, import_id: str | None = None, http_request: Request = None):
+def get_jobs(limit: int = 20, import_id: str | None = None, q: str | None = None,
+             http_request: Request = None):
     """Get recent jobs.
 
     import_id scopes the result to one bulk import's tracks instead of the
@@ -2679,10 +2680,31 @@ def get_jobs(limit: int = 20, import_id: str | None = None, http_request: Reques
     creation time, and without the usual limit truncating a big playlist.
     Lets the Bulk Import tab draw its progress with the exact same job cards
     (and retry buttons) as the Queue tab, rather than a second copy of them.
+
+    q filters on artist/title/album/playlist name across the whole jobs table,
+    not just the newest `limit` rows the Queue tab normally shows. Somebody who
+    imported a 900-track playlist and now wants to fix the one track that came
+    back as a Minecraft parody should not have to page through 89 other ones.
     """
     from pathlib import Path as _Path
     user_id = http_request.state.user_id if http_request else None
     is_admin = http_request.state.is_admin if http_request else True
+
+    # LIKE has its own wildcards; a user searching for "50_cent" means an
+    # underscore, not "any character". Escape them rather than surprise them.
+    search_frag, search_params = "", ()
+    term = (q or "").strip()
+    if term:
+        escaped = term.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        pattern = f"%{escaped}%"
+        search_frag = (
+            " AND (COALESCE(artist, '') LIKE ? ESCAPE '\\'"
+            " OR COALESCE(title, '') LIKE ? ESCAPE '\\'"
+            " OR COALESCE(album_name, '') LIKE ? ESCAPE '\\'"
+            " OR COALESCE(playlist_name, '') LIKE ? ESCAPE '\\')"
+        )
+        search_params = (pattern, pattern, pattern, pattern)
+
     with db_conn() as conn:
         conn.row_factory = sqlite3.Row
         _scope_frag, _scope_params = _user_scope(user_id, is_admin)
@@ -2690,14 +2712,14 @@ def get_jobs(limit: int = 20, import_id: str | None = None, http_request: Reques
             rows = conn.execute(
                 f"""SELECT j.* FROM jobs j
                     JOIN bulk_import_tracks t ON t.job_id = j.id
-                    WHERE t.import_id = ? AND {_scope_frag}
+                    WHERE t.import_id = ? AND {_scope_frag}{search_frag}
                     ORDER BY t.line_num ASC""",
-                (import_id, *_scope_params)
+                (import_id, *_scope_params, *search_params)
             ).fetchall()
         else:
             rows = conn.execute(
-                f"SELECT * FROM jobs WHERE {_scope_frag} ORDER BY created_at DESC LIMIT ?",
-                (*_scope_params, limit)
+                f"SELECT * FROM jobs WHERE {_scope_frag}{search_frag} ORDER BY created_at DESC LIMIT ?",
+                (*_scope_params, *search_params, limit)
             ).fetchall()
 
         # Pre-fetch resolved_paths for all jobs in one query.
@@ -2751,7 +2773,20 @@ def get_jobs(limit: int = 20, import_id: str | None = None, http_request: Reques
 
         _attach_acquisition_summaries(conn, jobs)
 
-    return {"jobs": jobs}
+        # Live counts for the whole queue, never narrowed by q or by the newest-N
+        # window. The tab's "3 on the workbench" banner and the queue-size guard
+        # both read these, so searching for one track does not convince the UI
+        # that the other 800 have quietly emigrated.
+        totals = None
+        if not import_id:
+            totals = {
+                row["status"]: row["n"] for row in conn.execute(
+                    f"SELECT status, COUNT(*) AS n FROM jobs WHERE {_scope_frag} GROUP BY status",
+                    _scope_params
+                ).fetchall()
+            }
+
+    return {"jobs": jobs, "queue_totals": totals}
 
 
 @app.get("/api/jobs/downloadable")
