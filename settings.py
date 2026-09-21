@@ -198,6 +198,10 @@ SETTINGS_SCHEMA = {
     # Reject live versions. Off by default; opt-in, and deliberately so since it's
     # destructive (bins a confidently-identified live recording and tries again).
     "reject_live_versions": {"type": "bool", "default": False, "env": "REJECT_LIVE_VERSIONS"},
+    # Same idea, but for whatever else the user cannot be doing with: a comma-separated
+    # list such as "demo, acoustic, radio edit, remix". Only matched inside a version
+    # annotation, so "Demolition Man" survives the word "demo" (GitLab #96).
+    "reject_version_keywords": {"type": "str", "default": "", "env": "REJECT_VERSION_KEYWORDS"},
     # Bake EBU R128 loudness normalisation into downloads from lossy web sources
     # (YouTube et al are all over the shop volume-wise). Lossless sources are never
     # touched; their masters stay exactly as mastered. Off by default.

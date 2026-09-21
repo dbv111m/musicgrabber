@@ -452,10 +452,10 @@ The easiest way to configure MusicGrabber is via the **Settings tab** in the UI.
 - **Jellyfin**: URL and API key for library refresh
 - **Lidarr**: URL and API key for library refresh
 - **Notifications**: Apprise URL, Telegram webhook, generic webhook URL, and SMTP settings
-- **YouTube**: Upload browser cookies for authenticated downloads and playlist fetching, including watched-playlist refreshes. These use your own cookie file when available, falling back to the shared cookie file otherwise.
+- **YouTube**: Upload browser cookies for authenticated downloads and playlist fetching, including watched-playlist refreshes. These use your own cookie file when available, falling back to the shared cookie file otherwise. Account-personalised YouTube Music playlists (Discover Mix, My Supermix, Liked Music and friends) require cookies and will not be enumerated without them, because YouTube answers a logged-out request with somebody else's recommendations rather than an error.
 - **Maintenance**: preview and remove orphaned watched imports, clear selected Queue-history states, reconcile missing files, or rebuild path records from audio beneath the configured Singles, Playlists, and Albums folders. These actions change database records only; they never delete or move library audio
 - **Spotify**: Upload browser cookies to access private playlists
-- **Apple Music**: Add a user token for private library playlists
+- **Apple Music**: Add a user token for private library playlists, and for public playlists over 300 tracks
 - **Blacklist**: View and manage reported tracks and blocked uploaders
 - **Security**: API key for authentication
 - **Users** (admin only): create and manage user accounts, reset passwords
@@ -487,6 +487,7 @@ Settings are stored in the database and persist across container restarts.
 | `CONVERT_LOSSLESS_ONLY` | `false` | When conversion is enabled and the target format is lossy (Opus, MP3, or AAC-in-M4A ALAC), only re-encode lossless sources (FLAC/ALAC/WAV). A source that's already lossy is kept as delivered instead of being re-encoded into a different lossy format |
 | `MIN_AUDIO_BITRATE` | `0` | Minimum audio bitrate in kbps. Downloads below this are rejected. 0 = disabled. Lossless (FLAC) always passes |
 | `REJECT_LIVE_VERSIONS` | `false` | Reject a confidently identified live recording when the query did not request one |
+| `REJECT_VERSION_KEYWORDS` | - | Comma-separated versions to reject, e.g. `demo, acoustic, radio edit, remix` |
 | `NORMALISE_LOSSY_AUDIO` | `false` | Apply two-pass EBU R128 loudness normalisation to lossy web sources; lossless sources are untouched |
 | `ENABLE_REPLAYGAIN` | `false` | Write ReplayGain 2.0 track gain/peak tags on new downloads. Tags only, the audio is never re-encoded. Album gain and peak are added once every track of an album has landed |
 | `REPLAYGAIN_REPLACE_EXISTING` | `false` | Overwrite ReplayGain tags a file already carries. Off by default; existing tags are assumed to be deliberate |
@@ -552,7 +553,7 @@ Settings are stored in the database and persist across container restarts.
 | `LIBRARY_RECONCILE_INTERVAL` | `1800` | How often MusicGrabber reconciles deleted/renamed files against the job database (seconds) |
 | `SPOTIFY_BROWSER_TIMEOUT_SECONDS` | `180` | Maximum runtime for the headless Spotify playlist browser fallback |
 | `SPOTIFY_BROWSER_STALL_SECONDS` | `30` | Abort Spotify browser scrolling after this many seconds without finding more tracks |
-| `APPLE_MUSIC_USER_TOKEN` | - | Apple Music user token for private `music.apple.com/library/...` playlists |
+| `APPLE_MUSIC_USER_TOKEN` | - | Apple Music user token for private library playlists, and for public playlists over 300 tracks |
 | `NOTIFY_ON` | `playlists,bulk,errors` | Notification triggers (applies to all channels): `singles`, `playlists`, `bulk`, `errors` |
 | `APPRISE_URL` | - | Apprise notification URL (covers Gotify, ntfy, Discord, Pushover, Slack, and ~50 others) |
 | `TELEGRAM_WEBHOOK_URL` | - | Full Telegram webhook URL (see Notifications section below) |
@@ -856,7 +857,7 @@ The `sp_dc` session cookie is what grants access. It has a long expiry (typicall
 
 **Apple Music private library playlists:**
 
-Public Apple Music playlists and albums work without credentials. For private `music.apple.com/library/...` playlists, add your Apple Music user token in **Settings, Apple Music**. You only need the `Music-User-Token`; MusicGrabber fetches the current web bearer token automatically from Apple's public bundle.
+Public Apple Music playlists and albums under about 300 tracks work without credentials. Anything longer needs your Apple Music user token, as does any private `music.apple.com/library/...` playlist: add it in **Settings, Apple Music**. In DevTools the header is called `media-user-token` (Apple's docs still call it `Music-User-Token`; same value, and MusicGrabber sends both). MusicGrabber fetches the current web bearer token automatically from Apple's public bundle.
 
 You can also provide it as an environment variable:
 

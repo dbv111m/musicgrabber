@@ -159,20 +159,70 @@ def _sync_cookies_file(user_id: str | None = None):
         cookie_file.unlink()
 
 
-def _ytdlp_base_args(user_id: str | None = None):
+def resolve_cookie_file(user_id: str | None = None) -> "Path | None":
+    """Return the cookie file we would actually hand yt-dlp, or None.
+
+    Per-user file wins if it exists and has content; otherwise the global one.
+    Ignores the cooldown window, so callers that must be authenticated can ask
+    "do we have cookies at all?" separately from "are we currently trusting
+    them?".
+    """
+    cookie_file = get_user_cookies_file(user_id)
+    if not (cookie_file.exists() and cookie_file.stat().st_size > 0):
+        cookie_file = COOKIES_FILE
+    if cookie_file.exists() and cookie_file.stat().st_size > 0:
+        return cookie_file
+    return None
+
+
+# YouTube Music hands every account the *same* playlist id for its personalised
+# mixes and serves different tracks depending on who is asking. That is why an
+# anonymous request does not 404, it just quietly returns a stranger's taste,
+# which is exactly how issue #95 happened. These ids are only meaningful with
+# the owner's cookies attached.
+#
+# Deliberately NOT listed: RDCLAK5uy_* (editorial YTM playlists, identical for
+# everyone) and RDMM* (radio seeded from a video, fine anonymously).
+_PERSONALISED_YT_PLAYLIST_IDS = frozenset({
+    "LM",  # Liked Music / Your Likes
+    "WL",  # Watch Later
+})
+_PERSONALISED_YT_PLAYLIST_PREFIXES = (
+    "RDTMAK5uy_",  # My Supermix, Discover Mix, New Release Mix, daily discovery
+)
+
+
+def is_personalised_youtube_playlist(url: str, playlist_id: str | None = None) -> bool:
+    """True when a YouTube/YouTube Music playlist is tied to a signed-in account.
+
+    Such a playlist has no honest anonymous answer, so callers should insist on
+    cookies rather than accept whatever YouTube offers a logged-out stranger.
+    """
+    if not playlist_id:
+        match = re.search(r'list=([a-zA-Z0-9_-]+)', url or "")
+        playlist_id = match.group(1) if match else ""
+    if playlist_id in _PERSONALISED_YT_PLAYLIST_IDS:
+        return True
+    return playlist_id.startswith(_PERSONALISED_YT_PLAYLIST_PREFIXES)
+
+
+def _ytdlp_base_args(user_id: str | None = None, *, require_cookies: bool = False):
     """Return common yt-dlp arguments (cookies, optional player-client override).
     These should be prepended after 'yt-dlp' in every command.
 
     When user_id is provided, the per-user cookie file is used if it exists
     and has content; otherwise falls back to the global cookie file.
+
+    With require_cookies, the caller is telling us the request is meaningless
+    without an authenticated session, so the temporary cookie cooldown is
+    ignored. An anonymous answer to "what is in *my* personalised playlist" is
+    not a degraded answer, it is somebody else's answer, and we would rather
+    fail than serve that.
     """
     args = []
-    if _cookies_allowed():
-        cookie_file = get_user_cookies_file(user_id)
-        # Fall back to global cookies if no per-user file exists
-        if not (cookie_file.exists() and cookie_file.stat().st_size > 0):
-            cookie_file = COOKIES_FILE
-        if cookie_file.exists() and cookie_file.stat().st_size > 0:
+    if require_cookies or _cookies_allowed():
+        cookie_file = resolve_cookie_file(user_id)
+        if cookie_file:
             args.extend(["--cookies", str(cookie_file)])
     if YTDLP_PLAYER_CLIENT:
         args.extend(["--extractor-args", f"youtube:player_client={YTDLP_PLAYER_CLIENT}"])

@@ -33,6 +33,7 @@ _WEB_ORIGIN = "https://music.apple.com"
 _AMP_API_ORIGIN = "https://amp-api.music.apple.com"
 _AMP_PAGE_LIMIT = 300
 _LIBRARY_PAGE_LIMIT = 100  # Library endpoint caps at 100
+_HTML_SCRAPE_CAP = 300  # Apple server-renders no more than this, whatever the real size
 
 
 def fetch_apple_music_playlist(url: str, music_user_token: str | None = None) -> dict:
@@ -63,7 +64,7 @@ def fetch_apple_music_playlist(url: str, music_user_token: str | None = None) ->
     playlist_name = _extract_playlist_name(html)
 
     try:
-        result = _fetch_via_api(url, html, playlist_name)
+        result = _fetch_via_api(url, html, playlist_name, music_user_token)
         if result["tracks"]:
             print(
                 f"[Apple] API path OK: {result['count']} tracks "
@@ -73,22 +74,36 @@ def fetch_apple_music_playlist(url: str, music_user_token: str | None = None) ->
     except Exception as exc:
         print(f"[Apple] API path failed ({exc}), falling back to HTML scraping")
 
-    return _fetch_via_html(html, playlist_name)
+    return _fetch_via_html(html, playlist_name, bool(music_user_token))
 
 
 # ---------------------------------------------------------------------------
 # Private library playlist path
 # ---------------------------------------------------------------------------
 
+def _auth_headers(token: str, music_user_token: str | None = None) -> dict:
+    """Headers for an amp-api call, with the user token attached when we have one.
+
+    Apple's own web player sends the user token as `media-user-token`, while
+    MusicKit documents it as `Music-User-Token`. They carry the same value and
+    different endpoints have historically been fussy about which one they want,
+    so we send both and let Apple pick a favourite.
+    """
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Origin": _WEB_ORIGIN,
+    }
+    if music_user_token:
+        headers["Music-User-Token"] = music_user_token
+        headers["media-user-token"] = music_user_token
+    return headers
+
+
 def _fetch_library_playlist(url: str, music_user_token: str) -> dict:
     """Fetch tracks from a private Apple Music library playlist."""
     item_id = urllib.parse.urlparse(url).path.rstrip("/").split("/")[-1]
     token = _fetch_web_token_for_library()
-    auth_headers = {
-        "Authorization": f"Bearer {token}",
-        "Music-User-Token": music_user_token,
-        "Origin": _WEB_ORIGIN,
-    }
+    auth_headers = _auth_headers(token, music_user_token)
     playlist_name = _fetch_library_playlist_name(item_id, auth_headers)
     tracks = _fetch_library_tracks(item_id, auth_headers)
     return {"tracks": tracks, "playlist_name": playlist_name, "count": len(tracks)}
@@ -146,11 +161,18 @@ def _fetch_library_tracks(item_id: str, auth_headers: dict) -> list[str]:
 # API path
 # ---------------------------------------------------------------------------
 
-def _fetch_via_api(url: str, html: str, playlist_name: str) -> dict:
+def _fetch_via_api(
+    url: str,
+    html: str,
+    playlist_name: str,
+    music_user_token: str | None = None,
+) -> dict:
     storefront, item_type, item_id, language = _extract_catalog_context(url, html)
     bundle_url = _extract_web_bundle_url(url, html)
     token = _extract_web_token(bundle_url)
-    tracks = _fetch_all_tracks(storefront, item_type, item_id, token, language)
+    tracks = _fetch_all_tracks(
+        storefront, item_type, item_id, token, language, music_user_token
+    )
 
     return {
         "tracks": tracks,
@@ -211,6 +233,7 @@ def _fetch_all_tracks(
     item_id: str,
     token: str,
     language: str | None,
+    music_user_token: str | None = None,
 ) -> list[str]:
     query = {
         "offset": "0",
@@ -228,10 +251,7 @@ def _fetch_all_tracks(
     while next_url:
         payload = _fetch_json(
             next_url,
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Origin": _WEB_ORIGIN,
-            },
+            headers=_auth_headers(token, music_user_token),
         )
         data = payload.get("data") or []
         for item in data:
@@ -254,7 +274,7 @@ def _fetch_all_tracks(
 # HTML scraping fallback
 # ---------------------------------------------------------------------------
 
-def _fetch_via_html(html: str, playlist_name: str) -> dict:
+def _fetch_via_html(html: str, playlist_name: str, had_user_token: bool) -> dict:
     """Scrape the server-rendered JSON blob. Works reliably but caps at ~300 tracks."""
     tracks = _extract_tracks_from_html(html)
 
@@ -268,7 +288,23 @@ def _fetch_via_html(html: str, playlist_name: str) -> dict:
         )
 
     print(f"[Apple] HTML scrape: {len(tracks)} tracks from '{playlist_name}'")
-    return {"tracks": tracks, "playlist_name": playlist_name, "count": len(tracks)}
+    result = {"tracks": tracks, "playlist_name": playlist_name, "count": len(tracks)}
+
+    # Apple server-renders at most ~300 tracks and its own trackCount in that
+    # blob is capped to match, so a long playlist looks complete and is not.
+    # If we came back holding suspiciously close to the cap, say so rather than
+    # let somebody discover the missing 200 songs themselves months later.
+    if len(tracks) >= _HTML_SCRAPE_CAP - 5:
+        advice = (
+            "Your Apple Music token did not work; it may have expired."
+            if had_user_token
+            else "Adding an Apple Music user token in Settings may fix it."
+        )
+        result["warning"] = (
+            f"Apple only server-rendered {len(tracks)} tracks and the API path failed, "
+            f"so this list is probably truncated. {advice}"
+        )
+    return result
 
 
 def _fetch_html(url: str) -> str:

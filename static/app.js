@@ -11045,6 +11045,7 @@
             'replaygain_replace_existing': 'settingReplaygainReplaceExisting',
             'min_audio_bitrate': 'settingMinBitrate',
             'reject_live_versions': 'settingRejectLiveVersions',
+            'reject_version_keywords': 'settingRejectVersionKeywords',
             'playlist_comment_tagging': 'settingPlaylistCommentTagging',
             'redownload_missing_files': 'settingRedownloadMissingFiles',
             'enable_track_upgrades': 'settingEnableTrackUpgrades',

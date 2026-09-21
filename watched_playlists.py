@@ -45,6 +45,8 @@ from downloads import check_navidrome_duplicate, check_lidarr_duplicate, _tag_tr
 from youtube import (
     _ytdlp_base_args,
     classify_ytdlp_failure,
+    is_personalised_youtube_playlist,
+    resolve_cookie_file,
     run_ytdlp_with_retries,
 )
 
@@ -1063,14 +1065,29 @@ def fetch_playlist_tracks(url: str, platform: str, user_id: str | None = None) -
 
         # Mix/Radio playlists (RD prefix) only work when seeded with the original watch URL  - 
         # YouTube refuses the bare /playlist?list=RD... form. Pass the URL as-is in that case.
-        if playlist_id.startswith("RD"):
+        # Personalised playlists keep their original URL too, music.youtube.com host and all,
+        # because rewriting them to www.youtube.com is one more way to lose the account context.
+        personalised = is_personalised_youtube_playlist(url, playlist_id)
+        if playlist_id.startswith("RD") or personalised:
             ytdlp_url = url
         else:
             ytdlp_url = f"https://www.youtube.com/playlist?list={playlist_id}"
 
+        # An account-personalised playlist has no meaningful anonymous answer: YouTube
+        # will happily hand back somebody else's recommendations with a straight face.
+        # Refuse to guess rather than quietly importing a stranger's taste.
+        if personalised and not resolve_cookie_file(user_id):
+            raise HTTPException(
+                status_code=401,
+                detail=(
+                    "This is a personalised YouTube Music playlist and needs your YouTube "
+                    "cookies to enumerate. Add them in Settings, then refresh."
+                ),
+            )
+
         info_cmd = [
             "yt-dlp",
-            *_ytdlp_base_args(user_id=user_id),
+            *_ytdlp_base_args(user_id=user_id, require_cookies=personalised),
             "--dump-json",
             "--flat-playlist",
             "--no-warnings",
@@ -1080,6 +1097,10 @@ def fetch_playlist_tracks(url: str, platform: str, user_id: str | None = None) -
         result, timed_out = run_ytdlp_with_retries(
             info_cmd,
             TIMEOUT_YTDLP_PLAYLIST,
+            # Never drop cookies and retry anonymously for a personalised playlist.
+            # A cookieless retry "succeeds", which is the whole problem: we would
+            # enqueue generic recommendations and mark them as the user's playlist.
+            allow_cookie_fallback=not personalised,
             operation=f"YouTube playlist metadata lookup for {playlist_id}",
         )
         if timed_out:
@@ -1093,6 +1114,19 @@ def fetch_playlist_tracks(url: str, platform: str, user_id: str | None = None) -
             # (timeouts, transient network) stays a 502.
             stderr = result.stderr if result is not None else ""
             stderr_lc = stderr.lower()
+            # Personalised playlists are the one case where "private" and friends
+            # mean "your session was not accepted", not "this playlist is gone".
+            # Say so plainly instead of sending the user off to check a URL that
+            # is perfectly fine.
+            if personalised:
+                raise HTTPException(
+                    status_code=401,
+                    detail=(
+                        "YouTube would not enumerate this personalised playlist with your "
+                        "cookies. They may have expired or belong to a different account; "
+                        "re-export them in Settings. Nothing has been queued or changed."
+                    ),
+                )
             client_error_signs = (
                 "does not exist", "unavailable", "private", "has been removed",
                 "this playlist does not exist or is private",
@@ -1145,7 +1179,7 @@ def fetch_playlist_tracks(url: str, platform: str, user_id: str | None = None) -
             else:
                 tracks.append(("Unknown", track_str.strip()))
 
-        return tracks, result["playlist_name"], None, [None] * len(tracks)
+        return tracks, result["playlist_name"], result.get("warning"), [None] * len(tracks)
 
     elif platform == "amazon":
         result = fetch_amazon_playlist(url)

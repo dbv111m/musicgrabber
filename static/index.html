@@ -858,6 +858,11 @@
                         </div>
                         <span class="settings-hint settings-hint-full">When a downloaded track is confidently identified as a live recording (and you did not ask for a live version), bin it and try again. Songs that simply have 'live' in the title, like 'Live and Let Die', are never affected.</span>
                     </label>
+                    <div class="settings-row admin-only">
+                        <label for="settingRejectVersionKeywords">Reject Other Versions</label>
+                        <input type="text" id="settingRejectVersionKeywords" placeholder="demo, acoustic, radio edit, remix" autocomplete="off">
+                        <span class="settings-hint-sm">Comma-separated. A downloaded track confidently identified as one of these versions gets binned and retried, same as the live check above. Only matched inside a version annotation such as '(Acoustic)', '[Demo]' or '- Radio Edit', so 'Demolition Man' is safe from the word 'demo'. Anything you explicitly asked for by name is never rejected.</span>
+                    </div>
                     <label class="settings-label settings-label-wrap admin-only">
                         <span>Tag Playlist Names in Comment</span>
                         <div class="toggle-switch">
@@ -1313,9 +1318,9 @@
                 <h3 class="settings-section-title">Apple Music</h3>
                 <div class="settings-form">
                     <div class="settings-row">
-                        <label for="settingAppleMusicUserToken">Music-User-Token</label>
-                        <input type="password" id="settingAppleMusicUserToken" placeholder="Paste your Music-User-Token here..." autocomplete="off">
-                        <span class="settings-hint">Required for private library playlists. To get the token: open music.apple.com, log in, open DevTools (F12), go to the Network tab, load any playlist, and find a request to <code>amp-api.music.apple.com</code>. Copy the <code>music-user-token</code> request header value.</span>
+                        <label for="settingAppleMusicUserToken">Media-User-Token</label>
+                        <input type="password" id="settingAppleMusicUserToken" placeholder="Paste your media-user-token here..." autocomplete="off">
+                        <span class="settings-hint">Needed for private library playlists, and worth adding for public playlists over 300 tracks. To get the token: open music.apple.com, log in, open DevTools (F12), go to the Network tab, load any playlist, and find a request to <code>amp-api.music.apple.com</code>. Copy the <code>media-user-token</code> request header value. Apple used to call this header <code>music-user-token</code>; if you see that name instead, it is the same thing.</span>
                     </div>
                 </div>
             </div>

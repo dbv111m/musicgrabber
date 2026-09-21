@@ -46,6 +46,7 @@ from metadata import (
     lookup_metadata, lookup_musicbrainz_by_isrc, fetch_lyrics, save_lyrics_file,
     apply_metadata_to_file, read_existing_track_number, verify_recording,
     apply_replaygain_tags, read_replaygain_tags, read_artist_title,
+    parse_reject_keywords, title_has_version_annotation,
 )
 from notifications import send_notification
 from settings import get_setting, get_setting_bool, get_setting_int, get_singles_dir, get_download_dir, get_playlists_dir, get_albums_dir, resolve_custom_subdir
@@ -75,6 +76,7 @@ from freemp3cloud import download_freemp3cloud_track
 from mp3phoenix import download_mp3phoenix_track, is_mp3phoenix_url
 from youtube import (
     _ytdlp_base_args, _is_ytdlp_403, _note_cookie_failure,
+    is_personalised_youtube_playlist, resolve_cookie_file,
     run_ytdlp_with_retries,
 )
 from acquisition import (
@@ -744,7 +746,32 @@ def _note_blacklist_entry(
         print(f"Blacklist write skipped: {e}")
 
 
-def _reject_if_live_version(
+def _unwanted_keyword_verdict(
+    mb_metadata: dict,
+    requested_title: str,
+    user_id: str | None,
+) -> str | None:
+    """Return the user keyword this recording trips, or None.
+
+    The user's own keyword list from Settings, matched only inside a version
+    annotation on the AcoustID-identified title. If they asked for the acoustic
+    version by name, they get the acoustic version; refusing to deliver what
+    somebody explicitly typed would be a special kind of rude.
+    """
+    keywords = parse_reject_keywords(get_setting("reject_version_keywords", "", user_id=user_id))
+    if not keywords:
+        return None
+
+    wanted = (requested_title or "").lower()
+    keywords = [kw for kw in keywords if kw not in wanted]
+    if not keywords:
+        return None
+
+    identified_title = (mb_metadata.get("title") or "")
+    return title_has_version_annotation(identified_title, keywords)
+
+
+def _reject_if_unwanted_version(
     job_id: str,
     audio_file,
     mb_metadata: dict | None,
@@ -754,37 +781,58 @@ def _reject_if_live_version(
     video_id: str | None,
     source: str,
     user_id: str | None,
-) -> bool:
-    """Layer 3 single-flow backstop for unwanted live takes.
+) -> str | None:
+    """Layer 3 single-flow backstop for unwanted versions.
 
-    Returns True if the file was rejected (the caller must then fail the job and
-    stop). Conservative by design: it only ever acts on a confident AcoustID
-    fingerprint identification of a live recording the user did not ask for.
-    Anything uncertain keeps the file; the asymmetry is the whole safety of the
-    feature. See docs/isrc-anchored-album-download.md, Part 1.5, Layer 3.
+    Returns a short reason when the file was rejected (the caller must then fail
+    the job and stop), or None to carry on. Conservative by design: it only ever
+    acts on a confident AcoustID fingerprint identification of a recording the
+    user did not ask for. Anything uncertain keeps the file; the asymmetry is
+    the whole safety of the feature. See docs/isrc-anchored-album-download.md,
+    Part 1.5, Layer 3.
+
+    Two opt-in flavours share that gate: the original live-version check, and
+    the user's own keyword list (GitLab #96).
     """
-    # Feature off -> behave exactly as today.
-    if not get_setting_bool("reject_live_versions", False, user_id=user_id):
-        return False
-
     # Only act when AcoustID actually fingerprinted the file. Text-search or
     # Deezer metadata is not a reliable identification, so we do not gamble.
     if not (mb_metadata and mb_metadata.get("metadata_source") == "acoustid_fingerprint"):
-        return False
+        return None
 
-    # Single-flow: no expected recording MBID, so verify_recording only ever
-    # returns 'reject_live' or 'ok'/'uncertain'. 'uncertain' means keep.
-    verdict = verify_recording(
-        mb_metadata,
-        expected_recording_mbid=None,
-        query=f"{artist} - {title}".strip(" -"),
-    )
-    if verdict not in ("reject_live", "reject_wrong"):
-        return False
+    verdict = None
+    if get_setting_bool("reject_live_versions", False, user_id=user_id):
+        # Single-flow: no expected recording MBID, so verify_recording only ever
+        # returns 'reject_live' or 'ok'/'uncertain'. 'uncertain' means keep.
+        recording_verdict = verify_recording(
+            mb_metadata,
+            expected_recording_mbid=None,
+            query=f"{artist} - {title}".strip(" -"),
+        )
+        if recording_verdict in ("reject_live", "reject_wrong"):
+            verdict = recording_verdict
 
-    reason = "live_version" if verdict == "reject_live" else "wrong_recording"
+    keyword = None
+    if verdict is None:
+        keyword = _unwanted_keyword_verdict(mb_metadata, title, user_id=user_id)
+        if keyword:
+            verdict = "reject_keyword"
+
+    if verdict is None:
+        return None
+
+    reason = {
+        "reject_live": "live_version",
+        "reject_wrong": "wrong_recording",
+        "reject_keyword": "unwanted_version",
+    }[verdict]
     identified = (mb_metadata.get("title") or "").strip() or "unknown"
-    note = f"AcoustID identified this as '{identified}' ({verdict}); we wanted '{title}'"
+    if keyword:
+        note = (
+            f"AcoustID identified this as '{identified}', which matches your "
+            f"reject keyword '{keyword}'; we wanted '{title}'"
+        )
+    else:
+        note = f"AcoustID identified this as '{identified}' ({verdict}); we wanted '{title}'"
     # Blacklist only when we have a precise per-result id (web sources), so a retry
     # skips this exact result. slskd has no stable per-file id, and blacklisting the
     # peer would punish their whole catalogue for one mislabelled track, so there we
@@ -802,7 +850,11 @@ def _reject_if_live_version(
         f"Rejected {source} download for {artist} - {title}: {verdict} "
         f"(AcoustID said '{identified}'); file binned and blacklisted"
     )
-    return True
+    return (
+        f"Rejected unwanted version, keyword '{keyword}' (AcoustID)"
+        if keyword
+        else "Rejected live version (AcoustID)"
+    )
 
 
 def _normalise_source_allowlist(raw_sources) -> set[str] | None:
@@ -3839,19 +3891,30 @@ def process_playlist_download(job_id: str, playlist_id: str, playlist_name: str,
             return
         _update_job(job_id, status="downloading")
 
-        # Get playlist information and extract all video IDs
+        # Get playlist information and extract all video IDs.
+        # Personalised playlists are account-scoped: enumerating one without the
+        # owner's cookies returns a perfectly plausible list of the wrong songs,
+        # so we insist on cookies and refuse to fall back (issue #95).
+        personalised = is_personalised_youtube_playlist("", playlist_id)
+        if personalised and not resolve_cookie_file(user_id):
+            raise Exception(
+                "This personalised YouTube Music playlist needs your YouTube cookies "
+                "to enumerate. Add them in Settings and try again."
+            )
+        host = "music.youtube.com" if personalised else "www.youtube.com"
         info_cmd = [
             "yt-dlp",
-            *_ytdlp_base_args(user_id),
+            *_ytdlp_base_args(user_id, require_cookies=personalised),
             "--dump-json",
             "--flat-playlist",
             "--no-warnings",
-            f"https://www.youtube.com/playlist?list={playlist_id}"
+            f"https://{host}/playlist?list={playlist_id}"
         ]
 
         info_result, info_timed_out = run_ytdlp_with_retries(
             info_cmd,
             TIMEOUT_YTDLP_PLAYLIST,
+            allow_cookie_fallback=not personalised,
             operation=f"Playlist metadata lookup for {playlist_id}",
         )
         if info_timed_out or info_result is None or info_result.returncode != 0:
@@ -4673,12 +4736,13 @@ def process_slskd_download(job_id: str, username: str, filename: str, artist: st
 
         # Layer 3 backstop: a confident AcoustID fingerprint says this is a live take
         # the user did not ask for. Bin it, blacklist the peer, fail the job for retry.
-        if _reject_if_live_version(
+        rejection = _reject_if_unwanted_version(
             job_id, final_file, mb_metadata,
             artist=artist, title=title,
             video_id=None, source="soulseek", user_id=user_id,
-        ):
-            _update_job(job_id, status="failed", error="Rejected live version (AcoustID)", final_path=str(final_file), progress_stage=None, completed_at=datetime.now(timezone.utc).isoformat())
+        )
+        if rejection:
+            _update_job(job_id, status="failed", error=rejection, final_path=str(final_file), progress_stage=None, completed_at=datetime.now(timezone.utc).isoformat())
             return
 
         _apply_replaygain(final_file, user_id=user_id, job_id=job_id)
@@ -5898,12 +5962,13 @@ def process_download(job_id: str, video_id: str, convert_audio: bool = True, sou
 
         # Layer 3 backstop: a confident AcoustID fingerprint says this is a live take
         # the user did not ask for. Bin it, blacklist it, fail the job so retry avoids it.
-        if _reject_if_live_version(
+        rejection = _reject_if_unwanted_version(
             job_id, audio_file, mb_metadata,
             artist=artist, title=title,
             video_id=video_id, source=source_label, user_id=user_id,
-        ):
-            _update_job(job_id, status="failed", error="Rejected live version (AcoustID)", final_path=str(audio_file), progress_stage=None, completed_at=datetime.now(timezone.utc).isoformat())
+        )
+        if rejection:
+            _update_job(job_id, status="failed", error=rejection, final_path=str(audio_file), progress_stage=None, completed_at=datetime.now(timezone.utc).isoformat())
             return
 
         _apply_replaygain(audio_file, user_id=user_id, job_id=job_id)

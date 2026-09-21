@@ -9,7 +9,22 @@
 const RELEASE_NOTES = {
     "4.2.3": {
         title: "What's New in v4.2.3",
-        sections: []
+        sections: [
+            {
+                heading: "Bin the versions you don't want",
+                items: [
+                    "Settings has a new box next to \"Reject Live Versions\" where you can list other versions you'd rather not have: demo, acoustic, radio edit, remix, whatever annoys you. Anything that turns up as one of those gets binned and tried again.",
+                    "It only looks at the bit in brackets or after the dash, so \"Demolition Man\" is safe from \"demo\" and \"Radio Ga Ga\" is safe from \"radio edit\". And if you actually search for the acoustic version, you get the acoustic version. Thanks to kaisernerox on GitLab for the request.",
+                ]
+            },
+            {
+                heading: "Fixed",
+                items: [
+                    "Your YouTube Music mixes are yours again. Discover Mix, My Supermix and Liked Music were sometimes downloading somebody else's recommendations, because YouTube happily hands a logged-out request a completely different set of songs instead of just saying no. These now insist on your cookies, and tell you plainly if the cookies aren't working instead of quietly grabbing the wrong tracks.",
+                    "Apple Music playlists longer than 300 tracks no longer arrive with the end chopped off in silence. Add your Apple Music token in Settings and you get the lot; if something still goes wrong, you'll at least be told the list is short rather than finding out months later. The Settings hint now names the right header, too: look for media-user-token.",
+                ]
+            },
+        ]
     },
     "4.2.2": {
         title: "What's New in v4.2.2",

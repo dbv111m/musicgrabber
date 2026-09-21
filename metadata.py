@@ -1132,6 +1132,51 @@ def _title_has_live_annotation(title: str) -> bool:
     return False
 
 
+def parse_reject_keywords(raw: str) -> list[str]:
+    """Split a user's comma-separated reject list into tidy lowercase keywords.
+
+    Blank entries are dropped, because a stray comma should not blacklist the
+    entire concept of music.
+    """
+    if not raw:
+        return []
+    seen = []
+    for chunk in raw.split(","):
+        keyword = " ".join(chunk.lower().split())
+        if keyword and keyword not in seen:
+            seen.append(keyword)
+    return seen
+
+
+def title_has_version_annotation(title: str, keywords: list[str]) -> str | None:
+    """Return the first keyword appearing inside a version annotation, else None.
+
+    Same positional discipline as `_title_has_live_annotation`, and for the same
+    reason: a bare substring test would bin "Demolition Man" for the keyword
+    "demo" and nobody would thank us. We only look inside bracketed segments and
+    the trailing dash segment, where version annotations actually live. Within
+    such a segment a whole-word match is enough, so "remix" catches
+    "(Tiesto Remix)" without the user having to guess the remixer's name.
+    """
+    if not title or not keywords:
+        return None
+    lowered = title.lower().strip()
+
+    segments = [m.group(1) for m in re.finditer(r'[\(\[]([^\)\]]*)[\]\)]', lowered)]
+    dash_split = re.split(r'\s[-\u2013]\s', lowered)
+    if len(dash_split) > 1:
+        segments.append(dash_split[-1])
+
+    for segment in segments:
+        segment = segment.strip().lstrip(' -')
+        if not segment:
+            continue
+        for keyword in keywords:
+            if re.search(rf'(?<!\w){re.escape(keyword)}(?!\w)', segment):
+                return keyword
+    return None
+
+
 def _disambiguation_is_live(disambiguation: str) -> bool:
     """True if a MusicBrainz recording disambiguation marks it as live.
 
