@@ -43,7 +43,7 @@ def test_catalog_path_carries_the_user_token(monkeypatch):
 
     monkeypatch.setattr(apple, "_fetch_json", fake_fetch_json)
     monkeypatch.setattr(apple, "_extract_web_bundle_url", lambda *_a: "https://x/bundle.js")
-    monkeypatch.setattr(apple, "_extract_web_token", lambda _u: "devtoken")
+    monkeypatch.setattr(apple, "_extract_web_tokens", lambda _u: ["devtoken"])
 
     html = '<link rel="canonical" href="https://music.apple.com/gb/playlist/x/pl.abc">'
     result = apple._fetch_via_api(
@@ -81,3 +81,102 @@ def test_empty_html_scrape_is_still_a_422(monkeypatch):
     with pytest.raises(HTTPException) as excinfo:
         apple._fetch_via_html("<html></html>", "Nothing", False)
     assert excinfo.value.status_code == 422
+
+
+# ---------------------------------------------------------------------------
+# Which developer token we pick (the actual cause of #94)
+#
+# Apple ships several JWTs in its web bundle. Only some of them mean anything
+# to amp-api, nothing in the file says which, and picking the wrong one earns
+# a bare 401 on every request. So: collect them all, best guess first.
+# ---------------------------------------------------------------------------
+
+def _jwt(issuer):
+    import base64 as b64, json as j
+
+    def seg(obj):
+        raw = j.dumps(obj).encode()
+        return b64.urlsafe_b64encode(raw).decode().rstrip("=")
+
+    return f"{seg({'typ': 'JWT'})}.{seg({'iss': issuer})}.notarealsignature"
+
+
+def test_web_player_token_outranks_the_one_that_401s(monkeypatch):
+    """AMPWebPlay is the browser's own token, so try it before the others."""
+    dud = _jwt("M62YD85FTQ")      # the one that refuses everything
+    player = _jwt("AMPWebPlay")   # the one that works
+    other = _jwt("5IKPP2IECQ")
+    monkeypatch.setattr(
+        apple, "_fetch_text",
+        lambda _u: f'const a="{dud}";const b="{other}";const c="{player}";',
+    )
+
+    tokens = apple._extract_web_tokens("https://x/bundle.js")
+
+    assert tokens[0] == player, "web player token should be tried first"
+    assert set(tokens) == {dud, player, other}, "no candidate may be discarded"
+
+
+def test_an_explicitly_named_token_still_wins(monkeypatch):
+    """If Apple names it developerToken again, believe them."""
+    named = _jwt("NAMED")
+    player = _jwt("AMPWebPlay")
+    monkeypatch.setattr(
+        apple, "_fetch_text",
+        lambda _u: f'const c="{player}";developerToken:"{named}"',
+    )
+    assert apple._extract_web_tokens("https://x/bundle.js")[0] == named
+
+
+def test_candidates_are_deduplicated(monkeypatch):
+    player = _jwt("AMPWebPlay")
+    monkeypatch.setattr(
+        apple, "_fetch_text", lambda _u: f'const a="{player}";const b="{player}";'
+    )
+    assert apple._extract_web_tokens("https://x/bundle.js") == [player]
+
+
+def test_a_bundle_with_no_tokens_is_an_error(monkeypatch):
+    monkeypatch.setattr(apple, "_fetch_text", lambda _u: "var x = 1;")
+    with pytest.raises(RuntimeError):
+        apple._extract_web_tokens("https://x/bundle.js")
+
+
+def test_a_401_moves_on_to_the_next_candidate(monkeypatch):
+    """The whole point: one token's 401 must not end the attempt."""
+    dud, player = _jwt("M62YD85FTQ"), _jwt("AMPWebPlay")
+    monkeypatch.setattr(apple, "_extract_web_tokens", lambda _u: [dud, player])
+    monkeypatch.setattr(apple, "_extract_web_bundle_url", lambda *_a: "https://x/b.js")
+    tried = []
+
+    def fake_fetch_all(_sf, _kind, _id, token, _lang, _mut=None):
+        tried.append(token)
+        if token == dud:
+            raise RuntimeError("Apple amp-api returned HTTP 401: ")
+        return ["Blur - Song 2"]
+
+    monkeypatch.setattr(apple, "_fetch_all_tracks", fake_fetch_all)
+    html = '<link rel="canonical" href="https://music.apple.com/gb/playlist/x/pl.abc">'
+
+    result = apple._fetch_via_api("https://music.apple.com/gb/playlist/x/pl.abc", html, "X")
+
+    assert tried == [dud, player], "must try the refused token then move on"
+    assert result["tracks"] == ["Blur - Song 2"]
+
+
+def test_a_non_auth_failure_is_not_retried_on_every_token(monkeypatch):
+    """A genuinely broken playlist should fail once, not four times."""
+    monkeypatch.setattr(apple, "_extract_web_tokens", lambda _u: [_jwt("a"), _jwt("b")])
+    monkeypatch.setattr(apple, "_extract_web_bundle_url", lambda *_a: "https://x/b.js")
+    calls = []
+
+    def fake_fetch_all(*_a, **_kw):
+        calls.append(1)
+        raise RuntimeError("Apple amp-api returned no tracks")
+
+    monkeypatch.setattr(apple, "_fetch_all_tracks", fake_fetch_all)
+    html = '<link rel="canonical" href="https://music.apple.com/gb/playlist/x/pl.abc">'
+
+    with pytest.raises(RuntimeError, match="no tracks"):
+        apple._fetch_via_api("https://music.apple.com/gb/playlist/x/pl.abc", html, "X")
+    assert len(calls) == 1

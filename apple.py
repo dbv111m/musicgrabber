@@ -11,6 +11,7 @@ HTML scraping is kept as a last-resort fallback for short public playlists if
 the API path fails.
 """
 
+import base64
 import json
 import re
 import urllib.error
@@ -169,10 +170,28 @@ def _fetch_via_api(
 ) -> dict:
     storefront, item_type, item_id, language = _extract_catalog_context(url, html)
     bundle_url = _extract_web_bundle_url(url, html)
-    token = _extract_web_token(bundle_url)
-    tracks = _fetch_all_tracks(
-        storefront, item_type, item_id, token, language, music_user_token
-    )
+
+    # Try each candidate token until amp-api stops slamming the door. A wrong
+    # token answers with a bare 401, which is indistinguishable from "computer
+    # says no" until you try a different one, so that is exactly what we do.
+    tracks = None
+    last_error = None
+    for index, token in enumerate(_extract_web_tokens(bundle_url), start=1):
+        try:
+            tracks = _fetch_all_tracks(
+                storefront, item_type, item_id, token, language, music_user_token
+            )
+            if index > 1:
+                print(f"[Apple] Token candidate {index} worked; earlier ones were refused")
+            break
+        except RuntimeError as exc:
+            last_error = exc
+            if "401" not in str(exc) and "403" not in str(exc):
+                raise
+            continue
+
+    if tracks is None:
+        raise last_error or RuntimeError("Apple amp-api refused every candidate token")
 
     return {
         "tracks": tracks,
@@ -211,20 +230,57 @@ def _extract_web_bundle_url(page_url: str, html: str) -> str:
     return urllib.parse.urljoin(page_url, script_match.group(1))
 
 
-def _extract_web_token(bundle_url: str) -> str:
+def _jwt_issuer(token: str) -> str:
+    """Return a JWT's `iss` claim, or "" if it will not decode.
+
+    No signature checking; we only want to know which Apple service minted it
+    so we can guess which one amp-api will actually answer to.
+    """
+    try:
+        payload = token.split(".")[1]
+        payload += "=" * (-len(payload) % 4)
+        return str(json.loads(base64.urlsafe_b64decode(payload)).get("iss", ""))
+    except Exception:
+        return ""
+
+
+def _extract_web_tokens(bundle_url: str) -> list[str]:
+    """Return every plausible developer token in the bundle, best guess first.
+
+    Apple ships several JWTs in that bundle and only some of them mean anything
+    to amp-api. Taking the first one we found was the whole of GitLab #94: the
+    one our regex happened to land on (`iss` M62YD85FTQ) answers every catalog
+    request with a bare 401, while the web player's own (`iss` AMPWebPlay) and
+    one other hand over the entire playlist quite happily. Nothing in the file
+    says which is which, so we order by how likely each is to be the right one
+    and let the caller try them in turn.
+    """
     js = _fetch_text(bundle_url)
 
-    patterns = (
-        r'developerToken:"([^"]+)"',
-        r"developerToken:`([^`]+)`",
-        r'const\s+\w+="(eyJ[a-zA-Z0-9._-]+)"',
-    )
-    for pattern in patterns:
-        match = re.search(pattern, js)
-        if match:
-            return match.group(1)
+    named = []
+    for pattern in (r'developerToken:"([^"]+)"', r"developerToken:`([^`]+)`"):
+        named.extend(re.findall(pattern, js))
 
-    raise RuntimeError("Could not extract Apple Music web token")
+    loose = re.findall(
+        r'(eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,})', js
+    )
+    # The web player's own token first among the unnamed ones. It is the one
+    # the browser uses, so it is the one most likely to still work next month.
+    web_player = [t for t in loose if _jwt_issuer(t) == "AMPWebPlay"]
+
+    ordered = []
+    for token in [*named, *web_player, *loose]:
+        if token and token not in ordered:
+            ordered.append(token)
+
+    if not ordered:
+        raise RuntimeError("Could not extract Apple Music web token")
+    return ordered
+
+
+def _extract_web_token(bundle_url: str) -> str:
+    """Single best-guess token, for callers that cannot try more than one."""
+    return _extract_web_tokens(bundle_url)[0]
 
 
 def _fetch_all_tracks(

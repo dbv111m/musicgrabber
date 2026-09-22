@@ -1320,7 +1320,7 @@
                     <div class="settings-row">
                         <label for="settingAppleMusicUserToken">Media-User-Token</label>
                         <input type="password" id="settingAppleMusicUserToken" placeholder="Paste your media-user-token here..." autocomplete="off">
-                        <span class="settings-hint">Needed for private library playlists, and worth adding for public playlists over 300 tracks. To get the token: open music.apple.com, log in, open DevTools (F12), go to the Network tab, load any playlist, and find a request to <code>amp-api.music.apple.com</code>. Copy the <code>media-user-token</code> request header value. Apple used to call this header <code>music-user-token</code>; if you see that name instead, it is the same thing.</span>
+                        <span class="settings-hint">Only needed for private library playlists (<code>music.apple.com/library/...</code>). Public playlists and albums need no token at all, whatever their length. To get it: open music.apple.com, log in, open DevTools (F12), go to the Network tab, load any playlist, and find a request to <code>amp-api.music.apple.com</code>. Copy the <code>media-user-token</code> request header value. Apple's docs call it <code>Music-User-Token</code>; same thing.</span>
                     </div>
                 </div>
             </div>

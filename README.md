@@ -455,7 +455,7 @@ The easiest way to configure MusicGrabber is via the **Settings tab** in the UI.
 - **YouTube**: Upload browser cookies for authenticated downloads and playlist fetching, including watched-playlist refreshes. These use your own cookie file when available, falling back to the shared cookie file otherwise. Account-personalised YouTube Music playlists (Discover Mix, My Supermix, Liked Music and friends) require cookies and will not be enumerated without them, because YouTube answers a logged-out request with somebody else's recommendations rather than an error.
 - **Maintenance**: preview and remove orphaned watched imports, clear selected Queue-history states, reconcile missing files, or rebuild path records from audio beneath the configured Singles, Playlists, and Albums folders. These actions change database records only; they never delete or move library audio
 - **Spotify**: Upload browser cookies to access private playlists
-- **Apple Music**: Add a user token for private library playlists, and for public playlists over 300 tracks
+- **Apple Music**: Add a user token for private library playlists
 - **Blacklist**: View and manage reported tracks and blocked uploaders
 - **Security**: API key for authentication
 - **Users** (admin only): create and manage user accounts, reset passwords
@@ -553,7 +553,7 @@ Settings are stored in the database and persist across container restarts.
 | `LIBRARY_RECONCILE_INTERVAL` | `1800` | How often MusicGrabber reconciles deleted/renamed files against the job database (seconds) |
 | `SPOTIFY_BROWSER_TIMEOUT_SECONDS` | `180` | Maximum runtime for the headless Spotify playlist browser fallback |
 | `SPOTIFY_BROWSER_STALL_SECONDS` | `30` | Abort Spotify browser scrolling after this many seconds without finding more tracks |
-| `APPLE_MUSIC_USER_TOKEN` | - | Apple Music user token for private library playlists, and for public playlists over 300 tracks |
+| `APPLE_MUSIC_USER_TOKEN` | - | Apple Music user token for private `music.apple.com/library/...` playlists |
 | `NOTIFY_ON` | `playlists,bulk,errors` | Notification triggers (applies to all channels): `singles`, `playlists`, `bulk`, `errors` |
 | `APPRISE_URL` | - | Apprise notification URL (covers Gotify, ntfy, Discord, Pushover, Slack, and ~50 others) |
 | `TELEGRAM_WEBHOOK_URL` | - | Full Telegram webhook URL (see Notifications section below) |
@@ -857,7 +857,7 @@ The `sp_dc` session cookie is what grants access. It has a long expiry (typicall
 
 **Apple Music private library playlists:**
 
-Public Apple Music playlists and albums under about 300 tracks work without credentials. Anything longer needs your Apple Music user token, as does any private `music.apple.com/library/...` playlist: add it in **Settings, Apple Music**. In DevTools the header is called `media-user-token` (Apple's docs still call it `Music-User-Token`; same value, and MusicGrabber sends both). MusicGrabber fetches the current web bearer token automatically from Apple's public bundle.
+Public Apple Music playlists and albums work without credentials, at any length. Only private `music.apple.com/library/...` playlists need your Apple Music user token: add it in **Settings, Apple Music**. In DevTools the header is called `media-user-token` (Apple's docs still call it `Music-User-Token`; same value, and MusicGrabber sends both). MusicGrabber fetches the web bearer token automatically from Apple's public bundle, trying each candidate in that bundle until amp-api accepts one, because only some of them work and Apple does not say which.
 
 You can also provide it as an environment variable:
 
