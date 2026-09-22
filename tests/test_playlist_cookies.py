@@ -154,3 +154,82 @@ def test_ordinary_playlist_still_allows_the_cookie_fallback(tmp_path, monkeypatc
         "https://www.youtube.com/playlist?list=PLexample", "youtube", user_id=None,
     )
     assert calls[0][1]["allow_cookie_fallback"] is True
+
+
+# ---------------------------------------------------------------------------
+# Per-user cookie scoping (issue #95, second round)
+#
+# Saving cookies wrote them to the user's settings row and then synced the
+# *global* file, so on a multi-user box the freshly saved cookies never reached
+# disk and cookies.txt was deleted for everyone else's trouble. What came back
+# instead was another account's jar, which for a personalised playlist is the
+# original bug wearing a different hat: authenticated, plausible, not yours.
+# ---------------------------------------------------------------------------
+
+
+def test_sync_writes_the_user_jar_and_leaves_the_global_one_alone(tmp_path, monkeypatch):
+    import settings
+    shared = tmp_path / "cookies.txt"
+    shared.write_text("everyone's cookies")
+    monkeypatch.setattr(youtube, "COOKIES_FILE", shared)
+    monkeypatch.setattr(youtube, "_has_valid_cookie_entries", lambda _text: True)
+    monkeypatch.setattr(
+        settings, "get_setting",
+        lambda key, default="", user_id=None: "alice's cookies" if user_id == "alice" else "",
+    )
+    monkeypatch.setattr(youtube, "get_setting", settings.get_setting)
+
+    youtube._sync_cookies_file(user_id="alice")
+
+    own = tmp_path / "cookies-alice.txt"
+    assert own.read_text() == "alice's cookies"
+    # The global jar is not ours to delete on someone else's save.
+    assert shared.read_text() == "everyone's cookies"
+    # A jar of live session cookies stays private.
+    assert own.stat().st_mode & 0o077 == 0
+
+
+def test_a_named_user_never_borrows_the_global_jar_when_cookies_are_required(tmp_path, monkeypatch):
+    shared = tmp_path / "cookies.txt"
+    shared.write_text("bob's cookies")
+    monkeypatch.setattr(youtube, "COOKIES_FILE", shared)
+    monkeypatch.setattr(youtube, "_sync_cookies_file", lambda **_kwargs: None)
+
+    # Ordinary download: borrowing the shared jar is a fine rescue.
+    assert youtube.resolve_cookie_file("alice") == shared
+    # Personalised playlist: bob's cookies answer the wrong question entirely.
+    assert youtube.resolve_cookie_file("alice", allow_global_fallback=False) is None
+
+
+def test_resolve_rebuilds_a_user_jar_that_the_old_sync_bug_never_wrote(tmp_path, monkeypatch):
+    """Upgrading must not make everyone re-export cookies they already saved."""
+    import settings
+    shared = tmp_path / "cookies.txt"
+    monkeypatch.setattr(youtube, "COOKIES_FILE", shared)
+    monkeypatch.setattr(youtube, "_has_valid_cookie_entries", lambda _text: True)
+    monkeypatch.setattr(
+        settings, "get_setting",
+        lambda key, default="", user_id=None: "alice's cookies" if user_id == "alice" else "",
+    )
+    monkeypatch.setattr(youtube, "get_setting", settings.get_setting)
+
+    resolved = youtube.resolve_cookie_file("alice", allow_global_fallback=False)
+    assert resolved == tmp_path / "cookies-alice.txt"
+    assert resolved.read_text() == "alice's cookies"
+
+
+def test_expired_cookies_are_cleared_from_the_scope_they_were_read_from(monkeypatch):
+    """Clearing the global setting while reading the user's one bins the wrong
+    cookies and leaves the expired ones exactly where they were."""
+    import settings
+    cleared = []
+    expired = "# Netscape HTTP Cookie File\n.youtube.com\tTRUE\t/\tTRUE\t1\tSID\tdead\n"
+    monkeypatch.setattr(settings, "get_setting", lambda key, default="", user_id=None: expired)
+    monkeypatch.setattr(youtube, "get_setting", settings.get_setting)
+    monkeypatch.setattr(settings, "set_setting", lambda k, v: cleared.append(("global", k, v)))
+    monkeypatch.setattr(
+        settings, "set_user_setting", lambda u, k, v: cleared.append((u, k, v)))
+    monkeypatch.setattr(youtube, "_sync_cookies_file", lambda **_kwargs: None)
+
+    assert youtube.clear_expired_cookies(user_id="alice") is True
+    assert cleared == [("alice", "youtube_cookies", "")]

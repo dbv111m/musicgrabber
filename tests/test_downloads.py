@@ -1869,3 +1869,84 @@ def test_enforce_target_format_still_converts_a_lossless_source(tmp_path, monkey
 
     result = downloads._enforce_target_format(audio_file, True)
     assert result.suffix == ".mp3"
+
+
+# ---------------------------------------------------------------------------
+# Weekly playlists carrying tracks across editions (issue #97)
+#
+# A ListenBrainz "Created for You" playlist renames itself every Monday, so its
+# folder and M3U rotate with it. A track that survives into the new week still
+# lives in the previous week's folder, which is inside the Playlists tree but
+# not inside *this* week's folder. It used to fall through to the branch meant
+# for Navidrome library paths and get stamped in as an absolute path, which
+# plays here and nowhere else.
+# ---------------------------------------------------------------------------
+
+def _weekly_playlist_db(monkeypatch, downloads, playlists_dir, sync_mode="mirror"):
+    import sqlite3
+    from contextlib import contextmanager
+
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.executescript("""
+        CREATE TABLE jobs (id TEXT PRIMARY KEY, artist TEXT, title TEXT);
+        CREATE TABLE watched_playlists (
+            id TEXT PRIMARY KEY, name TEXT, user_id TEXT,
+            stale_navidrome_paths INTEGER DEFAULT 0);
+        CREATE TABLE watched_playlist_tracks (
+            playlist_id TEXT, track_hash TEXT, artist TEXT, title TEXT,
+            downloaded_at TIMESTAMP, resolved_path TEXT, job_id TEXT,
+            removed_at TIMESTAMP, position INTEGER,
+            first_seen TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (playlist_id, track_hash));
+    """)
+
+    @contextmanager
+    def fake_db_conn():
+        yield conn
+
+    monkeypatch.setattr(downloads, "db_conn", fake_db_conn)
+    monkeypatch.setattr(downloads, "get_playlists_dir", lambda user_id=None: playlists_dir)
+    monkeypatch.setattr(downloads, "_tag_track_comment", lambda *a, **k: None)
+    monkeypatch.setattr(downloads, "set_file_permissions", lambda *a, **k: None)
+    return conn
+
+
+def test_weekly_carry_over_track_stays_relative_to_the_playlists_folder(tmp_path, monkeypatch):
+    downloads = _import_downloads_or_skip()
+
+    playlists_dir = tmp_path / "Playlists"
+    playlists_dir.mkdir()
+    conn = _weekly_playlist_db(monkeypatch, downloads, playlists_dir)
+
+    last_week = "Weekly Jams for kaisernerox, week of 2026-09-14"
+    this_week = "Weekly Jams for kaisernerox, week of 2026-09-21"
+
+    def seed(artist, title, folder, position):
+        folder_path = playlists_dir / folder
+        folder_path.mkdir(parents=True, exist_ok=True)
+        audio = folder_path / f"{artist} - {title}.mp3"
+        audio.write_bytes(b"not really audio")
+        conn.execute(
+            """INSERT INTO watched_playlist_tracks
+               (playlist_id, track_hash, artist, title, downloaded_at, resolved_path, position)
+               VALUES (?, ?, ?, ?, datetime('now'), ?, ?)""",
+            ("pl-1", f"{artist}|{title}", artist, title, str(audio), position),
+        )
+
+    conn.execute(
+        "INSERT INTO watched_playlists (id, name) VALUES (?, ?)", ("pl-1", this_week))
+    seed("Floating Points", "Last Bloom", last_week, 0)   # survived the rollover
+    seed("Yussef Dayes", "Rust", this_week, 1)            # new this week
+    conn.commit()
+
+    m3u = downloads.rebuild_watched_playlist_m3u(
+        "pl-1", this_week, use_playlists_dir=True, sync_mode="mirror", user_id=None,
+    )
+
+    entries = [l for l in m3u.read_text().splitlines() if not l.startswith("#")]
+    assert entries == [
+        f"{last_week}/Floating Points - Last Bloom.mp3",
+        f"{this_week}/Yussef Dayes - Rust.mp3",
+    ], "last week's track must stay relative to Playlists/, not go absolute"
+    assert not any(e.startswith("/") for e in entries)

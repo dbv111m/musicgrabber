@@ -452,7 +452,7 @@ The easiest way to configure MusicGrabber is via the **Settings tab** in the UI.
 - **Jellyfin**: URL and API key for library refresh
 - **Lidarr**: URL and API key for library refresh
 - **Notifications**: Apprise URL, Telegram webhook, generic webhook URL, and SMTP settings
-- **YouTube**: Upload browser cookies for authenticated downloads and playlist fetching, including watched-playlist refreshes. These use your own cookie file when available, falling back to the shared cookie file otherwise. Account-personalised YouTube Music playlists (Discover Mix, My Supermix, Liked Music and friends) require cookies and will not be enumerated without them, because YouTube answers a logged-out request with somebody else's recommendations rather than an error.
+- **YouTube**: Upload browser cookies for authenticated downloads and playlist fetching, including watched-playlist refreshes. These use your own cookie file when available, falling back to the shared cookie file otherwise. The fallback is deliberately switched off for account-personalised playlists: borrowing another account's jar there would return a confidently authenticated list of somebody else's songs, so a signed-in user gets their own cookies or a clear error. Account-personalised YouTube Music playlists (Discover Mix, My Supermix, Liked Music and friends) require cookies and will not be enumerated without them, because YouTube answers a logged-out request with somebody else's recommendations rather than an error.
 - **Maintenance**: preview and remove orphaned watched imports, clear selected Queue-history states, reconcile missing files, or rebuild path records from audio beneath the configured Singles, Playlists, and Albums folders. These actions change database records only; they never delete or move library audio
 - **Spotify**: Upload browser cookies to access private playlists
 - **Apple Music**: Add a user token for private library playlists
@@ -907,6 +907,19 @@ has changed. The earlier Queue rows and attempt history remain in place. Manual
 single-track result selections are different by design: MusicGrabber honours the
 chosen service and does not silently swap it for another one; Soulseek may try
 another peer for the same recording before admitting defeat.
+
+ListenBrainz "Created for You" playlists (Weekly Jams, Weekly Exploration) are
+reissued under a fresh UUID every Monday. Add one by URL, or add your bare
+ListenBrainz username to set up every "Created for You" playlist at once, each
+as its own watched playlist. MusicGrabber follows the weekly reissue across
+automatically, re-querying ListenBrainz when a playlist goes stale or its URL
+starts 404ing. The playlist's name carries the week (`Weekly Jams for you, week
+of 2026-09-21`), so its folder and M3U are dated and each week gets its own
+file. Set such a playlist to **Mirror** sync and each week's M3U holds that
+week's tracks, with previous weeks' M3Us left intact beside it; on **Append**
+the newest file accumulates every track since you started watching. Audio is
+never deleted either way, and a track carried over from an earlier week is
+played from where it already lives rather than downloaded twice.
 
 Each watched playlist can also:
 - Use Append or Mirror sync for its M3U

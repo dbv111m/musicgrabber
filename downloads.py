@@ -3714,7 +3714,15 @@ def rebuild_watched_playlist_m3u(playlist_id: str, playlist_name: str, use_playl
                         rel = stored_path.relative_to(playlists_dir / safe_playlist)
                         entry = f"{safe_playlist}/{rel}"
                     except ValueError:
-                        entry = stored_path_str  # outside playlist folder, use as-is (library/Navidrome path)
+                        try:
+                            # Not in *this* playlist's folder, but still somewhere in
+                            # the Playlists tree: a weekly playlist carrying a track
+                            # over from an earlier week's folder, most likely. It is
+                            # ours, so keep it relative and portable rather than
+                            # stamping in an absolute path that only works here.
+                            entry = str(stored_path.relative_to(playlists_dir))
+                        except ValueError:
+                            entry = stored_path_str  # genuinely elsewhere (library/Navidrome path)
                 else:
                     # Singles-layout mode: use path relative to Singles dir
                     try:
@@ -3896,7 +3904,7 @@ def process_playlist_download(job_id: str, playlist_id: str, playlist_name: str,
         # owner's cookies returns a perfectly plausible list of the wrong songs,
         # so we insist on cookies and refuse to fall back (issue #95).
         personalised = is_personalised_youtube_playlist("", playlist_id)
-        if personalised and not resolve_cookie_file(user_id):
+        if personalised and not resolve_cookie_file(user_id, allow_global_fallback=False):
             raise Exception(
                 "This personalised YouTube Music playlist needs your YouTube cookies "
                 "to enumerate. Add them in Settings and try again."

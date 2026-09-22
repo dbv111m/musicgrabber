@@ -1076,7 +1076,7 @@ def fetch_playlist_tracks(url: str, platform: str, user_id: str | None = None) -
         # An account-personalised playlist has no meaningful anonymous answer: YouTube
         # will happily hand back somebody else's recommendations with a straight face.
         # Refuse to guess rather than quietly importing a stranger's taste.
-        if personalised and not resolve_cookie_file(user_id):
+        if personalised and not resolve_cookie_file(user_id, allow_global_fallback=False):
             raise HTTPException(
                 status_code=401,
                 detail=(

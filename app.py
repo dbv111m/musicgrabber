@@ -847,9 +847,12 @@ def update_settings(updates: SettingsUpdate, request: Request):
 
         updated_keys.append(key)
 
-    # Sync cookies file if YouTube cookies were updated
+    # Sync cookies file if YouTube cookies were updated. Scope it to the user we
+    # just saved for: unscoped, the save lands in user_settings while the file
+    # written is the global one, which on a multi-user box either deletes
+    # cookies.txt or leaves everyone sharing one account (issue #95).
     if "youtube_cookies" in updated_keys:
-        _sync_cookies_file()
+        _sync_cookies_file(user_id=user_id)
 
     # Clear the expired flag when fresh Spotify cookies are saved
     if "spotify_cookies" in updated_keys:

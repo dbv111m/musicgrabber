@@ -122,7 +122,7 @@ def clear_expired_cookies(user_id: str | None = None) -> bool:
     When user_id is provided, checks and clears that user's cookies.
     Returns True if cookies were cleared, False otherwise.
     """
-    from settings import get_setting, set_setting
+    from settings import get_setting, set_setting, set_user_setting
     cookies_text = get_setting("youtube_cookies", "", user_id=user_id)
     if not cookies_text.strip():
         return False
@@ -131,9 +131,14 @@ def clear_expired_cookies(user_id: str | None = None) -> bool:
         return False
     if time.time() < expiry:
         return False
-    # Every auth cookie has expired  -  bin them
+    # Every auth cookie has expired  -  bin them. Clear the same scope we read,
+    # or we wipe the global setting and leave the expired ones exactly where
+    # they were, which is the worst of both worlds.
     print("YouTube cookies have expired  -  clearing from settings")
-    set_setting("youtube_cookies", "")
+    if user_id:
+        set_user_setting(user_id, "youtube_cookies", "")
+    else:
+        set_setting("youtube_cookies", "")
     _sync_cookies_file(user_id=user_id)
     return True
 
@@ -155,20 +160,47 @@ def _sync_cookies_file(user_id: str | None = None):
             return
         cookie_file.parent.mkdir(parents=True, exist_ok=True)
         cookie_file.write_text(cookies)
+        # It is a jar of live session cookies, so keep it to ourselves.
+        try:
+            cookie_file.chmod(0o600)
+        except OSError:
+            pass
     elif cookie_file.exists():
         cookie_file.unlink()
 
 
-def resolve_cookie_file(user_id: str | None = None) -> "Path | None":
+def resolve_cookie_file(
+    user_id: str | None = None, *, allow_global_fallback: bool = True
+) -> "Path | None":
     """Return the cookie file we would actually hand yt-dlp, or None.
 
     Per-user file wins if it exists and has content; otherwise the global one.
     Ignores the cooldown window, so callers that must be authenticated can ask
     "do we have cookies at all?" separately from "are we currently trusting
     them?".
+
+    With allow_global_fallback off, a named user gets their own cookies or
+    nothing. Borrowing the global jar is a fine rescue on an ordinary download,
+    where the worst case is somebody else's Premium bitrate, and quietly wrong
+    on a personalised playlist, where the answer returned is a stranger's taste
+    presented as yours (issue #95).
     """
     cookie_file = get_user_cookies_file(user_id)
-    if not (cookie_file.exists() and cookie_file.stat().st_size > 0):
+    own = cookie_file.exists() and cookie_file.stat().st_size > 0
+    if user_id and not own:
+        # Before the sync was scoped, saving cookies wrote the global file and
+        # left the user's own one missing. Rebuild it from the setting that was
+        # saved correctly all along, rather than making everyone re-export.
+        # Best effort: if the settings lookup falls over we simply have no
+        # per-user cookies, which is what we already believed.
+        try:
+            _sync_cookies_file(user_id=user_id)
+            own = cookie_file.exists() and cookie_file.stat().st_size > 0
+        except Exception:
+            pass
+    if not own:
+        if user_id and not allow_global_fallback:
+            return None
         cookie_file = COOKIES_FILE
     if cookie_file.exists() and cookie_file.stat().st_size > 0:
         return cookie_file
@@ -215,13 +247,16 @@ def _ytdlp_base_args(user_id: str | None = None, *, require_cookies: bool = Fals
 
     With require_cookies, the caller is telling us the request is meaningless
     without an authenticated session, so the temporary cookie cooldown is
-    ignored. An anonymous answer to "what is in *my* personalised playlist" is
-    not a degraded answer, it is somebody else's answer, and we would rather
-    fail than serve that.
+    ignored and the global jar is no longer an acceptable stand-in for a named
+    user's own cookies. An anonymous answer to "what is in *my* personalised
+    playlist" is not a degraded answer, it is somebody else's answer, and so is
+    the answer another user's cookies would give. We would rather fail.
     """
     args = []
     if require_cookies or _cookies_allowed():
-        cookie_file = resolve_cookie_file(user_id)
+        cookie_file = resolve_cookie_file(
+            user_id, allow_global_fallback=not require_cookies
+        )
         if cookie_file:
             args.extend(["--cookies", str(cookie_file)])
     if YTDLP_PLAYER_CLIENT:
