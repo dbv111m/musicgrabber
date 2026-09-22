@@ -823,7 +823,7 @@ Bulk Import also accepts **MusicBrainz release URLs**, which are handled differe
 **How it works by source:**
 
 - **Apple Music**: Fetches the public page, extracts Apple's current web MusicKit token from the site bundle, then paginates their `amp-api` track endpoint directly. Falls back to the server-rendered HTML when needed
-- **Amazon Music**: Headless browser scraping via Playwright. Slower but reliable for most public playlists
+- **Amazon Music**: Playwright bootstraps Amazon's anonymous web session, then reads the complete ordered playlist from the app's JSON response. This avoids the rendered page's virtualised scrolling on long playlists; DOM scraping remains as a fallback
 - **Spotify small playlists (under ~100 tracks)**: Uses Spotify's embed endpoint to quickly fetch track data
 - **Spotify large playlists (100+ tracks)**: Automatically falls back to headless browser scraping
 - **Tidal playlists**: Direct scrape of Tidal's embed player (`embed.tidal.com/playlists/UUID`), which server-renders the full track list. Downloads can use any enabled source

@@ -20,6 +20,7 @@ const RELEASE_NOTES = {
             {
                 heading: "Fixed",
                 items: [
+                    "Amazon playlists now come straight from the complete ordered list its web app receives, rather than making the browser scroll through a page that keeps recycling rows. A real 229-row public playlist now returns all 227 unique songs in order, and the rendered page remains ready as a fallback. It turns out Amazon's JSON never left; it merely renamed the useful fields and watched us blame the furniture.",
                     "Your YouTube Music mixes are yours again. Discover Mix, My Supermix and Liked Music were sometimes downloading somebody else's recommendations, because YouTube happily hands a logged-out request a completely different set of songs instead of just saying no. These now insist on your cookies, and tell you plainly if the cookies aren't working instead of quietly grabbing the wrong tracks.",
                     "Apple Music playlists longer than 300 tracks no longer arrive with the end chopped off in silence. Add your Apple Music token in Settings and you get the lot; if something still goes wrong, you'll at least be told the list is short rather than finding out months later. The Settings hint now names the right header, too: look for media-user-token.",
                 ]

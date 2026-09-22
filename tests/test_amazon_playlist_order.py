@@ -5,10 +5,10 @@ collectors were sets and the result was run through sorted().  A playlist is a
 running order, so these check the ordering survives, and that the explicit badge
 stops gatecrashing the title while we're here.
 
-There were two collectors at the time, the rendered page and a sifter for the
-app's JSON traffic. The latter was removed in v4.1.3 having never contributed a
-single track, so `_ordered` below now mirrors the whole of `main`'s final step
-rather than most of it.
+Amazon's current JSON calls playlist rows ``VisualRowItemElement`` and names
+their useful fields ``primaryText`` and ``secondaryText1``. The old generic
+network collector did not know that, which is why it reported zero tracks even
+while the response contained the whole list.
 """
 
 import os
@@ -68,6 +68,90 @@ def test_a_row_at_the_very_top_is_not_lost_to_a_falsy_position():
     seen = {}
     amazonpl._merge_positioned([(80.0, "second"), (0.0, "first")], seen)
     assert _ordered(seen) == ["first", "second"]
+
+
+# ---------------------------------------------------------------------------
+# Amazon showHome JSON
+# ---------------------------------------------------------------------------
+
+def _network_row(index, title, artist):
+    return {
+        "interface": "Web.TemplatesInterface.v1_0.Touch.WidgetsInterface.VisualRowItemElement",
+        "rowIndex": str(index),
+        "primaryText": title,
+        "secondaryText1": artist,
+        "primaryLink": {"deeplink": f"/albums/album?trackAsin=track-{index}"},
+    }
+
+
+def test_current_show_home_rows_are_extracted_in_playlist_order():
+    payload = {
+        "methods": [{
+            "header": {
+                "interface": "Web.TemplatesInterface.v1_0.Touch.WidgetsInterface.TextElement",
+                "text": "A Proper Playlist",
+                "observer": {"storageGroup": "PLAYLIST_NAME"},
+            },
+            "items": [
+                _network_row(2, "Second", "Artist B"),
+                _network_row(1, "First", "Artist A"),
+            ],
+        }]
+    }
+    rows = {}
+    names = []
+
+    amazonpl._extract_from_payload(payload, rows, names)
+
+    assert amazonpl._ordered_network_tracks(rows) == [
+        "Artist A - First",
+        "Artist B - Second",
+    ]
+    assert names == ["A Proper Playlist"]
+
+
+def test_network_extractor_has_no_hundred_track_ceiling():
+    payload = {"items": [
+        _network_row(index, f"Track {index}", f"Artist {index}")
+        for index in range(125, 0, -1)
+    ]}
+    rows = {}
+
+    amazonpl._extract_from_payload(payload, rows)
+    tracks = amazonpl._ordered_network_tracks(rows)
+
+    assert len(tracks) == 125
+    assert tracks[0] == "Artist 1 - Track 1"
+    assert tracks[-1] == "Artist 125 - Track 125"
+
+
+def test_repeated_network_tracks_keep_their_first_playlist_position():
+    rows = {}
+    amazonpl._extract_from_payload({"items": [
+        _network_row(3, "Same Song", "Same Artist"),
+        _network_row(1, "Same Song", "Same Artist"),
+        _network_row(2, "Other Song", "Other Artist"),
+    ]}, rows)
+
+    assert len(rows) == 3
+    assert amazonpl._ordered_network_tracks(rows) == [
+        "Same Artist - Same Song",
+        "Other Artist - Other Song",
+    ]
+
+
+def test_unrelated_json_objects_are_not_mistaken_for_tracks():
+    payload = {
+        "title": "Not a track",
+        "artistName": "Nor an artist",
+        "primaryText": "Still not a row",
+        "secondaryText1": "Nope",
+    }
+    rows = {}
+
+    amazonpl._extract_from_payload(payload, rows)
+
+    assert rows == {}
 
 
 # ---------------------------------------------------------------------------

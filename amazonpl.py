@@ -11,6 +11,7 @@ import os
 import re
 import sys
 import time
+from typing import Any
 
 try:
     from playwright.sync_api import sync_playwright
@@ -95,6 +96,73 @@ def _strip_featured_suffix(title: str, artist: str) -> str:
 
 def _looks_like_duration(text: str) -> bool:
     return bool(re.match(r"^\d{1,2}:\d{2}$", text))
+
+
+def _extract_from_payload(
+    payload: Any,
+    rows: dict[int, str],
+    playlist_names: list[str] | None = None,
+) -> None:
+    """Extract Amazon's ordered playlist rows from a ``showHome`` response.
+
+    The response calls these ``VisualRowItemElement`` objects.  Older code
+    looked for generic ``title`` and ``artistName`` fields, so it reported
+    precisely zero tracks even though the complete playlist was sitting in
+    front of it under ``primaryText`` and ``secondaryText1``.  ``rowIndex`` is
+    the playlist position and, unlike the rendered page, is available for the
+    whole list at once.
+
+    ``rows`` is keyed by position rather than track text so repeated songs do
+    not disturb the ordering.  The final conversion deliberately retains the
+    scraper's established unique-track behaviour.
+    """
+    if isinstance(payload, dict):
+        interface = str(payload.get("interface", ""))
+        if interface.endswith(".VisualRowItemElement"):
+            title = payload.get("primaryText")
+            artist = payload.get("secondaryText1")
+            try:
+                position = int(payload.get("rowIndex"))
+            except (TypeError, ValueError):
+                position = -1
+
+            if (
+                position >= 0
+                and isinstance(title, str)
+                and isinstance(artist, str)
+            ):
+                artist = artist.strip()
+                title = _strip_explicit_badge(title).strip()
+                title = _strip_featured_suffix(title, artist)
+                if title and artist and title.lower() != artist.lower():
+                    rows.setdefault(position, _normalise_track(artist, title))
+
+        # The visible heading observes Amazon's PLAYLIST_NAME storage value.
+        # Capture it with the same payload so the JSON path does not depend on
+        # the page managing to paint an h1 afterwards.
+        observer = payload.get("observer")
+        if playlist_names is not None and isinstance(observer, dict):
+            if observer.get("storageGroup") == "PLAYLIST_NAME":
+                name = payload.get("text")
+                if not isinstance(name, str):
+                    default = observer.get("defaultValue")
+                    name = default.get("text") if isinstance(default, dict) else None
+                if isinstance(name, str) and name.strip():
+                    playlist_names.append(name.strip())
+
+        for value in payload.values():
+            _extract_from_payload(value, rows, playlist_names)
+    elif isinstance(payload, list):
+        for item in payload:
+            _extract_from_payload(item, rows, playlist_names)
+
+
+def _ordered_network_tracks(rows: dict[int, str]) -> list[str]:
+    """Turn positioned JSON rows into the scraper's ordered unique track list."""
+    tracks: dict[str, None] = {}
+    for _, track in sorted(rows.items()):
+        tracks.setdefault(track, None)
+    return list(tracks)
 
 
 def _collect_visible_tracks(page) -> list[tuple[float, str]]:
@@ -281,6 +349,10 @@ def main() -> None:
     # track -> position in the list; dicts keep insertion order, which is the
     # tie-break for anything the page couldn't give us a position for.
     dom_tracks: dict[str, float] = {}
+    # Each intercepted response is kept separate. Amazon can call showHome
+    # more than once; the payload with the most rows is the playlist rather
+    # than some later navigation fragment.
+    network_candidates: list[tuple[dict[int, str], list[str]]] = []
 
     try:
         with sync_playwright() as p:
@@ -295,6 +367,37 @@ def main() -> None:
             )
             page = context.new_page()
 
+            def capture_show_home(route) -> None:
+                """Read and forward Amazon's playlist JSON response.
+
+                A normal ``page.on('response')`` listener works for short
+                playlists, but Chromium evicts the multi-megabyte body of a
+                100+ track list from its inspector cache before Playwright can
+                read it. Interception reads the body while forwarding the same
+                response to the page, so long playlists do not fall through a
+                trapdoor merely for being enthusiastic.
+                """
+                try:
+                    response = route.fetch()
+                except Exception as exc:
+                    print(f"Amazon JSON request capture failed: {exc}", file=sys.stderr)
+                    route.continue_()
+                    return
+
+                try:
+                    payload = response.json()
+                    rows: dict[int, str] = {}
+                    names: list[str] = []
+                    _extract_from_payload(payload, rows, names)
+                    if rows:
+                        network_candidates.append((rows, names))
+                except Exception as exc:
+                    print(f"Amazon JSON response parse failed: {exc}", file=sys.stderr)
+
+                route.fulfill(response=response)
+
+            page.route("**/api/showHome", capture_show_home)
+
             page.goto(amazon_url, timeout=90000, wait_until="domcontentloaded")
             time.sleep(3)
 
@@ -306,82 +409,106 @@ def main() -> None:
             except Exception:
                 pass
 
+            network_rows: dict[int, str] = {}
+            network_names: list[str] = []
+            if network_candidates:
+                network_rows, network_names = max(
+                    network_candidates, key=lambda candidate: len(candidate[0])
+                )
+
             # A cold container occasionally draws an Amazon page that never
             # renders a single row, then behaves perfectly a minute later.
             # Left alone, a watched playlist refreshing seconds after a restart
             # logs a spurious empty fetch and, in mirror mode, concludes the
             # whole playlist has been emptied upstream. One reload is far
             # cheaper than that conversation.
-            if not _wait_for_rows(page):
+            if not network_rows and not _wait_for_rows(page):
                 print("No rows rendered on first load; reloading once", file=sys.stderr)
                 try:
                     page.reload(timeout=90000, wait_until="domcontentloaded")
                     time.sleep(3)
                     _accept_cookie_banner(page)
-                    _wait_for_rows(page)
+                    try:
+                        page.wait_for_load_state("networkidle", timeout=15000)
+                    except Exception:
+                        pass
+                    if network_candidates:
+                        network_rows, network_names = max(
+                            network_candidates, key=lambda candidate: len(candidate[0])
+                        )
+                    if not network_rows:
+                        _wait_for_rows(page)
                 except Exception as exc:
                     print(f"Reload failed: {exc}", file=sys.stderr)
 
             # Extract playlist title if available
-            for sel in ("h1", '[data-testid*="title"]'):
-                try:
-                    el = page.query_selector(sel)
-                    if el:
-                        text = el.inner_text().strip()
-                        if text:
-                            playlist_name = text
-                            break
-                except Exception:
-                    continue
+            if network_names:
+                playlist_name = network_names[0]
+            else:
+                for sel in ("h1", '[data-testid*="title"]'):
+                    try:
+                        el = page.query_selector(sel)
+                        if el:
+                            text = el.inner_text().strip()
+                            if text:
+                                playlist_name = text
+                                break
+                    except Exception:
+                        continue
 
-            # Scroll through the virtualised list, scraping tracks as we go.
-            # Smaller scroll increments help catch rows that would otherwise
-            # get recycled between captures in a virtualised container.
-            stale = 0
-            previous = 0
-            while stale < 30:
-                _merge_positioned(_collect_visible_tracks(page), dom_tracks)
+            if not network_rows:
+                # Scroll through the virtualised list, scraping tracks as we go.
+                # Smaller scroll increments help catch rows that would otherwise
+                # get recycled between captures in a virtualised container.
+                stale = 0
+                previous = 0
+                while stale < 30:
+                    _merge_positioned(_collect_visible_tracks(page), dom_tracks)
 
-                page.mouse.wheel(0, 600)
-                time.sleep(0.3)
+                    page.mouse.wheel(0, 600)
+                    time.sleep(0.3)
 
-                total = len(dom_tracks)
-                if total == previous:
-                    stale += 1
-                else:
-                    stale = 0
-                    previous = total
+                    total = len(dom_tracks)
+                    if total == previous:
+                        stale += 1
+                    else:
+                        stale = 0
+                        previous = total
 
-            # Second pass: scroll back to the top and crawl down again.
-            # Virtualised lists recycle DOM nodes, so the first batch of
-            # rows may have been swapped out before we captured them.
-            page.evaluate("window.scrollTo(0, 0)")
-            time.sleep(1)
-            stale = 0
-            while stale < 15:
-                _merge_positioned(_collect_visible_tracks(page), dom_tracks)
-                page.mouse.wheel(0, 600)
-                time.sleep(0.3)
-                new_total = len(dom_tracks)
-                if new_total == previous:
-                    stale += 1
-                else:
-                    stale = 0
-                    previous = new_total
+                # Second pass: scroll back to the top and crawl down again.
+                # Virtualised lists recycle DOM nodes, so the first batch of
+                # rows may have been swapped out before we captured them.
+                page.evaluate("window.scrollTo(0, 0)")
+                time.sleep(1)
+                stale = 0
+                while stale < 15:
+                    _merge_positioned(_collect_visible_tracks(page), dom_tracks)
+                    page.mouse.wheel(0, 600)
+                    time.sleep(0.3)
+                    new_total = len(dom_tracks)
+                    if new_total == previous:
+                        stale += 1
+                    else:
+                        stale = 0
+                        previous = new_total
 
             browser.close()
 
-        # Playlist order, not alphabetical order.  Sorting the "Artist - Title"
-        # strings was tidy and completely wrong: a playlist is a running order,
-        # and Amazon's is the one the user actually chose to follow.
-        tracks = [track for track, _ in sorted(dom_tracks.items(), key=lambda item: item[1])]
-        # There used to be a second collector here, sifting the page's XHR JSON
-        # for anything track-shaped, kept on probation in case it was the only
-        # thing that worked on some playlist nobody had tried. The probation is
-        # over: it reported dom=60 network=0 on a live 60-track playlist, having
-        # never contributed a single track on any shape measured. The DOM is
-        # where Amazon puts the tracklist, so the DOM is where we read it.
-        print(f"Amazon extract: dom={len(dom_tracks)}", file=sys.stderr)
+        if network_rows:
+            tracks = _ordered_network_tracks(network_rows)
+            print(
+                f"Amazon extract: json-rows={len(network_rows)} "
+                f"unique={len(tracks)}",
+                file=sys.stderr,
+            )
+        else:
+            # Playlist order, not alphabetical order. Sorting the strings was
+            # tidy and completely wrong: Amazon's running order is the one the
+            # user actually chose to follow.
+            tracks = [
+                track for track, _ in sorted(dom_tracks.items(), key=lambda item: item[1])
+            ]
+            print(f"Amazon extract: dom-fallback={len(dom_tracks)}", file=sys.stderr)
         print(
             json.dumps(
                 {

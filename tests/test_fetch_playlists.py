@@ -2,9 +2,9 @@
 Platform-specific playlist fetch tests.
 All are @pytest.mark.slow - they hit real external services.
 
-Current state (2026-05-05):
+Current state (2026-09-22):
   - Spotify embed: BROKEN (returns 1 track) - tests correctly catch this
-  - Amazon: BROKEN (page structure changed) - tests correctly catch this
+  - Amazon: working (showHome JSON with rendered-page fallback)
   - Apple Music: working
   - YouTube: working (see test_playlists.py)
   - ListenBrainz: working
@@ -125,6 +125,7 @@ def test_fetch_apple_music_count_field(api, base_url):
 # If this test starts failing with 0 tracks, check the playlist still exists
 # before suspecting the scraper, and swap in a fresh editorial ASIN.
 _AMAZON_URL = "https://music.amazon.co.uk/playlists/B09ZHBTLFF"  # HITS by Topsify
+_AMAZON_LONG_URL = "https://music.amazon.com/user-playlists/c5259a244e914ae18ffa0c1be3837d32b1r0"
 
 
 @pytest.mark.slow
@@ -141,6 +142,20 @@ def test_fetch_amazon_playlist(api, base_url):
     assert len(tracks) >= 10, (
         f"Amazon playlist returned only {len(tracks)} track(s) - page structure may have changed"
     )
+
+
+@pytest.mark.slow
+def test_fetch_amazon_playlist_over_one_hundred_tracks(api, base_url):
+    """The JSON path must not fall back to a truncated or evicted response."""
+    r = api.post(
+        f"{base_url}/api/fetch-playlist",
+        json={"url": _AMAZON_LONG_URL},
+        timeout=90,
+    )
+    assert r.status_code == 200, f"fetch failed ({r.status_code}): {r.text}"
+    d = r.json()
+    assert d.get("platform") == "amazon"
+    assert len(d.get("tracks", [])) > 100
 
 
 # ---------------------------------------------------------------------------
