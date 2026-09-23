@@ -4148,7 +4148,7 @@
                             ${isActive ? `<span class="job-progress-stage">${escapeHtml(activeStage)}</span>${elapsedHtml}` : ''}
                             <span class="job-date">· ${formatTime(job.created_at)}</span>
                         </div>
-                        ${job.error ? `<div class="job-error">${job.error.startsWith('Already exists') ? 'Already in library' : escapeHtml(job.error)}</div>` : ''}
+                        ${job.error ? (job.error.startsWith('Already exists') ? '<div class="job-error job-note">Already in library</div>' : `<div class="job-error">${escapeHtml(job.error)}</div>`) : ''}
                         ${hasDetails ? `
                         <div class="job-details" style="display:${isExpanded ? 'block' : 'none'};">
                             ${qualityDetailRows(job.audio_quality)}
@@ -4172,7 +4172,7 @@
                             <div id="score-rationale-${escapeHtml(job.id || '')}" style="display:none;"></div>
                             ` : ''}
                             <div style="display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap;">
-                                ${job.status !== 'failed' && !fileDeleted ? `<button class="library-play-btn" onclick="event.stopPropagation(); playJobAudio('${escapeAttr(job.id || '')}', this)" style="padding: 6px 12px; font-size: 11px; font-family: inherit; font-weight: 600; background: var(--bg-tertiary); color: var(--accent); border: 1px solid var(--border); border-radius: 6px; cursor: pointer;"><i class="fa-solid fa-play"></i></button>` : ''}
+                                ${job.status !== 'failed' && !fileDeleted ? `<button class="library-play-btn" aria-label="Play or pause" title="Play or pause" onclick="event.stopPropagation(); playJobAudio('${escapeAttr(job.id || '')}', this)" style="padding: 6px 12px; font-size: 11px; font-family: inherit; font-weight: 600; background: var(--bg-tertiary); color: var(--accent); border: 1px solid var(--border); border-radius: 6px; cursor: pointer;"><i class="fa-solid fa-play"></i></button>` : ''}
                                 ${job.status === 'failed' && job.acquisition_mode === 'automatic'
                                     ? `<button onclick="event.stopPropagation(); retryNextJob('${escapeAttr(job.id || '')}')" style="padding: 6px 12px; font-size: 11px; font-family: inherit; font-weight: 600; background: var(--bg-tertiary); color: var(--accent); border: 1px solid var(--border); border-radius: 6px; cursor: pointer;">Retry next option</button>
                                        <button onclick="event.stopPropagation(); openJobRescueVersions('${escapeAttr(job.id || '')}')" style="padding: 6px 12px; font-size: 11px; font-family: inherit; font-weight: 600; background: var(--bg-tertiary); color: var(--text-secondary); border: 1px solid var(--border); border-radius: 6px; cursor: pointer;">Choose version</button>`
@@ -4823,7 +4823,7 @@
                                 <div class="job-meta">${escapeHtml(f.path)} &middot; ${formatFileSize(f.size)}</div>
                             </div>
                             <div style="display: flex; gap: 6px; align-items: center; flex-shrink: 0;">
-                                <button class="library-play-btn" onclick="playTrashAudio('${escapeAttr(f.path)}', this)" style="padding: 6px 12px; font-size: 11px; font-family: inherit; font-weight: 600; background: var(--bg-tertiary); color: var(--accent); border: 1px solid var(--border); border-radius: 6px; cursor: pointer;"><i class="fa-solid fa-play"></i></button>
+                                <button class="library-play-btn" aria-label="Play or pause" title="Play or pause" onclick="playTrashAudio('${escapeAttr(f.path)}', this)" style="padding: 6px 12px; font-size: 11px; font-family: inherit; font-weight: 600; background: var(--bg-tertiary); color: var(--accent); border: 1px solid var(--border); border-radius: 6px; cursor: pointer;"><i class="fa-solid fa-play"></i></button>
                                 <button onclick="restoreTrashFile('${escapeAttr(f.path)}')" style="padding: 6px 12px; font-size: 11px; font-family: inherit; font-weight: 600; background: var(--bg-tertiary); color: var(--accent); border: 1px solid var(--border); border-radius: 6px; cursor: pointer;">Restore</button>
                                 <button onclick="deleteTrashFile('${escapeAttr(f.path)}', '${escapeAttr(f.name)}')" style="padding: 6px 12px; font-size: 11px; font-family: inherit; font-weight: 600; background: var(--bg-tertiary); color: var(--error); border: 1px solid var(--border); border-radius: 6px; cursor: pointer;">Delete</button>
                             </div>

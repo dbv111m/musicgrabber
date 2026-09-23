@@ -762,8 +762,14 @@ def _unwanted_keyword_verdict(
     if not keywords:
         return None
 
+    # Whole words only, same as the annotation matcher. A plain substring test
+    # meant asking for "Demolition Man" quietly switched off "demo", which is
+    # precisely the song the feature promises to protect from it.
     wanted = (requested_title or "").lower()
-    keywords = [kw for kw in keywords if kw not in wanted]
+    keywords = [
+        kw for kw in keywords
+        if not re.search(rf'(?<!\w){re.escape(kw)}(?!\w)', wanted)
+    ]
     if not keywords:
         return None
 

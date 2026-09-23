@@ -75,7 +75,7 @@ def fetch_apple_music_playlist(url: str, music_user_token: str | None = None) ->
     except Exception as exc:
         print(f"[Apple] API path failed ({exc}), falling back to HTML scraping")
 
-    return _fetch_via_html(html, playlist_name, bool(music_user_token))
+    return _fetch_via_html(html, playlist_name)
 
 
 # ---------------------------------------------------------------------------
@@ -174,21 +174,31 @@ def _fetch_via_api(
     # Try each candidate token until amp-api stops slamming the door. A wrong
     # token answers with a bare 401, which is indistinguishable from "computer
     # says no" until you try a different one, so that is exactly what we do.
+    #
+    # Catalogue calls do not need the user token, so if everything was refused
+    # while carrying one, go round once more without it. An expired token in
+    # Settings should not be the reason a public playlist gets cut off at 300.
     tracks = None
     last_error = None
-    for index, token in enumerate(_extract_web_tokens(bundle_url), start=1):
-        try:
-            tracks = _fetch_all_tracks(
-                storefront, item_type, item_id, token, language, music_user_token
-            )
-            if index > 1:
-                print(f"[Apple] Token candidate {index} worked; earlier ones were refused")
+    tokens = _extract_web_tokens(bundle_url)
+    for user_token in dict.fromkeys([music_user_token, None]):
+        for index, token in enumerate(tokens, start=1):
+            try:
+                tracks = _fetch_all_tracks(
+                    storefront, item_type, item_id, token, language, user_token
+                )
+                if index > 1:
+                    print(f"[Apple] Token candidate {index} worked; earlier ones were refused")
+                if music_user_token and not user_token:
+                    print("[Apple] Refused with your user token, fine without it; it may have expired")
+                break
+            except RuntimeError as exc:
+                last_error = exc
+                if "401" not in str(exc) and "403" not in str(exc):
+                    raise
+                continue
+        if tracks is not None:
             break
-        except RuntimeError as exc:
-            last_error = exc
-            if "401" not in str(exc) and "403" not in str(exc):
-                raise
-            continue
 
     if tracks is None:
         raise last_error or RuntimeError("Apple amp-api refused every candidate token")
@@ -330,7 +340,7 @@ def _fetch_all_tracks(
 # HTML scraping fallback
 # ---------------------------------------------------------------------------
 
-def _fetch_via_html(html: str, playlist_name: str, had_user_token: bool) -> dict:
+def _fetch_via_html(html: str, playlist_name: str) -> dict:
     """Scrape the server-rendered JSON blob. Works reliably but caps at ~300 tracks."""
     tracks = _extract_tracks_from_html(html)
 
@@ -350,15 +360,13 @@ def _fetch_via_html(html: str, playlist_name: str, had_user_token: bool) -> dict
     # blob is capped to match, so a long playlist looks complete and is not.
     # If we came back holding suspiciously close to the cap, say so rather than
     # let somebody discover the missing 200 songs themselves months later.
+    # No token advice here: public playlists need none, and suggesting one sent
+    # people off hunting for something that could not help.
     if len(tracks) >= _HTML_SCRAPE_CAP - 5:
-        advice = (
-            "Your Apple Music token did not work; it may have expired."
-            if had_user_token
-            else "Adding an Apple Music user token in Settings may fix it."
-        )
         result["warning"] = (
             f"Apple only server-rendered {len(tracks)} tracks and the API path failed, "
-            f"so this list is probably truncated. {advice}"
+            f"so this list is probably truncated. Try again later; if it keeps "
+            f"happening, Apple has moved the furniture and it is worth reporting."
         )
     return result
 

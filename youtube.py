@@ -5,6 +5,7 @@ Cookie handling, bot backoff, search, and scoring.
 """
 
 import json
+import os
 import re
 import random
 import subprocess
@@ -159,8 +160,12 @@ def _sync_cookies_file(user_id: str | None = None):
                 cookie_file.unlink()
             return
         cookie_file.parent.mkdir(parents=True, exist_ok=True)
-        cookie_file.write_text(cookies)
-        # It is a jar of live session cookies, so keep it to ourselves.
+        # It is a jar of live session cookies, so keep it to ourselves, and from
+        # the moment it exists rather than a moment later. The chmod covers a
+        # file that predates this and so kept whatever umask gave it.
+        fd = os.open(cookie_file, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as f:
+            f.write(cookies)
         try:
             cookie_file.chmod(0o600)
         except OSError:

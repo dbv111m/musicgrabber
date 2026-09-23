@@ -94,6 +94,19 @@ def test_verdict_respects_what_the_user_actually_asked_for(monkeypatch):
     assert verdict is None
 
 
+@pytest.mark.parametrize("requested, identified, keywords, expected", [
+    ("Demolition Man", "Demolition Man (Demo)", "demo", "demo"),
+    ("Credit in the Straight World", "Credit in the Straight World - Radio Edit", "edit", "edit"),
+    ("Olive Tree", "Olive Tree (Live)", "live", "live"),
+])
+def test_asking_by_name_means_the_whole_word(monkeypatch, requested, identified, keywords, expected):
+    """A keyword hiding inside a longer word of the request is not a request for it."""
+    _settings(monkeypatch, keywords)
+    assert downloads._unwanted_keyword_verdict(
+        {"title": identified}, requested, user_id=None
+    ) == expected
+
+
 def test_verdict_is_silent_when_the_setting_is_empty(monkeypatch):
     _settings(monkeypatch, "")
     assert downloads._unwanted_keyword_verdict(

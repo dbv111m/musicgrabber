@@ -441,6 +441,15 @@ def main() -> None:
                 except Exception as exc:
                     print(f"Reload failed: {exc}", file=sys.stderr)
 
+            # Amazon rarely goes network-idle, so that wait can give up before
+            # showHome arrives. Rows only paint once it has, so by the time
+            # _wait_for_rows is happy the JSON is usually sitting there. Look
+            # again rather than scroll a recycling list for no reason.
+            if not network_rows and network_candidates:
+                network_rows, network_names = max(
+                    network_candidates, key=lambda candidate: len(candidate[0])
+                )
+
             # Extract playlist title if available
             if network_names:
                 playlist_name = network_names[0]

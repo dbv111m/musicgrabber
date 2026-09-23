@@ -54,17 +54,40 @@ def test_catalog_path_carries_the_user_token(monkeypatch):
     assert seen[0]["media-user-token"] == "usertoken"
 
 
+def test_refused_with_user_token_retries_without_it(monkeypatch):
+    """An expired user token must not cost a public playlist its API path."""
+    seen = []
+
+    def fake_fetch_json(url, headers=None):
+        headers = headers or {}
+        seen.append(headers)
+        if "media-user-token" in headers:
+            raise RuntimeError("Apple amp-api returned HTTP 401: ")
+        return {"data": [{"attributes": {"artistName": "Blur", "name": "Song 2"}}]}
+
+    monkeypatch.setattr(apple, "_fetch_json", fake_fetch_json)
+    monkeypatch.setattr(apple, "_extract_web_bundle_url", lambda *_a: "https://x/bundle.js")
+    monkeypatch.setattr(apple, "_extract_web_tokens", lambda _u: ["dev1", "dev2"])
+
+    html = '<link rel="canonical" href="https://music.apple.com/gb/playlist/x/pl.abc">'
+    result = apple._fetch_via_api(
+        "https://music.apple.com/gb/playlist/x/pl.abc", html, "X", "stale"
+    )
+
+    assert result["tracks"] == ["Blur - Song 2"]
+    # Both developer tokens tried with the user token, then the first without.
+    assert [("media-user-token" in h) for h in seen] == [True, True, False]
+
+
 def test_html_fallback_warns_when_it_hits_apple_s_cap(monkeypatch):
     monkeypatch.setattr(
         apple, "_extract_tracks_from_html",
         lambda _html: [f"Artist {i} - Track {i}" for i in range(299)],
     )
-    result = apple._fetch_via_html("<html></html>", "Opluisteren", False)
+    result = apple._fetch_via_html("<html></html>", "Opluisteren")
     assert "truncated" in result["warning"]
-    assert "Settings" in result["warning"]
-
-    with_token = apple._fetch_via_html("<html></html>", "Opluisteren", True)
-    assert "expired" in with_token["warning"]
+    # Public playlists need no token, so the warning must not send anyone for one.
+    assert "token" not in result["warning"].lower()
 
 
 def test_html_fallback_stays_quiet_for_a_short_playlist(monkeypatch):
@@ -72,14 +95,14 @@ def test_html_fallback_stays_quiet_for_a_short_playlist(monkeypatch):
         apple, "_extract_tracks_from_html",
         lambda _html: [f"Artist {i} - Track {i}" for i in range(40)],
     )
-    result = apple._fetch_via_html("<html></html>", "Short one", False)
+    result = apple._fetch_via_html("<html></html>", "Short one")
     assert "warning" not in result
 
 
 def test_empty_html_scrape_is_still_a_422(monkeypatch):
     monkeypatch.setattr(apple, "_extract_tracks_from_html", lambda _html: [])
     with pytest.raises(HTTPException) as excinfo:
-        apple._fetch_via_html("<html></html>", "Nothing", False)
+        apple._fetch_via_html("<html></html>", "Nothing")
     assert excinfo.value.status_code == 422
 
 

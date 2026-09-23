@@ -744,6 +744,13 @@ h1 {
     color: var(--text-primary);
 }
 
+/* 22px tall is a guessing game with a thumb, especially between 128k and 96k. */
+@media (pointer: coarse) {
+    .format-option {
+        min-height: 32px;
+    }
+}
+
 .tabs {
     display: flex;
     gap: 5px;
@@ -783,6 +790,19 @@ h1 {
 
 .tabs::-webkit-scrollbar {
     display: none;
+}
+
+/* Seven tabs do not fit across a phone, and a hidden scrollbar meant Stats and
+   Settings sat off the edge with nothing to say they existed. Two rows, every
+   tab one tap away, and the tabs stretch so the rows look intentional. */
+@media (max-width: 768px) {
+    .tabs {
+        flex-wrap: wrap;
+    }
+
+    .tabs .tab {
+        flex: 1 1 auto;
+    }
 }
 
 .tab {
@@ -1255,7 +1275,7 @@ h1 {
     margin-top: 14px;
 }
 .upgrades-page-info { color: var(--text-secondary); font-size: 14px; }
-.upgrade-header-actions { display: flex; gap: 8px; align-items: center; }
+.upgrade-header-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
 .upgrade-go { white-space: nowrap; }
 .watched-empty-text { color: var(--text-secondary); padding: 12px 0; }
 
@@ -1696,6 +1716,12 @@ h1 {
     margin-top: 4px;
 }
 
+/* "Already in library" rides in the error slot but is good news; a queue full
+   of red for things that went perfectly well was needlessly alarming. */
+.job-error.job-note {
+    color: var(--text-secondary);
+}
+
 .job-item.has-details {
     cursor: pointer;
     transition: background 0.15s;
@@ -1831,8 +1857,13 @@ h1 {
     color: #fff;
 }
 
+/* Every section header wraps rather than pushing the page sideways on a phone.
+   It used to be the Queue tab's private privilege, while Watched Upgrades
+   quietly made the whole page 451px wide on a 390px screen. */
 .queue-header {
     display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
     justify-content: space-between;
     align-items: center;
     margin-bottom: 12px;
@@ -1844,15 +1875,8 @@ h1 {
     gap: 10px;
 }
 
-/* The Download Queue header carries a search box now, which is more than the
-   column can hold on one line without folding the heading into origami. Let it
-   wrap instead; scoped to the Queue tab so every other .queue-header is left
-   exactly as it was. */
-#queueTabContainer > .queue-header {
-    flex-wrap: wrap;
-    gap: var(--space-2);
-}
-
+/* The Download Queue header carries a search box now, so give the heading its
+   own line before it gets folded into origami. */
 #queueTabContainer > .queue-header .queue-section-heading {
     flex: 1 1 260px;
 }
@@ -3512,6 +3536,14 @@ h1 {
     transition: all 0.2s;
 }
 
+/* Thumbs are bigger than cursors. 29x24 was a fine target for a mouse. */
+@media (pointer: coarse) {
+    .theme-toggle-btn {
+        min-width: 36px;
+        min-height: 32px;
+    }
+}
+
 .version-label {
     font-size: 12px;
     color: var(--text-secondary);
@@ -4538,6 +4570,13 @@ h1 {
     accent-color: var(--accent);
 }
 
+@media (pointer: coarse) {
+    .notify-checkbox {
+        width: 20px;
+        height: 20px;
+    }
+}
+
 /* Apprise test row */
 .apprise-test-row {
     display: flex;
@@ -4800,9 +4839,11 @@ h1 {
     color: var(--text-primary);
 }
 
+/* Six columns do not fit on a phone. Scroll the table, not the whole page. */
 .blacklist-content {
     font-size: 13px;
     color: var(--text-secondary);
+    overflow-x: auto;
 }
 
 /* --------------------------------------------------------------------------
