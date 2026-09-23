@@ -7,7 +7,7 @@ All shared constants in one place for easy tuning.
 import os
 from pathlib import Path
 
-VERSION = "4.2.3"
+VERSION = "4.2.4"
 
 
 def _normalise_root_path(value: str) -> str:
