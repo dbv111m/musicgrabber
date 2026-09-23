@@ -858,7 +858,7 @@ The `sp_dc` session cookie is what grants access. It has a long expiry (typicall
 
 **Apple Music private library playlists:**
 
-Public Apple Music playlists and albums work without credentials, at any length. Only private `music.apple.com/library/...` playlists need your Apple Music user token: add it in **Settings, Apple Music**. In DevTools the header is called `media-user-token` (Apple's docs still call it `Music-User-Token`; same value, and MusicGrabber sends both). MusicGrabber fetches the web bearer token automatically from Apple's public bundle, trying each candidate in that bundle until amp-api accepts one, because only some of them work and Apple does not say which.
+Public Apple Music playlists and albums work without credentials, at any length. Only private `music.apple.com/library/...` playlists need your Apple Music user token: add it in **Settings, Apple Music**. In DevTools the header is called `media-user-token` (Apple's docs still call it `Music-User-Token`; same value, and MusicGrabber sends both). MusicGrabber fetches the web bearer token automatically from Apple's public bundle, trying each candidate in that bundle until amp-api accepts one, because only some of them work and Apple does not say which. If Apple refuses every one of them for a library playlist, your user token has almost certainly expired, and MusicGrabber says so rather than handing you a status code.
 
 You can also provide it as an environment variable:
 

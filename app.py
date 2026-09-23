@@ -5513,7 +5513,10 @@ def search_watched_artist(q: str):
     """Search MusicBrainz for an artist by name. Returns up to 5 candidates."""
     if not q or not q.strip():
         return {"results": []}
-    results = search_artist_mbid(q.strip())
+    try:
+        results = search_artist_mbid(q.strip())
+    except MusicBrainzUnavailable as exc:
+        raise HTTPException(status_code=503, detail=f"MusicBrainz unreachable: {exc}. Try again in a moment.")
     return {"results": results}
 
 

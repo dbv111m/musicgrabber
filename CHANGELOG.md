@@ -2,6 +2,12 @@
 
 ## v4.2.4 (DEV)
 
+### Fixed
+- **Finding an artist to follow while MusicBrainz is down**: the Artists tab's search let MusicBrainz's outage escape as an HTTP 500, and the page shrugged "Search failed. Check server logs." It now says MusicBrainz is unreachable and to try again in a moment, the same as the Albums tab always has. A plain backend fix would have made it worse, oddly enough: the page would have read the polite error, found no artists in it, and announced "No artists found on MusicBrainz", which is a lie told with total confidence about a band you know exists.
+- **Apple Music library playlists get the same second chances as public ones**: v4.2.3 taught public playlists to try every token in Apple's web bundle until one works; private `library/...` playlists still took the first and hoped. They now try the lot too, and if Apple refuses every one of them, you are told your media-user-token has probably expired rather than handed a raw HTTP 401.
+- **Logs arrive when they happen**: app output was block-buffered on its way to `docker logs`, so it turned up late, out of order with uvicorn's own lines, or not until something else happened to flush it. A quiet container looked broken when it was merely shy. `PYTHONUNBUFFERED=1` is now set in the image.
+- **The end-to-end test no longer assumes you like the Navidrome dupe check**: its second phase asserted the check was already on, so anyone running with it off saw a failure after every download had succeeded. It now switches the check on for that phase and puts your own setting back afterwards, pass or fail.
+
 ## v4.2.3 (2026-09-23)
 
 ### Added

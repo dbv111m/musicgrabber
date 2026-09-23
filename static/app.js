@@ -9060,6 +9060,14 @@
             selectedArtistName = null;
             try {
                 const res = await apiFetch(`/api/watched-artists/search?q=${encodeURIComponent(q)}`);
+                // A 503 means MusicBrainz is down, not that the artist does not exist.
+                // Without this it parsed happily, found no results, and said so.
+                if (!res.ok) {
+                    let detail = `HTTP ${res.status}`;
+                    try { detail = (await res.json()).detail || detail; } catch (_) { /* not JSON, keep the status */ }
+                    resultsEl.innerHTML = `<div style="font-size:12px;color:var(--error);">Search failed: ${escapeHtml(detail)}</div>`;
+                    return;
+                }
                 const data = await res.json();
                 if (!data.results || data.results.length === 0) {
                     resultsEl.innerHTML = '<div style="font-size:12px;color:var(--text-secondary);">No artists found on MusicBrainz.</div>';

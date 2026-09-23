@@ -105,6 +105,13 @@ EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:${LISTEN_PORT:-8080}/ || exit 1
 
+# Write print() output as it happens. Without this stdout is a pipe, Python
+# block-buffers it, and app output turns up in docker logs late, out of order
+# with uvicorn's (which goes to stderr), or not at all until something else
+# happens to flush. Down here rather than at the top so it does not rebuild
+# every layer above it.
+ENV PYTHONUNBUFFERED=1
+
 # Reap short-lived browser children as well as forwarding shutdown signals.
 ENTRYPOINT ["/usr/bin/tini", "--"]
 

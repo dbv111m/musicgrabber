@@ -9,7 +9,15 @@
 const RELEASE_NOTES = {
     "4.2.4": {
         title: "What's New in v4.2.4",
-        sections: []
+        sections: [
+            {
+                heading: "Fixed",
+                items: [
+                    "Searching for an artist to follow while MusicBrainz is having a bad day now tells you MusicBrainz is down and to try again shortly, instead of a vague \"Search failed\".",
+                    "Private Apple Music library playlists are as stubborn as public ones now: they keep trying until Apple lets them in. If Apple still says no, you are told your token has probably expired, so you know exactly what to go and refresh.",
+                ]
+            },
+        ]
     },
     "4.2.3": {
         title: "What's New in v4.2.3",

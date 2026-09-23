@@ -203,3 +203,69 @@ def test_a_non_auth_failure_is_not_retried_on_every_token(monkeypatch):
     with pytest.raises(RuntimeError, match="no tracks"):
         apple._fetch_via_api("https://music.apple.com/gb/playlist/x/pl.abc", html, "X")
     assert len(calls) == 1
+
+
+# ---------------------------------------------------------------------------
+# Private library playlists get the same second chances as public ones.
+# ---------------------------------------------------------------------------
+
+_LIBRARY_URL = "https://music.apple.com/library/playlist/p.abc123"
+
+
+def _library_fetch(monkeypatch, refused: set[str]):
+    """Stub the network: amp-api refuses any bearer token listed in `refused`."""
+    tried = []
+
+    def fake_fetch_json(url, headers=None):
+        token = headers["Authorization"].removeprefix("Bearer ")
+        tried.append(token)
+        assert headers["media-user-token"] == "user-token"
+        if token in refused:
+            raise RuntimeError("Apple amp-api returned HTTP 401: ")
+        if url.endswith("/p.abc123"):
+            return {"data": [{"attributes": {"name": "Kitchen Disco"}}]}
+        return {"data": [{"attributes": {"artistName": "Blur", "name": "Song 2"}}]}
+
+    monkeypatch.setattr(apple, "_fetch_json", fake_fetch_json)
+    return tried
+
+
+def test_library_playlist_moves_past_a_refused_token(monkeypatch):
+    dud, player = _jwt("M62YD85FTQ"), _jwt("AMPWebPlay")
+    monkeypatch.setattr(apple, "_fetch_web_tokens_for_library", lambda: [dud, player])
+    tried = _library_fetch(monkeypatch, refused={dud})
+
+    result = apple.fetch_apple_music_playlist(_LIBRARY_URL, music_user_token="user-token")
+
+    assert result["tracks"] == ["Blur - Song 2"]
+    assert result["playlist_name"] == "Kitchen Disco"
+    assert tried[0] == dud and set(tried[1:]) == {player}, "must try the dud, then stick with the one that worked"
+
+
+def test_library_playlist_refused_by_every_token_blames_the_user_token(monkeypatch):
+    """Every candidate refused while carrying the user token: that is the expired one."""
+    tokens = [_jwt("a"), _jwt("b")]
+    monkeypatch.setattr(apple, "_fetch_web_tokens_for_library", lambda: tokens)
+    tried = _library_fetch(monkeypatch, refused=set(tokens))
+
+    with pytest.raises(HTTPException) as caught:
+        apple.fetch_apple_music_playlist(_LIBRARY_URL, music_user_token="user-token")
+
+    assert caught.value.status_code == 401
+    assert "media-user-token" in caught.value.detail
+    assert tried == tokens
+
+
+def test_library_playlist_non_auth_failure_is_not_retried(monkeypatch):
+    monkeypatch.setattr(apple, "_fetch_web_tokens_for_library", lambda: [_jwt("a"), _jwt("b")])
+    calls = []
+
+    def fake_fetch_json(_url, headers=None):
+        calls.append(1)
+        raise RuntimeError("Apple amp-api returned HTTP 500: ")
+
+    monkeypatch.setattr(apple, "_fetch_json", fake_fetch_json)
+
+    with pytest.raises(RuntimeError, match="HTTP 500"):
+        apple.fetch_apple_music_playlist(_LIBRARY_URL, music_user_token="user-token")
+    assert len(calls) == 1

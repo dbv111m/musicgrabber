@@ -101,20 +101,46 @@ def _auth_headers(token: str, music_user_token: str | None = None) -> dict:
 
 
 def _fetch_library_playlist(url: str, music_user_token: str) -> dict:
-    """Fetch tracks from a private Apple Music library playlist."""
+    """Fetch tracks from a private Apple Music library playlist.
+
+    Tries each candidate web token in turn, exactly as the catalogue path does,
+    so the next time Apple reshuffles its bundle this heals itself too. The
+    user token rides along on every attempt here, so if amp-api refuses the
+    lot, the user token is by far the likeliest culprit and we say so.
+    """
     item_id = urllib.parse.urlparse(url).path.rstrip("/").split("/")[-1]
-    token = _fetch_web_token_for_library()
-    auth_headers = _auth_headers(token, music_user_token)
-    playlist_name = _fetch_library_playlist_name(item_id, auth_headers)
-    tracks = _fetch_library_tracks(item_id, auth_headers)
-    return {"tracks": tracks, "playlist_name": playlist_name, "count": len(tracks)}
+    for index, token in enumerate(_fetch_web_tokens_for_library(), start=1):
+        auth_headers = _auth_headers(token, music_user_token)
+        try:
+            tracks = _fetch_library_tracks(item_id, auth_headers)
+        except RuntimeError as exc:
+            if not _is_refusal(exc):
+                raise
+            continue
+        if index > 1:
+            print(f"[Apple] Token candidate {index} worked for the library; earlier ones were refused")
+        playlist_name = _fetch_library_playlist_name(item_id, auth_headers)
+        return {"tracks": tracks, "playlist_name": playlist_name, "count": len(tracks)}
+
+    raise HTTPException(
+        status_code=401,
+        detail=(
+            "Apple Music refused your media-user-token for this library playlist. "
+            "It has probably expired: copy a fresh one into Settings under Apple Music."
+        ),
+    )
 
 
-def _fetch_web_token_for_library() -> str:
-    """Extract the Apple Music web bearer token via the public homepage."""
+def _fetch_web_tokens_for_library() -> list[str]:
+    """Candidate Apple Music web bearer tokens, via the public homepage."""
     html = _fetch_html(_WEB_ORIGIN)
     bundle_url = _extract_web_bundle_url(_WEB_ORIGIN, html)
-    return _extract_web_token(bundle_url)
+    return _extract_web_tokens(bundle_url)
+
+
+def _is_refusal(exc: Exception) -> bool:
+    """True when amp-api said 401 or 403, which a different token might fix."""
+    return "HTTP 401" in str(exc) or "HTTP 403" in str(exc)
 
 
 def _fetch_library_playlist_name(item_id: str, auth_headers: dict) -> str:
@@ -194,7 +220,7 @@ def _fetch_via_api(
                 break
             except RuntimeError as exc:
                 last_error = exc
-                if "401" not in str(exc) and "403" not in str(exc):
+                if not _is_refusal(exc):
                     raise
                 continue
         if tracks is not None:
@@ -286,11 +312,6 @@ def _extract_web_tokens(bundle_url: str) -> list[str]:
     if not ordered:
         raise RuntimeError("Could not extract Apple Music web token")
     return ordered
-
-
-def _extract_web_token(bundle_url: str) -> str:
-    """Single best-guess token, for callers that cannot try more than one."""
-    return _extract_web_tokens(bundle_url)[0]
 
 
 def _fetch_all_tracks(
