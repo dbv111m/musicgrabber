@@ -142,6 +142,9 @@ MP3PHOENIX_BROWSER_TIMEOUT = int(os.getenv("MP3PHOENIX_BROWSER_TIMEOUT", "75"))
 MP3PHOENIX_SESSION_TTL = int(os.getenv("MP3PHOENIX_SESSION_TTL", "3600"))
 MP3PHOENIX_BROWSER_FAILURE_LIMIT = 3
 MP3PHOENIX_BROWSER_FAILURE_COOLDOWN = int(os.getenv("MP3PHOENIX_BROWSER_FAILURE_COOLDOWN", "600"))
+# Cloudflare's hard "you have been blocked" page is a firewall rule, not a puzzle:
+# no browser gets past it, so stop asking for hours rather than minutes.
+MP3PHOENIX_BLOCK_COOLDOWN = int(os.getenv("MP3PHOENIX_BLOCK_COOLDOWN", "21600"))
 TIMEOUT_ZVU4NO_SEARCH = 15       # zvu4no HTML search
 TIMEOUT_ZVU4NO_DOWNLOAD = int(os.getenv("TIMEOUT_ZVU4NO_DOWNLOAD", "120"))  # zvu4no direct MP3 stream
 TIMEOUT_FREEMP3CLOUD_SEARCH = 20    # FreeMp3Cloud landing + form POST (two round-trips)

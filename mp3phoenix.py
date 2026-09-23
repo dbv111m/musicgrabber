@@ -15,6 +15,7 @@ from urllib.parse import quote_plus, urlsplit
 from curl_cffi import requests
 
 from constants import (
+    MP3PHOENIX_BLOCK_COOLDOWN,
     MP3PHOENIX_BROWSER_FAILURE_LIMIT,
     MP3PHOENIX_BROWSER_FAILURE_COOLDOWN,
     MP3PHOENIX_BROWSER_TIMEOUT,
@@ -135,9 +136,29 @@ def _cloudflare_rejected(response) -> bool:
     return "cf-chl-" in body or "just a moment" in body or "verify you are human" in body
 
 
+def _cloudflare_blocked(response) -> bool:
+    """Cloudflare's hard block page, as opposed to a challenge.
+
+    A challenge ("Just a moment...") is a puzzle a browser can solve. The block
+    page ("Sorry, you have been blocked") is a firewall rule on the address or
+    region we come from, and no browser, SeleniumBase release or fresh session
+    gets past it. Treating it as a challenge meant launching Chrome twice per
+    search to be refused twice, three searches running, every ten minutes.
+    """
+    if response.status_code != 403:
+        return False
+    if "html" not in (response.headers.get("content-type") or "").lower():
+        return False
+    body = response.text.lower()
+    return "you have been blocked" in body and "cloudflare" in body
+
+
 class _CoolingDown(RuntimeError):
     """Raised while the circuit breaker is open. Never counts as a fresh failure,
     otherwise every call made during the cooldown re-arms it and it never expires."""
+
+
+_BLOCKED_REASON = "MP3Phoenix is refusing this server outright (Cloudflare block, not a challenge)"
 
 
 class _PhoenixClient:
@@ -149,11 +170,42 @@ class _PhoenixClient:
         self._refreshed_at = 0.0
         self._failures = 0
         self._disabled_until = 0.0
+        self._disabled_reason = "MP3Phoenix failed repeatedly"
+
+    def _park(self, seconds: int, reason: str) -> None:
+        self._disabled_until = time.monotonic() + seconds
+        self._disabled_reason = reason
+
+    def _parked_message(self) -> str:
+        minutes = max(1, round((self._disabled_until - time.monotonic()) / 60))
+        return f"{self._disabled_reason}; cooling down for {minutes} min"
 
     def _record_failure(self) -> None:
         self._failures += 1
         if self._failures >= MP3PHOENIX_BROWSER_FAILURE_LIMIT:
-            self._disabled_until = time.monotonic() + MP3PHOENIX_BROWSER_FAILURE_COOLDOWN
+            self._park(MP3PHOENIX_BROWSER_FAILURE_COOLDOWN, "MP3Phoenix failed repeatedly")
+
+    def _blocked(self) -> _CoolingDown:
+        """Park for the long haul and return the error to raise."""
+        self._park(MP3PHOENIX_BLOCK_COOLDOWN, _BLOCKED_REASON)
+        print(f"{_BLOCKED_REASON}; parking it for {MP3PHOENIX_BLOCK_COOLDOWN}s")
+        return _CoolingDown(self._parked_message())
+
+    def _probe_blocked(self) -> bool:
+        """One plain request to see whether a block page is waiting.
+
+        Costs a single GET, where finding out the hard way costs a Chrome launch.
+        Anything inconclusive (a timeout, a challenge) says no, so the browser
+        still gets its usual go at anything short of an outright block.
+        """
+        try:
+            response = requests.get(f"{_BASE_URL}/", impersonate="chrome", timeout=15)
+        except Exception:
+            return False
+        try:
+            return _cloudflare_blocked(response)
+        finally:
+            response.close()
 
     def _refresh(self) -> None:
         # The child's own Cloudflare-clearance wait defaults to MP3PHOENIX_BROWSER_TIMEOUT
@@ -179,9 +231,10 @@ class _PhoenixClient:
     def _ensure_session(self, force: bool = False):
         now = time.monotonic()
         if now < self._disabled_until:
-            remaining = int(self._disabled_until - now)
-            raise _CoolingDown(f"MP3Phoenix session is cooling down for {remaining}s")
+            raise _CoolingDown(self._parked_message())
         if force or not self._session or now - self._refreshed_at >= MP3PHOENIX_SESSION_TTL:
+            if self._probe_blocked():
+                raise self._blocked()
             self._refresh()
         return self._session
 
@@ -189,6 +242,10 @@ class _PhoenixClient:
         for attempt in range(2):
             session = self._ensure_session(force=attempt == 1)
             response = session.get(url, headers=headers, timeout=timeout, stream=stream)
+            if _cloudflare_blocked(response):
+                # Blocked mid-session: a fresh browser session would be refused too.
+                response.close()
+                raise self._blocked()
             if not _cloudflare_rejected(response):
                 return response
             response.close()
@@ -295,11 +352,20 @@ class _PhoenixClient:
                     response.close()
 
     def health(self) -> tuple[bool, str]:
-        """Report remembered health without spinning up Chrome for a probe."""
-        now = time.monotonic()
-        if now < self._disabled_until:
-            remaining = int(self._disabled_until - now)
-            return False, f"MP3Phoenix is cooling down for {remaining}s after repeated failures"
+        """Report health without spinning up Chrome for a probe.
+
+        While parked this answers from memory. Otherwise it spends one plain
+        request checking for a block page, so a source that cannot work says so
+        from boot instead of claiming health until the first search trips over it.
+        """
+        if time.monotonic() < self._disabled_until:
+            return False, self._parked_message()
+        if self._probe_blocked():
+            # No lock: a search can hold it through a whole Chrome launch, and
+            # parking is two attribute writes that cannot disagree in any way
+            # that matters.
+            self._blocked()
+            return False, self._parked_message()
         return True, "MP3Phoenix session available on demand"
 
 
@@ -401,10 +467,10 @@ def fetch_mp3phoenix_preview(download_url: str) -> bytes:
 
 
 def browser_healthy() -> tuple[bool, str]:
-    """Report remembered session health without launching Chrome for a probe.
+    """Report session health without launching Chrome for a probe.
 
     A real search or download launches Chrome when it actually needs a fresh
-    session, and its failures feed the circuit breaker; this just reads that
-    state back, matching monochrome_browser.py's browser_fallback_health().
+    session, and its failures feed the circuit breaker. This reads that state
+    back, plus one plain request to catch an outright Cloudflare block early.
     """
     return _CLIENT.health()

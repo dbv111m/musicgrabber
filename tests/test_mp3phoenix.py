@@ -33,6 +33,14 @@ def _reset_circuit_breaker():
     mp3phoenix._CLIENT._disabled_until = 0.0
 
 
+@pytest.fixture(autouse=True)
+def _no_real_block_probe(monkeypatch):
+    """The block probe is one real GET to mp3phoenix.net. Unit tests make no
+    network calls, and from a blocked host it would fail them for the wrong
+    reason. Say "not blocked" unless a test says otherwise."""
+    monkeypatch.setattr(mp3phoenix._PhoenixClient, "_probe_blocked", lambda _self: False)
+
+
 def test_source_previews_but_stays_disabled_by_default():
     source = search.SOURCE_REGISTRY["mp3phoenix"]
     # Off by default like Soulseek: it briefly launches Chrome for Cloudflare
@@ -343,3 +351,74 @@ def test_browser_healthy_reports_remembered_state_without_launching_chrome(monke
     healthy, reason = mp3phoenix.browser_healthy()
     assert healthy is False
     assert "cooling down" in reason
+
+
+# ---------------------------------------------------------------------------
+# Cloudflare's hard block: a firewall rule, not a puzzle. Stop asking for hours.
+# ---------------------------------------------------------------------------
+
+_BLOCK_PAGE = (
+    "<title>Attention Required! | Cloudflare</title>"
+    "<h1>Sorry, you have been blocked</h1>"
+    "<p>You are unable to access mp3phoenix.net</p>"
+    "<span>Performance &amp; security by Cloudflare</span>"
+)
+
+
+def test_block_page_is_told_apart_from_a_challenge():
+    assert mp3phoenix._cloudflare_blocked(_FakeResponse(_BLOCK_PAGE, status=403))
+    assert not mp3phoenix._cloudflare_blocked(_FakeResponse("Just a moment...", status=403))
+    assert not mp3phoenix._cloudflare_blocked(_FakeResponse(_BLOCK_PAGE, status=200))
+
+
+def test_a_blocked_host_never_launches_chrome(monkeypatch):
+    class FailIfCalledBrowser:
+        def request(self, payload, timeout):
+            raise AssertionError("Chrome cannot get past a block page; do not launch it")
+
+    monkeypatch.setattr(mp3phoenix, "_BROWSER", FailIfCalledBrowser())
+    monkeypatch.setattr(mp3phoenix._PhoenixClient, "_probe_blocked", lambda _self: True)
+    client = mp3phoenix._PhoenixClient()
+
+    for _ in range(3):
+        with pytest.raises(RuntimeError, match="refusing this server"):
+            client.search("https://mp3phoenix.net/ajax/music/test")
+
+    parked_for = client._disabled_until - mp3phoenix.time.monotonic()
+    assert parked_for > mp3phoenix.MP3PHOENIX_BROWSER_FAILURE_COOLDOWN
+    assert client._failures == 0, "a block is not a flaky failure; do not feed the breaker"
+
+
+def test_a_block_mid_session_parks_without_a_second_browser(monkeypatch):
+    browser_calls = []
+
+    class FakeBrowser:
+        def request(self, payload, timeout):
+            browser_calls.append(payload)
+            return _session_details()
+
+    monkeypatch.setattr(mp3phoenix, "_BROWSER", FakeBrowser())
+    monkeypatch.setattr(
+        mp3phoenix.requests, "Session",
+        lambda **_kwargs: _FakeSession([_FakeResponse(_BLOCK_PAGE, status=403)]),
+    )
+    client = mp3phoenix._PhoenixClient()
+
+    with pytest.raises(RuntimeError, match="refusing this server"):
+        client.search("https://mp3phoenix.net/ajax/music/test")
+    assert len(browser_calls) == 1, "the forced refresh cannot help against a block"
+    assert client._disabled_until - mp3phoenix.time.monotonic() > 3600
+
+
+def test_health_reports_a_block_before_anyone_searches(monkeypatch):
+    monkeypatch.setattr(mp3phoenix._PhoenixClient, "_probe_blocked", lambda _self: True)
+
+    healthy, reason = mp3phoenix.browser_healthy()
+
+    assert healthy is False
+    assert "refusing this server" in reason
+    # And it stays parked from memory rather than probing again every sweep.
+    probes = []
+    monkeypatch.setattr(mp3phoenix._PhoenixClient, "_probe_blocked", lambda _self: probes.append(1) or True)
+    assert mp3phoenix.browser_healthy()[0] is False
+    assert probes == []

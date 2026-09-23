@@ -15,6 +15,7 @@ const RELEASE_NOTES = {
                 items: [
                     "Searching for an artist to follow while MusicBrainz is having a bad day now tells you MusicBrainz is down and to try again shortly, instead of a vague \"Search failed\".",
                     "Private Apple Music library playlists are as stubborn as public ones now: they keep trying until Apple lets them in. If Apple still says no, you are told your token has probably expired, so you know exactly what to go and refresh.",
+                    "If MP3Phoenix has blocked you outright, MusicGrabber now notices straight away, stops trying for a few hours, and tells you why, instead of repeatedly firing up a browser to be turned away at the door. Searches stay quick in the meantime.",
                 ]
             },
         ]

@@ -585,6 +585,7 @@ Settings are stored in the database and persist across container restarts.
 | `MP3PHOENIX_PREVIEW_BYTES` | `1048576` | Bytes fetched for an MP3Phoenix preview; roughly 25 seconds at 320 kbps |
 | `MP3PHOENIX_SESSION_TTL` | `3600` | Maximum age in seconds of MP3Phoenix's Selenium-seeded HTTP session |
 | `MP3PHOENIX_BROWSER_FAILURE_COOLDOWN` | `600` | Seconds to park MP3Phoenix after three consecutive session failures |
+| `MP3PHOENIX_BLOCK_COOLDOWN` | `21600` | Seconds to park MP3Phoenix after Cloudflare serves its hard "you have been blocked" page, which no browser can get past |
 | `TIMEOUT_ZVU4NO_DOWNLOAD` | `120` | Timeout in seconds for zvu4no direct MP3 downloads |
 | `TIMEOUT_FREEMP3CLOUD_DOWNLOAD` | `120` | Timeout in seconds for FreeMp3Cloud direct MP3 downloads |
 | `TIMEOUT_MONOCHROME_DOWNLOAD` | `300` | Timeout in seconds for Monochrome/Qobuz FLAC downloads |
@@ -687,6 +688,15 @@ automatic work then falls through to the next allowed source. Preview failures
 do not trip that shared breaker: a stale browser result or invented media token
 is allowed to fail its own audition without parking searches and downloads for
 everyone else.
+
+A hard Cloudflare block is a different animal from a challenge. If MP3Phoenix
+answers with "Sorry, you have been blocked", that is a firewall rule on your
+address or region, and no browser gets past it. MusicGrabber spots that page with
+one plain request before ever launching Chrome, parks the source for six hours
+(`MP3PHOENIX_BLOCK_COOLDOWN`), and says so in search results and source health
+rather than cheerfully calling it healthy. As of September 2026 it serves that
+page to every connection we have tried: two in the UK, plus VPN exits in Brazil
+and the US. If it does the same to you, leaving it switched off costs nothing.
 
 Preview works like every other source, but the route is different: Cloudflare
 will not serve an `<audio>` element directly, so the opening megabyte (roughly
