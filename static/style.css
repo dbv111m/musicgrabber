@@ -113,6 +113,9 @@
     --space-4: 16px;
     --space-5: 24px;
     --space-6: 32px;
+    /* The app column, content plus its 20px gutters. Shared with the Settings
+       save bar so the two cannot drift apart. Widened for desktop below. */
+    --container-max: 640px;
 
     /* Radius scale */
     --radius-sm: 6px;
@@ -225,10 +228,19 @@ a:hover {
 }
 
 .container {
-    max-width: 640px;
+    max-width: var(--container-max);
     margin: 0 auto;
     padding: 20px;
     padding-bottom: max(60px, env(safe-area-inset-bottom, 60px));
+}
+
+/* Desktop only: a 600px column on a 1440px monitor was mostly black bars and
+   queue cards that were mostly whitespace. Phones and tablets keep 640. */
+@media (min-width: 1024px) {
+    .container,
+    .settings-floating-bar-inner {
+        --container-max: 880px;
+    }
 }
 
 header {
@@ -4983,7 +4995,7 @@ h1 {
     align-items: stretch;
     gap: 16px;
     width: 100%;
-    max-width: 640px;
+    max-width: var(--container-max);
 }
 
 @media (max-width: 600px) {

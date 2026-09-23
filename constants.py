@@ -495,6 +495,10 @@ QBDLX_SHARED_TOKENS_URL = os.getenv(
 )
 QBDLX_QOBUZ_API_BASE = os.getenv("QBDLX_QOBUZ_API_BASE", "https://www.qobuz.com/api.json/0.2/")
 QBDLX_TOKEN_CACHE_TTL = int(os.getenv("QBDLX_TOKEN_CACHE_TTL", "600"))  # re-fetch the pool every N seconds
+# After the token host fails to answer, stop asking for this long. Without it every
+# caller paid the full timeout in turn, so a dead host held an album import at
+# "Queuing..." for minutes instead of letting it fall through to other sources.
+QBDLX_TOKEN_FAILURE_COOLDOWN = int(os.getenv("QBDLX_TOKEN_FAILURE_COOLDOWN", "120"))
 
 # Source health checks: living the pirate lifestyle means free services come and
 # go, so we check whether each source can actually deliver before showing its

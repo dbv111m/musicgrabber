@@ -537,6 +537,7 @@ Settings are stored in the database and persist across container restarts.
 | `SEARCH_CONCURRENCY` | `1` | Maximum simultaneous searches admitted per provider, from 1 to 5. This does not increase download concurrency |
 | `MONOCHROME_HIFI_API_URL` | *(blank)* | Optional self-hosted hifi-api compatible endpoint(s) for Tidal metadata top-up. Comma or newline separated lists are tried in order. The public instances that used to ship as the default have been dead since Tidal revoked their OAuth client, so there is no honest public default any more; Monochrome works fine without this set |
 | `QBDLX_FALLBACK_ENABLED` | `true` | Try qbdlx's direct Qobuz API when browser-authenticated Monochrome playback has no stream |
+| `QBDLX_TOKEN_FAILURE_COOLDOWN` | `120` | Seconds to stop asking qbdlx's token host after it fails to answer, so downloads fall through to other sources instead of waiting on it |
 | `MONOCHROME_BROWSER_FALLBACK_ENABLED` | `true` | Allow a SeleniumBase/Chrome session to complete Monochrome's Turnstile flow as the primary playback route |
 | `MONOCHROME_WEB_URL` | `https://monochrome.tf` | Monochrome web client used for browser authentication and public playback configuration discovery |
 | `MONOCHROME_BROWSER_AUTH_TIMEOUT` | `75` | Seconds to wait for Monochrome to issue a browser Turnstile JWT |

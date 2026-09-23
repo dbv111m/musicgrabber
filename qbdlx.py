@@ -38,6 +38,7 @@ from constants import (
     QBDLX_SHARED_TOKENS_URL,
     QBDLX_QOBUZ_API_BASE,
     QBDLX_TOKEN_CACHE_TTL,
+    QBDLX_TOKEN_FAILURE_COOLDOWN,
     TIMEOUT_MONOCHROME_SEARCH,
 )
 
@@ -50,6 +51,10 @@ _HEADERS = {
 _token_cache: list[dict] = []
 _token_cache_at: float = 0.0
 _token_lock = threading.Lock()
+# When the pool host last failed to answer. Inside the cooldown we hand back
+# whatever we have (often nothing) at once, so callers fall through to other
+# sources instead of queueing behind the lock for a timeout apiece.
+_token_fetch_failed_at: float = 0.0
 
 # The token that last handed back a genuine stream, so the next download starts
 # with the one we know works instead of trudging through the pool from the top.
@@ -91,10 +96,13 @@ def _fetch_shared_tokens(force: bool = False) -> list[dict]:
     stale token still beats no token, and the caller treats an empty list as
     "fallback unavailable" anyway.
     """
-    global _token_cache, _token_cache_at
+    global _token_cache, _token_cache_at, _token_fetch_failed_at
     with _token_lock:
         fresh = _token_cache and (time.time() - _token_cache_at) < QBDLX_TOKEN_CACHE_TTL
         if fresh and not force:
+            return _token_cache
+        cooling = (time.time() - _token_fetch_failed_at) < QBDLX_TOKEN_FAILURE_COOLDOWN
+        if cooling and not force:
             return _token_cache
 
         try:
@@ -115,11 +123,16 @@ def _fetch_shared_tokens(force: bool = False) -> list[dict]:
                 _token_cache_at = time.time()
                 with _known_bad_lock:
                     _known_bad_tokens.clear()  # fresh pool, fresh chances
+                _token_fetch_failed_at = 0.0
                 return tokens
             print("qbdlx: shared token pool came back empty")
         except Exception as exc:
-            print(f"qbdlx: failed to fetch shared tokens: {exc}")
+            print(
+                f"qbdlx: failed to fetch shared tokens: {exc}; "
+                f"not asking again for {QBDLX_TOKEN_FAILURE_COOLDOWN}s"
+            )
 
+        _token_fetch_failed_at = time.time()
         return _token_cache  # last known good, possibly empty
 
 

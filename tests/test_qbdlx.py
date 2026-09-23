@@ -15,6 +15,7 @@ _TOKEN = {"token": "T", "app_id": "798273057", "app_secret": "SEC", "country": "
 def setup_function():
     qbdlx._token_cache = []
     qbdlx._token_cache_at = 0.0
+    qbdlx._token_fetch_failed_at = 0.0
     qbdlx._good_token = None  # otherwise one test's favourite skews the next
     qbdlx._known_bad_tokens = set()
     # Stub the persistence hooks out entirely and pretend the restore already
@@ -354,6 +355,62 @@ def test_fetch_shared_tokens_resets_known_bad_on_fresh_pool(monkeypatch):
 
     assert tokens == [_TOKEN]
     assert qbdlx._known_bad_tokens == set()
+
+
+def _dead_host(calls):
+    def fake_get(*_a, **_k):
+        calls.append(1)
+        raise qbdlx.httpx.ConnectTimeout("timed out")
+    return fake_get
+
+
+def test_dead_token_host_is_asked_once_not_once_per_caller(monkeypatch):
+    """An album's fifteen ISRC lookups must not pay fifteen timeouts."""
+    calls = []
+    monkeypatch.setattr(qbdlx.httpx, "get", _dead_host(calls))
+
+    for _ in range(15):
+        assert qbdlx._fetch_shared_tokens() == []
+    assert len(calls) == 1
+    # And the lookup reports "could not verify", so the caller falls through.
+    assert qbdlx.lookup_qobuz_isrc("GBAYE9200070") == ([], True)
+    assert len(calls) == 1
+
+
+def test_stale_pool_is_not_refetched_on_every_call_while_host_is_down(monkeypatch):
+    qbdlx._token_cache = [dict(_TOKEN)]
+    qbdlx._token_cache_at = 0.0  # long expired
+    calls = []
+    monkeypatch.setattr(qbdlx.httpx, "get", _dead_host(calls))
+
+    for _ in range(5):
+        assert qbdlx._fetch_shared_tokens() == [_TOKEN]
+    assert len(calls) == 1
+
+
+def test_force_ignores_the_failure_cooldown(monkeypatch):
+    calls = []
+    monkeypatch.setattr(qbdlx.httpx, "get", _dead_host(calls))
+    qbdlx._fetch_shared_tokens()
+    qbdlx._fetch_shared_tokens(force=True)
+    assert len(calls) == 2
+
+
+def test_cooldown_expires_and_a_recovered_host_is_used(monkeypatch):
+    monkeypatch.setattr(qbdlx.httpx, "get", _dead_host([]))
+    qbdlx._fetch_shared_tokens()
+
+    class _FakeResponse:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return [dict(_TOKEN)]
+
+    monkeypatch.setattr(qbdlx.httpx, "get", lambda *a, **k: _FakeResponse())
+    qbdlx._token_fetch_failed_at -= qbdlx.QBDLX_TOKEN_FAILURE_COOLDOWN + 1
+    assert qbdlx._fetch_shared_tokens() == [_TOKEN]
+    assert qbdlx._token_fetch_failed_at == 0.0
 
 
 # ---------------------------------------------------------------------------
