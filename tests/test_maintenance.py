@@ -216,3 +216,47 @@ def test_nothing_to_do_is_silent_and_cheap(fresh_db, spawned):
     assert db.cleanup_stale_bulk_imports() == (0, 0)
     assert db.cleanup_stale_bulk_imports(orphaned=True) == (0, 0)
     assert spawned == []
+
+
+# ---------------------------------------------------------------------------
+# Single jobs: the same "nothing survives a restart" rule
+# ---------------------------------------------------------------------------
+
+def _add_job(job_id, status, quiet_seconds):
+    with db.db_conn() as conn:
+        conn.execute(
+            """INSERT INTO jobs (id, title, artist, status, progress_stage, created_at, progress_at)
+               VALUES (?, 'Mein Herz brennt', 'Rammstein', ?, 'Downloading audio',
+                       datetime('now', ? || ' seconds'), datetime('now', ? || ' seconds'))""",
+            (job_id, status, str(-quiet_seconds), str(-quiet_seconds)),
+        )
+        conn.commit()
+
+
+def _job(job_id):
+    with db.db_conn() as conn:
+        return conn.execute(
+            "SELECT status, error, progress_stage FROM jobs WHERE id = ?", (job_id,)
+        ).fetchone()
+
+
+def test_a_job_caught_mid_download_by_a_restart_is_failed_at_boot(fresh_db):
+    """Thirty seconds into a download when the container went down: no thread
+    is behind it any more, so it should not sit on "Downloading" for 15 minutes."""
+    _add_job("fresh1", "downloading", quiet_seconds=30)
+    _add_job("queued1", "queued", quiet_seconds=5)
+    db.cleanup_stale_jobs(orphaned=True)
+    assert _job("fresh1") == ("failed", "Interrupted by a restart", None)
+    assert _job("queued1")[0] == "failed"
+
+
+def test_the_periodic_sweep_still_leaves_a_live_download_alone(fresh_db):
+    _add_job("alive1", "downloading", quiet_seconds=30)
+    db.cleanup_stale_jobs()
+    assert _job("alive1")[0] == "downloading"
+
+
+def test_the_periodic_sweep_still_times_out_a_silent_download(fresh_db):
+    _add_job("dead1", "downloading", quiet_seconds=db.STALE_JOB_TIMEOUT + 60)
+    db.cleanup_stale_jobs()
+    assert _job("dead1")[:2] == ("failed", "Timed out (no progress)")

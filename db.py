@@ -1786,39 +1786,48 @@ def cleanup_old_search_logs(retention_days: int = SEARCH_LOG_RETENTION_DAYS) -> 
         return deleted
 
 
-def cleanup_stale_jobs():
+def cleanup_stale_jobs(orphaned: bool = False):
     """Mark any downloading/queued jobs with no progress for STALE_JOB_TIMEOUT as failed.
     Handles cases where the background task crashed or the container restarted.
     Judged on the progress heartbeat (falling back to created_at for jobs that
-    never got one), so a slow-but-alive download isn't shot for taking its time."""
+    never got one), so a slow-but-alive download isn't shot for taking its time.
+
+    `orphaned=True` is the boot pass. Every job runs in a daemon thread, so
+    after a restart nothing is behind any of them; waiting out the timeout just
+    meant a dead job sat on "Downloading" for a quarter of an hour looking busy,
+    with no Retry button, which is how Monochrome got blamed for a restart."""
+    cutoff = 0 if orphaned else STALE_JOB_TIMEOUT
+    reason = "Interrupted by a restart" if orphaned else "Timed out (no progress)"
     with db_conn() as conn:
         cursor = conn.execute(
-            """UPDATE jobs SET status = 'failed', error = 'Timed out (no progress)',
+            """UPDATE jobs SET status = 'failed', error = ?,
                progress_stage = NULL, completed_at = datetime('now')
                WHERE status IN ('downloading', 'queued')
-               AND COALESCE(progress_at, created_at) < datetime('now', ? || ' seconds')""",
-            (str(-STALE_JOB_TIMEOUT),)
+               AND COALESCE(progress_at, created_at) <= datetime('now', ? || ' seconds')""",
+            (reason, str(-cutoff))
         )
         if cursor.rowcount > 0:
             print(f"Cleaned up {cursor.rowcount} stale job(s)")
             conn.execute(
                 """UPDATE acquisition_attempts
-                   SET status = 'failed', error = 'Timed out (no progress)',
+                   SET status = 'failed', error = ?,
                        completed_at = datetime('now')
                    WHERE status = 'attempting'
                      AND job_id IN (
                          SELECT id FROM jobs
-                         WHERE status = 'failed' AND error = 'Timed out (no progress)'
-                     )"""
+                         WHERE status = 'failed' AND error = ?
+                     )""",
+                (reason, reason),
             )
             conn.execute(
                 """UPDATE acquisition_targets
-                   SET status = 'failed', last_error = 'Timed out (no progress)',
+                   SET status = 'failed', last_error = ?,
                        updated_at = datetime('now')
                    WHERE id IN (
                        SELECT DISTINCT target_id FROM acquisition_attempts
-                       WHERE status = 'failed' AND error = 'Timed out (no progress)'
-                   )"""
+                       WHERE status = 'failed' AND error = ?
+                   )""",
+                (reason, reason),
             )
 
         # Evict album track locks that never reached completed status  -  these are
@@ -2154,7 +2163,7 @@ def reconcile_deleted_library_files(batch_size: int = 500) -> tuple[int, int]:
 
 def _boot_cleanup():
     """Clear state left behind by a crash or restart. Runs once, off the boot path."""
-    cleanup_stale_jobs()
+    cleanup_stale_jobs(orphaned=True)
     cleanup_stale_watched_refreshes()
     # Nothing survives a restart, so every import still marked 'processing' is
     # orphaned by definition. No sense making it serve out the timeout first.
