@@ -1,6 +1,6 @@
 # Changelog
 
-## v4.2.3 (DEV)
+## v4.2.3 (2026-09-23)
 
 ### Added
 - **Reject more than just live versions**: the "Reject Live Versions" toggle has grown a companion, a free text box where you list whatever else you cannot be doing with. `demo, acoustic, radio edit, remix` is a reasonable start. A downloaded track confidently identified as one of those gets binned and retried, exactly like the live check. It inherits the same paranoia too: the keyword only counts inside a version annotation such as `(Acoustic)`, `[Demo]` or `- Radio Edit`, so "Demolition Man" is in no danger from the word "demo" and "Radio Ga Ga" is safe from "radio edit"; it only ever acts on a confident AcoustID fingerprint, never a text-search guess; and anything you explicitly asked for by name is never rejected, so searching for the acoustic version still gets you the acoustic version. "By name" means the whole word: asking for "Demolition Man" does not count as asking for a demo, which an early draft briefly thought it did. "remix" matches "(Tiesto Remix)" without you having to know who Tiesto is. Requested by kaisernerox on GitLab (#96).

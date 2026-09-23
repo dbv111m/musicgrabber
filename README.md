@@ -1,5 +1,5 @@
 # Music Grabber
-**v4.2.2 (2026-09-15)**
+**v4.2.3 (2026-09-23)**
 
 A self-hosted music acquisition service. Search YouTube, SoundCloud, zvu4no, FreeMp3Cloud, Monochrome/Qobuz, optional MP3Phoenix, and optional Soulseek, tap a result and it downloads the best quality audio straight into your music library. You'll have a choice to convert to a common format, or store as is.
 
