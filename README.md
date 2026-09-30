@@ -25,7 +25,7 @@ MusicGrabber is intentionally narrow. It is **not**:
 
 - **Multi-source search:** the Tracks tab searches YouTube, SoundCloud, zvu4no, FreeMp3Cloud, Monochrome/Qobuz, optional MP3Phoenix, and optional Soulseek in parallel; relevance-ranked results include source badges and score explanations, plus a separate audio-quality tier where the provider declares one. MP3Phoenix is an off-by-default source that briefly launches Selenium to obtain Cloudflare clearance, then searches, previews and downloads through a reusable Chrome-impersonating HTTP session. Soulseek results also show the peer's current queue depth and use it as a bounded ranking penalty, so an idle peer wins an otherwise equal contest without a busy peer disappearing altogether. The single-song search collapses when you leave Tracks, keeping the other workspaces focused on their own jobs
 - **Live search progress:** results stream in as each source answers, with live status for completed, slow, parked, or unavailable sources; repeated timeouts automatically bench an unhealthy source until a background probe clears it. yt-dlp searches and metadata lookups share a bounded retry policy for throttling, timeouts, gateway failures, and reduced format manifests, while genuinely private/deleted media fails immediately
-- **Monochrome/Qobuz source:** searches Tidal and Deezer metadata and resolves matching Qobuz FLAC streams by ISRC. Browser-authenticated Monochrome playback is tried first, then the direct qbdlx Qobuz route, then a Deezer ISRC rescue, then a lossless Tidal stream as a last resort. No account or API key is required. Enabled by default and configurable in Search Sources
+- **Monochrome/Qobuz source:** searches Tidal and Deezer metadata and resolves matching Qobuz FLAC streams by ISRC. Monochrome's own tracks API is tried first, then the direct qbdlx Qobuz route, then a Deezer ISRC rescue, then a lossless Tidal stream as a last resort. Monochrome downloads are 16-bit/44.1kHz FLAC. No account or API key is required. Enabled by default and configurable in Search Sources
 - **Watched playlists:** monitor Spotify, YouTube (including Mixes), Amazon Music, Apple Music, SoundCloud, Tidal, Beatport, Monochrome, and ListenBrainz playlists; auto-downloads new tracks and grabs the best match available. Per-playlist sync mode: Append (M3U grows as tracks arrive) or Mirror (M3U stays in sync with the upstream; removed tracks drop out). Each card shows live refresh state and stage. "Missing" button shows tracks that never made it; Retry and Search buttons to fix them. M3U updates immediately as each track finishes
 - **Artists tab:** follow an artist on MusicBrainz and new singles are downloaded automatically as they appear. Search by name, pick from up to five candidates, set a from-date (defaults to today so your back-catalogue stays put). Singles come first: remixes, live cuts, soundtracks, and compilations are filtered out at the MusicBrainz level. Albums sit underneath for browsing and picking off individually, with an optional "automatically add new albums" toggle that marks everything already released as seen, so ticking it never starts a back-catalogue download. A transient failure while handing a new album to the queue is recorded and retried once on the next artist check rather than making the release permanently “known but abandoned”. Tracks already on disk are recognised immediately, and followed-album labels are derived from the current import and actual audio count rather than preserving “Queued” until the sun burns out. Per-artist check interval, Keep source/Convert to control, pause/resume, missing and track list panels. You can also browse any artist's albums without following them at all
 - **Playlist routing:** pick any watched playlist or existing `.m3u` file from the selector below the search bar; downloads land there instead of Singles
@@ -446,7 +446,7 @@ The easiest way to configure MusicGrabber is via the **Settings tab** in the UI.
 - **Library layout**: Singles, Playlists, and Albums subfolders, track-number filenames, auto-album routing, playlist album/comment tagging, automatic Music import, singles-only mode, and file permissions
 - **Search sources**: enable/disable YouTube, SoundCloud, zvu4no, FreeMp3Cloud, MP3Phoenix, Soulseek, and Monochrome; configure cross-source fallback, automatic health checks, and a per-provider search limit from 1–5 (default 1). MP3Phoenix and Soulseek are disabled by default. An off-by-default YouTube playlist option can use the exact upstream video only after every confident alternative fails. Download concurrency remains deliberately internal and conservative
 - **Track upgrades**: scan the library for files below the configured quality tier and control the scan interval
-- **Monochrome**: hifi-api URL, browser-authenticated Turnstile playback, and direct-qbdlx fallback
+- **Monochrome**: hifi-api URL and direct-qbdlx fallback
 - **Soulseek (slskd)**: enable toggle, URL, credentials, downloads path
 - **Navidrome**: URL and credentials for library refresh
 - **Jellyfin**: URL and API key for library refresh
@@ -536,11 +536,10 @@ Settings are stored in the database and persist across container restarts.
 | `SOURCE_HEALTH_COOLDOWN_MINUTES` | `10` | Minimum time a failed source remains parked before it can be probed again |
 | `SEARCH_CONCURRENCY` | `1` | Maximum simultaneous searches admitted per provider, from 1 to 5. This does not increase download concurrency |
 | `MONOCHROME_HIFI_API_URL` | *(blank)* | Optional self-hosted hifi-api compatible endpoint(s) for Tidal metadata top-up. Comma or newline separated lists are tried in order. The public instances that used to ship as the default have been dead since Tidal revoked their OAuth client, so there is no honest public default any more; Monochrome works fine without this set |
-| `QBDLX_FALLBACK_ENABLED` | `true` | Try qbdlx's direct Qobuz API when browser-authenticated Monochrome playback has no stream |
+| `QBDLX_FALLBACK_ENABLED` | `true` | Try qbdlx's direct Qobuz API when Monochrome's tracks API has no stream |
 | `QBDLX_TOKEN_FAILURE_COOLDOWN` | `120` | Seconds to stop asking qbdlx's token host after it fails to answer, so downloads fall through to other sources instead of waiting on it |
-| `MONOCHROME_BROWSER_FALLBACK_ENABLED` | `true` | Allow a SeleniumBase/Chrome session to complete Monochrome's Turnstile flow as the primary playback route |
-| `MONOCHROME_WEB_URL` | `https://monochrome.tf` | Monochrome web client used for browser authentication and public playback configuration discovery |
-| `MONOCHROME_BROWSER_AUTH_TIMEOUT` | `75` | Seconds to wait for Monochrome to issue a browser Turnstile JWT |
+| `MONOCHROME_WEB_URL` | `https://monochrome.st` | Monochrome web client, read to discover where its tracks API currently lives. A retired domain's redirect is followed automatically |
+| `MONOCHROME_TRACKS_API_URL` | *(blank)* | Pin the Monochrome tracks API address and skip discovery. Only needed if Monochrome moves and discovery cannot follow; blank uses what the web client says, falling back to `https://tracks.monochrome.st` |
 | `SLSKD_URL` | - | slskd API URL (e.g., `http://slskd:5030`) |
 | `SLSKD_USER` | - | slskd username |
 | `SLSKD_PASS` | - | slskd password |
@@ -655,9 +654,11 @@ This is a refresh nudge, not a promise that Lidarr will suddenly become reasonab
 
 ### Monochrome/Qobuz Source (Optional)
 
-Monochrome is enabled by default. MusicGrabber searches Tidal and Deezer metadata and uses the ISRC to find the same recording. Browser-authenticated playback is the primary route: headed Chrome runs under Xvfb and completes the Turnstile flow used by Monochrome's real web client. Authentication and playback resolution stay in Chrome, while the resulting media URL downloads with MusicGrabber's normal HTTP client. If Monochrome has no stream, MusicGrabber tries the direct qbdlx Qobuz route, an ISRC rescue through Deezer, and finally a lossless Tidal stream where the result carries a genuine Tidal track ID. The retired public Qobuz proxy layer and its configuration have been removed.
+Monochrome is enabled by default. MusicGrabber searches Deezer (and a self-hosted Tidal hifi-api, if you have one) and uses the ISRC to pin down the exact recording. Downloads go through Monochrome's own tracks API first, the same one its web player uses: a plain HTTP catalogue with no account, token or browser involved. MusicGrabber searches it by artist and title, keeps only the result carrying exactly the right ISRC, and downloads the FLAC directly. If it has no match, MusicGrabber tries the direct qbdlx Qobuz route, an ISRC rescue through Deezer, and finally a lossless Tidal stream where the result carries a genuine Tidal track ID.
 
-The first browser-authenticated resolution normally takes several seconds. MusicGrabber keeps that browser and its short-lived JWT session alive, so later tracks avoid another Chrome launch; playback requests are serialised briefly through the one session. If it expires or Monochrome rotates its public client token, MusicGrabber refreshes the public configuration and starts a clean session once. Two consecutive browser failures temporarily mark that route unhealthy so a broken Chrome host does not impose the full timeout on every queued track; a retry window opens after ten minutes. Some lossless resources are standard CENC AES-CTR protected FLAC-in-MP4: MusicGrabber keeps the authorised key in memory, downloads the media normally, and asks ffmpeg to decrypt/remux it to a clean FLAC. The key is neither logged nor written to disk, though ffmpeg necessarily receives it as a process argument while remuxing. Preview requests only use an already-warmed browser session and never cold-start Chrome on hover.
+Monochrome downloads are 16-bit/44.1kHz FLAC. The tracks API ignores requests for anything higher, and the qbdlx route is capped at the same tier, so 24-bit hi-res is not on offer from this source.
+
+Monochrome has changed domain and playback route several times. MusicGrabber reads the tracks API's address from Monochrome's web client (following the redirect a retired domain leaves behind) and re-checks every six hours, so a move should be picked up on its own. If it is not, the Settings test says so, and `MONOCHROME_TRACKS_API_URL` pins the new address by hand.
 
 You can turn it off in Settings, Search Sources, or use:
 
@@ -665,10 +666,9 @@ You can turn it off in Settings, Search Sources, or use:
 environment:
   - SOURCE_MONOCHROME_ENABLED=false
   - MONOCHROME_HIFI_API_URL=https://your-own-hifi-api-instance
-  - MONOCHROME_BROWSER_FALLBACK_ENABLED=true
 ```
 
-You can point those URLs at self-hosted compatible services if you run them. Disable `MONOCHROME_BROWSER_FALLBACK_ENABLED` if you do not want Chrome launched for failed Monochrome downloads. The Docker image uses Google Chrome on amd64 and matched Debian Chromium/chromedriver packages on ARM. The arm64 image build is validated, but the Turnstile runtime path has less real-world coverage than amd64 and remains more sensitive to upstream browser/driver compatibility. Monochrome results without an ISRC are ignored, because the playback services cannot resolve them and pretending otherwise just wastes everyone's afternoon.
+You can point the hifi-api URL at a self-hosted compatible service if you run one. Monochrome results without an ISRC are ignored, because the playback services cannot resolve them and pretending otherwise just wastes everyone's afternoon.
 
 ### MP3Phoenix Source
 
@@ -1262,14 +1262,14 @@ music.yourdomain.com {
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET` | `/api/sources` | List available search sources (for source selector UI) |
-| `GET` | `/api/sources/health` | Get current source health, including Monochrome playback availability |
+| `GET` | `/api/sources/health` | Get current source health, including whether Monochrome's tracks API or qbdlx can serve a download |
 | `POST` | `/api/sources/health/recheck` | Start an admin-only background re-check of every source |
 | `POST` | `/api/search` | Search sources (`{"query": "...", "limit": 15, "source": "all/youtube/soundcloud/mp3phoenix/zvu4no/freemp3cloud/monochrome/soulseek"}`); results expose `relevance_score` for ordering and `quality_tier` for declared audio quality |
 | `POST` | `/api/search/stream` | Stream per-source status and ranked results as NDJSON, using the same `relevance_score`/`quality_tier` result contract |
 | `POST` | `/api/search/slskd` | Search Soulseek via slskd (if configured); results use the same ranking and quality fields |
 | `GET` | `/api/search/artwork` | Find display artwork for a search result (`?artist=...&title=...` or `?artist=...&album=...`); album lookups use Deezer `/search/album` as the fallback |
 | `GET` | `/api/preview/{video_id}` | Get a streamable audio URL. Monochrome accepts its complete `url` plus optional `artist` and `title` hints for lossless fallback resolution |
-| `GET` | `/api/preview-audio/{token}` | Serve a decrypted Monochrome preview snippet prepared by `/api/preview`, since an `<audio>` element cannot carry the token any other way |
+| `GET` | `/api/preview-audio/{token}` | Serve an MP3Phoenix preview snippet fetched server-side by `/api/preview`, since Cloudflare will not serve an `<audio>` element directly and the element cannot carry the token any other way |
 | `POST` | `/api/explore/similar` | Get similar artists via MusicBrainz + ListenBrainz Labs (`{"artist": "...", "mode": "easy", "limit": 25}`) |
 
 ### Downloads
@@ -1464,13 +1464,13 @@ docker compose up -d
 - TrueNAS commonly uses service UID/GID `568`. Debian may print `useradd warning: ... outside of the UID_MIN ... range` when the container creates that account. This is cosmetic: low numeric IDs are supported. Check that the container becomes healthy and that the host dataset grants `568:568` write access; changing the IDs merely to silence the warning usually swaps a harmless complaint for a real permissions problem
 
 **Browser fallbacks failing?**
-- Large Spotify playlists and Monochrome's browser-authenticated fallback need extra shared memory:
+- Large Spotify playlists need extra shared memory:
   ```yaml
   shm_size: '2gb'
   ```
   Add this to the `music-grabber` service block in `docker-compose.yml`
 - If you see a truncation warning in the UI, the headless browser crashed; the error message should tell you why
-- On ARM (NAS, Raspberry Pi) or low-RAM hosts, Chromium can silently crash even with `shm_size` set. Spotify then returns the embed result (up to ~100 tracks); Monochrome proceeds to its remaining non-browser fallbacks
+- On ARM (NAS, Raspberry Pi) or low-RAM hosts, Chromium can silently crash even with `shm_size` set. Spotify then returns the embed result (up to ~100 tracks)
 - Wrong `PUID`/`PGID` values can also prevent Chromium from launching; check those first
 
 **Downloads failing with 403 errors?**

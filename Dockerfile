@@ -43,8 +43,8 @@ RUN pip install --no-cache-dir \
     bcrypt~=4.2.0
 
 # SeleniumBase is kept beside Playwright rather than replacing the working
-# Spotify/Amazon scrapers. Monochrome uses it for a small Turnstile exchange;
-# experimental MP3Phoenix uses it briefly to seed curl_cffi with clearance.
+# Spotify/Amazon scrapers. Experimental MP3Phoenix uses it briefly to seed
+# curl_cffi with clearance.
 RUN pip install --no-cache-dir seleniumbase~=4.49.0
 
 # Install Playwright browsers into a fixed path so non-root users (PUID/PGID) can find them.

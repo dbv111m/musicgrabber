@@ -1661,6 +1661,17 @@ def init_db():
             )
             print("DB migrated to version 17: cleared stale watched-playlist job links")
 
+        # v18: Monochrome switched its Turnstile-guarded playback off and the
+        # browser route went with it. Drop the orphaned toggle so Settings stops
+        # offering a switch for a route that no longer exists.
+        if db_version < 18:
+            conn.execute("DELETE FROM settings WHERE key = 'monochrome_browser_fallback_enabled'")
+            conn.execute("DELETE FROM user_settings WHERE key = 'monochrome_browser_fallback_enabled'")
+            conn.execute(
+                "INSERT OR REPLACE INTO settings (key, value) VALUES ('db_version', '18')"
+            )
+            print("DB migrated to version 18: retired Monochrome browser playback setting removed")
+
         # Defensive backstop: early dev builds of v1 silently dropped custom_subdir
         # when recreating watched_playlists. Re-add it for any DB that already
         # passed through that mangled migration. Harmless if the column is present.

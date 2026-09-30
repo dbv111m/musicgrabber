@@ -11,6 +11,14 @@ const RELEASE_NOTES = {
         title: "What's New in v4.2.4",
         sections: [
             {
+                heading: "Monochrome is back",
+                items: [
+                    "Monochrome moved house and changed the locks, which broke every Monochrome download. It now uses the same simple route Monochrome's own player does, so downloads work again and resolve in a couple of seconds instead of half a minute. No more browser firing up behind the scenes either.",
+                    "Previews play the real track straight away.",
+                    "One catch: the new route tops out at CD quality (16-bit FLAC), so Monochrome no longer offers 24-bit hi-res. Still proper lossless, just not the audiophile's extra helping.",
+                ]
+            },
+            {
                 heading: "Fixed",
                 items: [
                     "Searching for an artist to follow while MusicBrainz is having a bad day now tells you MusicBrainz is down and to try again shortly, instead of a vague \"Search failed\".",

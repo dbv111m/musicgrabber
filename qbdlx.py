@@ -1,7 +1,7 @@
 """
 MusicGrabber - direct Qobuz fallback
 
-When browser-authenticated Monochrome playback cannot resolve a track, this
+When Monochrome's own tracks API cannot resolve a track, this
 module talks to the official Qobuz API directly, signing requests with a shared
 free-account token (the same pool the qbdlx web UI at
 qbdlx.launchpd.cloud hands out under its "Free account" tab).
@@ -231,7 +231,7 @@ def lookup_qobuz_isrc(isrc: str) -> tuple[list[dict], bool]:
 
     The boolean distinguishes a clean catalogue miss from an unavailable token
     pool. Search callers may discard a confirmed miss, but keep an unverified
-    result for browser-authenticated playback to settle at download time.
+    result for the tracks API to settle at download time.
     """
     if not qbdlx_enabled() or not isrc:
         return [], True
@@ -441,7 +441,7 @@ def resolve_qobuz_stream_url(isrc: str, quality_fmt: int) -> str | None:
 def download_leg_healthy() -> tuple[bool, str]:
     """Can the qbdlx fallback actually serve a FLAC right now?
 
-    Used by servicecheck when browser-authenticated playback is unavailable.
+    Used by servicecheck when Monochrome's tracks API is unavailable.
     Probes Radiohead's Creep, a stable known ISRC. The reason string always
     carries the usable-token count, healthy or not, so degradation shows up before
     the pool is fully dead rather than only once it is.

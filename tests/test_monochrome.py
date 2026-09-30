@@ -1,6 +1,4 @@
 import os
-from pathlib import Path
-import subprocess
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -17,11 +15,11 @@ import pytest
 # download_leg_healthy
 # ---------------------------------------------------------------------------
 
-def test_download_leg_healthy_prefers_browser_without_launching_it(monkeypatch):
+def test_download_leg_healthy_prefers_tracks_api(monkeypatch):
     import monochrome
     monkeypatch.setattr(
-        "monochrome_browser.browser_fallback_health",
-        lambda: (True, "browser-authenticated playback available on demand"),
+        "monochrome_tracks.health",
+        lambda: (True, "Monochrome tracks API answering at https://tracks.test"),
     )
     monkeypatch.setattr(
         "qbdlx.download_leg_healthy",
@@ -29,12 +27,12 @@ def test_download_leg_healthy_prefers_browser_without_launching_it(monkeypatch):
     )
     ok, reason = monochrome.download_leg_healthy()
     assert ok is True
-    assert "browser-authenticated" in reason
+    assert "tracks API" in reason
 
 
-def test_download_leg_healthy_uses_qbdlx_when_browser_unavailable(monkeypatch):
+def test_download_leg_healthy_uses_qbdlx_when_tracks_api_down(monkeypatch):
     import monochrome
-    monkeypatch.setattr("monochrome_browser.browser_fallback_health", lambda: (False, "Chrome failed twice"))
+    monkeypatch.setattr("monochrome_tracks.health", lambda: (False, "tracks API unreachable"))
     monkeypatch.setattr("qbdlx.qbdlx_enabled", lambda: True)
     monkeypatch.setattr("qbdlx.download_leg_healthy", lambda: (True, "3/28 shared tokens usable this cycle"))
     ok, reason = monochrome.download_leg_healthy()
@@ -44,38 +42,46 @@ def test_download_leg_healthy_uses_qbdlx_when_browser_unavailable(monkeypatch):
 
 def test_download_leg_healthy_reports_both_failures(monkeypatch):
     import monochrome
-    monkeypatch.setattr("monochrome_browser.browser_fallback_health", lambda: (False, "Chrome failed twice"))
+    monkeypatch.setattr("monochrome_tracks.health", lambda: (False, "tracks API unreachable"))
     monkeypatch.setattr("qbdlx.qbdlx_enabled", lambda: True)
     monkeypatch.setattr("qbdlx.download_leg_healthy", lambda: (False, "0/28 shared tokens usable this cycle"))
     ok, reason = monochrome.download_leg_healthy()
     assert ok is False
-    assert "Chrome failed twice" in reason
+    assert "tracks API unreachable" in reason
     assert "0/28 shared tokens" in reason
 
 
 # ---------------------------------------------------------------------------
-# Browser-first stream fallback chain
+# Tracks-API-first stream fallback chain
 # ---------------------------------------------------------------------------
 
-def test_preview_uses_browser_before_qbdlx(monkeypatch):
+def test_preview_uses_tracks_api_before_qbdlx(monkeypatch):
     import monochrome
     calls = []
     monkeypatch.setattr(
-        "monochrome_browser.resolve_unified_stream_url",
-        lambda *a, **k: calls.append(("browser", a[0], a[1])) or "https://mono.test/preview.mp4",
+        "monochrome_tracks.resolve_stream_url",
+        lambda isrc, artist, title: calls.append((isrc, artist, title)) or "https://tracks.test/track/1",
     )
     monkeypatch.setattr(
         "qbdlx.resolve_qobuz_stream_url",
         lambda *a, **k: (_ for _ in ()).throw(AssertionError("qbdlx should not run")),
     )
-    assert monochrome.get_monochrome_preview_url("GBAYE9200070") == "https://mono.test/preview.mp4"
-    assert calls == [("browser", "GBAYE9200070", "LOSSLESS")]
+    url = monochrome.get_monochrome_preview_url(
+        "monochrome://123?isrc=GBAYE9200070&quality=LOSSLESS&src=deezer",
+        artist_hint="Radiohead", title_hint="Creep",
+    )
+    assert url == "https://tracks.test/track/1"
+    assert calls == [("GBAYE9200070", "Radiohead", "Creep")]
 
 
-def test_preview_uses_qbdlx_when_browser_has_nothing(monkeypatch):
+def test_bare_isrc_preview_skips_tracks_api_and_uses_qbdlx(monkeypatch):
+    """The tracks API can only search by name, so an ISRC with no title cannot use it."""
     import monochrome
+    monkeypatch.setattr(
+        "monochrome_tracks.resolve_stream_url",
+        lambda *a: (_ for _ in ()).throw(AssertionError("tracks API needs a title")),
+    )
     calls = []
-    monkeypatch.setattr("monochrome_browser.resolve_unified_stream_url", lambda *a, **k: None)
     monkeypatch.setattr(
         "qbdlx.resolve_qobuz_stream_url",
         lambda isrc, quality_fmt: calls.append((isrc, quality_fmt)) or "https://qobuz.test/preview.flac",
@@ -87,7 +93,7 @@ def test_preview_uses_qbdlx_when_browser_has_nothing(monkeypatch):
 def test_preview_never_falls_back_to_lossy_qbdlx_format(monkeypatch):
     import monochrome
     calls = []
-    monkeypatch.setattr("monochrome_browser.resolve_unified_stream_url", lambda *a, **k: None)
+    monkeypatch.setattr("monochrome_tracks.resolve_stream_url", lambda *a: None)
     monkeypatch.setattr(
         "qbdlx.resolve_qobuz_stream_url",
         lambda isrc, quality_fmt: calls.append((isrc, quality_fmt)),
@@ -100,24 +106,24 @@ def test_preview_never_falls_back_to_lossy_qbdlx_format(monkeypatch):
 
 def test_preview_rescues_isrc_with_artist_and_title(monkeypatch):
     import monochrome
-    browser_calls = []
-    def fake_browser(isrc, *args, **kwargs):
-        browser_calls.append(isrc)
-        return "https://mono.test/rescued.mp4" if isrc == "GBNEW2500001" else None
-    monkeypatch.setattr("monochrome_browser.resolve_unified_stream_url", fake_browser)
+    tracks_calls = []
+    def fake_tracks(isrc, artist, title):
+        tracks_calls.append(isrc)
+        return "https://tracks.test/track/2" if isrc == "GBNEW2500001" else None
+    monkeypatch.setattr("monochrome_tracks.resolve_stream_url", fake_tracks)
     monkeypatch.setattr("qbdlx.resolve_qobuz_stream_url", lambda *a: None)
     monkeypatch.setattr(monochrome, "_deezer_isrc_rescue", lambda *a: "GBNEW2500001")
     url = monochrome.get_monochrome_preview_url(
         "monochrome://123?isrc=GBOLD2500001&quality=LOSSLESS&src=deezer",
         artist_hint="Artist", title_hint="Track",
     )
-    assert url == "https://mono.test/rescued.mp4"
-    assert browser_calls == ["GBOLD2500001", "GBNEW2500001"]
+    assert url == "https://tracks.test/track/2"
+    assert tracks_calls == ["GBOLD2500001", "GBNEW2500001"]
 
 
 def test_preview_uses_tidal_lossless_as_final_leg(monkeypatch):
     import monochrome
-    monkeypatch.setattr("monochrome_browser.resolve_unified_stream_url", lambda *a, **k: None)
+    monkeypatch.setattr("monochrome_tracks.resolve_stream_url", lambda *a: None)
     monkeypatch.setattr("qbdlx.resolve_qobuz_stream_url", lambda *a: None)
     monkeypatch.setattr(monochrome, "_deezer_isrc_rescue", lambda *a: "")
     tidal_calls = []
@@ -132,41 +138,30 @@ def test_preview_uses_tidal_lossless_as_final_leg(monkeypatch):
     assert tidal_calls == [("18420572", "LOSSLESS")]
 
 
-def test_download_fails_cleanly_when_browser_and_qbdlx_have_nothing(monkeypatch, tmp_path):
+def test_download_fails_cleanly_when_tracks_api_and_qbdlx_have_nothing(monkeypatch, tmp_path):
     import monochrome
-    monkeypatch.setattr("monochrome_browser.resolve_unified_stream_url", lambda *a, **k: None)
+    monkeypatch.setattr("monochrome_tracks.resolve_stream_url", lambda *a: None)
     monkeypatch.setattr("qbdlx.resolve_qobuz_stream_url", lambda *a: None)
     monkeypatch.setattr(monochrome, "_deezer_isrc_rescue", lambda *a: "")
     output = tmp_path / "track.flac"
     with pytest.raises(RuntimeError, match="no stream available"):
         monochrome.download_monochrome_track(
             "monochrome://not-tidal?isrc=GBAYE9200070&quality=LOSSLESS", output,
+            artist_hint="Radiohead", title_hint="Creep",
         )
     assert not output.exists()
 
 
-def test_browser_fallback_is_tried_before_qbdlx(monkeypatch):
+def test_tracks_api_error_falls_through_to_qbdlx(monkeypatch):
+    """A tracks API outage is a reason to try the next leg, not to give up."""
     import monochrome
     monkeypatch.setattr(
-        "monochrome_browser.resolve_unified_stream_url",
-        lambda *a, **k: "https://monochrome.test/browser.flac",
+        "monochrome_tracks.resolve_stream_url",
+        lambda *a: (_ for _ in ()).throw(httpx.ConnectError("tracks API down")),
     )
-    monkeypatch.setattr(
-        "qbdlx.resolve_qobuz_stream_url",
-        lambda *a: (_ for _ in ()).throw(AssertionError("qbdlx must not run")),
-    )
-    assert monochrome._resolve_monochrome_stream_url(
-        "monochrome://123?isrc=GBAYE9200070&quality=LOSSLESS",
-        artist_hint="Radiohead", title_hint="Creep",
-    ) == "https://monochrome.test/browser.flac"
-
-
-def test_qbdlx_runs_when_browser_leg_has_nothing(monkeypatch):
-    import monochrome
-    monkeypatch.setattr("monochrome_browser.resolve_unified_stream_url", lambda *a, **k: None)
     monkeypatch.setattr("qbdlx.resolve_qobuz_stream_url", lambda *a: "https://qobuz.test/fast.flac")
     assert monochrome._resolve_monochrome_stream_url(
-        "monochrome://123?isrc=GBAYE9200070&quality=LOSSLESS",
+        "monochrome://123?isrc=GBAYE9200070&quality=HI_RES_LOSSLESS",
         artist_hint="Radiohead", title_hint="Creep",
     ) == "https://qobuz.test/fast.flac"
 
@@ -692,8 +687,8 @@ def test_download_rescues_malformed_isrc_via_deezer(monkeypatch, tmp_path):
     )
     stream_calls = []
     monkeypatch.setattr(
-        "monochrome_browser.resolve_unified_stream_url",
-        lambda isrc, *a, **k: stream_calls.append(isrc) or "https://cdn.test/track.flac",
+        "monochrome_tracks.resolve_stream_url",
+        lambda isrc, *a: stream_calls.append(isrc) or "https://tracks.test/track/3",
     )
     monkeypatch.setattr(monochrome.httpx, "stream", lambda *a, **k: _FakeStreamResponse())
     output = tmp_path / "track.flac"
@@ -705,36 +700,9 @@ def test_download_rescues_malformed_isrc_via_deezer(monkeypatch, tmp_path):
     assert stream_calls == ["GB28K1100036"]
     assert output.exists() and output.stat().st_size > 0
 
-def test_download_decrypts_browser_cenc_resource_without_persisting_key(monkeypatch, tmp_path):
-    import monochrome
-
-    monkeypatch.setattr(
-        monochrome, "_resolve_monochrome_stream_url", lambda *a, **k: "https://cdn.test/encrypted.mp4"
-    )
-    monkeypatch.setattr("monochrome_browser.pop_decryption_key", lambda url: "a1" * 16)
-    monkeypatch.setattr(
-        monochrome.httpx, "stream", lambda *a, **k: _FakeStreamResponse(b"encrypted-media")
-    )
-    calls = []
-
-    def fake_ffmpeg(args, **kwargs):
-        calls.append(args)
-        Path(args[-1]).write_bytes(b"fLaCclean-audio")
-        return subprocess.CompletedProcess(args, 0, "", "")
-
-    monkeypatch.setattr(monochrome.subprocess, "run", fake_ffmpeg)
-    output = tmp_path / "track.flac"
-
-    monochrome.download_monochrome_track("monochrome://123?isrc=TEST", output)
-
-    assert output.read_bytes().startswith(b"fLaC")
-    assert not (tmp_path / "track.flac.encrypted.mp4").exists()
-    assert calls and calls[0][calls[0].index("-decryption_key") + 1] == "a1" * 16
-
-
 def test_download_falls_back_to_tidal_stream_for_tidal_results(monkeypatch, tmp_path):
     import monochrome
-    monkeypatch.setattr("monochrome_browser.resolve_unified_stream_url", lambda *a, **k: None)
+    monkeypatch.setattr("monochrome_tracks.resolve_stream_url", lambda *a: None)
     monkeypatch.setattr("qbdlx.resolve_qobuz_stream_url", lambda *a: None)
     monkeypatch.setattr(monochrome, "_deezer_isrc_rescue", lambda *a: "")
     tidal_calls = []
@@ -752,7 +720,7 @@ def test_download_falls_back_to_tidal_stream_for_tidal_results(monkeypatch, tmp_
 
 def test_download_never_uses_tidal_stream_for_non_tidal_results(monkeypatch, tmp_path):
     import monochrome
-    monkeypatch.setattr("monochrome_browser.resolve_unified_stream_url", lambda *a, **k: None)
+    monkeypatch.setattr("monochrome_tracks.resolve_stream_url", lambda *a: None)
     monkeypatch.setattr("qbdlx.resolve_qobuz_stream_url", lambda *a: None)
     monkeypatch.setattr(monochrome, "_deezer_isrc_rescue", lambda *a: "")
     monkeypatch.setattr(

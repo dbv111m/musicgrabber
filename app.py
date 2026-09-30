@@ -80,7 +80,6 @@ from search import (
 )
 from library_scans import snapshots, scan_playlists, scan_storage
 import servicecheck
-import monochrome_browser
 from slskd import slskd_enabled, search_slskd
 from downloads import (
     process_acquisition_cycle, process_download, process_playlist_download,
@@ -231,11 +230,6 @@ start_upgrade_scheduler()
 # its database it says so once and everything carries on walking the disk.
 start_library_index_scheduler()
 servicecheck.start_health_checks()  # initial background health sweep at boot
-
-# Warm Monochrome's browser session at boot so the first hover preview (or
-# download) isn't the poor soul paying Chrome's start-up bill. Quietly does
-# nothing unless Monochrome is an enabled source with the browser leg on.
-spawn_daemon_thread(monochrome_browser.warm_browser_broker)
 
 # Sync cookies file from settings at startup
 _sync_cookies_file()
@@ -1968,18 +1962,6 @@ def get_preview_url(http_request: Request, video_id: str, source: str = "youtube
                 artist_hint=artist,
                 title_hint=title,
             )
-            # Anything resolved through the browser leg arrives as CENC-encrypted
-            # FLAC-in-MP4, which an <audio> element will stare at blankly. Decrypt
-            # the opening seconds and hand back one of ours instead. The qbdlx and
-            # Tidal legs return ordinary playable audio, so they pass straight through.
-            from monochrome_browser import pop_decryption_key
-            decryption_key = pop_decryption_key(cdn_url)
-            if decryption_key:
-                from preview_snippets import build_snippet
-                token = build_snippet(
-                    cdn_url, decryption_key, getattr(http_request.state, "user", None)
-                )
-                return {"url": f"/api/preview-audio/{token}", "video_id": video_id}
             return {"url": cdn_url, "video_id": video_id}
 
         if source == "mp3phoenix":

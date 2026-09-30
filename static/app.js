@@ -11083,7 +11083,6 @@
             'search_concurrency': 'settingSearchConcurrency',
             'monochrome_hifi_api_url': 'settingMonochromeHifiUrl',
             'monochrome_qbdlx_fallback_enabled': 'settingMonochromeQbdlxFallback',
-            'monochrome_browser_fallback_enabled': 'settingMonochromeBrowserFallback',
             'slskd_url': 'settingSlskdUrl',
             'slskd_user': 'settingSlskdUser',
             'slskd_pass': 'settingSlskdPass',

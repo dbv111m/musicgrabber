@@ -137,7 +137,7 @@ TIMEOUT_MP3PHOENIX_PREVIEW = int(os.getenv("TIMEOUT_MP3PHOENIX_PREVIEW", "45"))
 MP3PHOENIX_PREVIEW_BYTES = int(os.getenv("MP3PHOENIX_PREVIEW_BYTES", str(1024 * 1024)))
 # How long the Chrome bootstrap gets to clear Cloudflare and hand back cookies.
 # Forwarded to mp3phoenix_browser.py; the parent's own kill timer allows this
-# plus a buffer, so the child isn't killed mid-clearance (see MONOCHROME_BROWSER_AUTH_TIMEOUT).
+# plus a buffer, so the child isn't killed mid-clearance.
 MP3PHOENIX_BROWSER_TIMEOUT = int(os.getenv("MP3PHOENIX_BROWSER_TIMEOUT", "75"))
 MP3PHOENIX_SESSION_TTL = int(os.getenv("MP3PHOENIX_SESSION_TTL", "3600"))
 MP3PHOENIX_BROWSER_FAILURE_LIMIT = 3
@@ -154,13 +154,10 @@ TIMEOUT_MONOCHROME_SEARCH = 15   # Monochrome and direct-Qobuz catalogue lookups
 MONOCHROME_HIFI_SEARCH_BUDGET = float(os.getenv("MONOCHROME_HIFI_SEARCH_BUDGET", "15"))
 TIMEOUT_MONOCHROME_DOWNLOAD = int(os.getenv("TIMEOUT_MONOCHROME_DOWNLOAD", "300"))  # Qobuz FLAC CDN download (FLACs are big)
 
-# Preview snippets: Monochrome's browser leg only ever yields encrypted
-# FLAC-in-MP4, so a hover preview is decrypted to a short MP3 and served
-# locally. Measured at roughly 1.2s to prepare, hence the modest timeout.
-PREVIEW_SNIPPET_SECONDS = int(os.getenv("PREVIEW_SNIPPET_SECONDS", "30"))
+# Preview snippets: audio a browser cannot fetch for itself (MP3Phoenix sits
+# behind Cloudflare) is parked locally under a short-lived token.
 PREVIEW_SNIPPET_TTL = int(os.getenv("PREVIEW_SNIPPET_TTL", "600"))
 PREVIEW_SNIPPET_MAX_CACHED = int(os.getenv("PREVIEW_SNIPPET_MAX_CACHED", "20"))
-TIMEOUT_PREVIEW_SNIPPET_BUILD = int(os.getenv("TIMEOUT_PREVIEW_SNIPPET_BUILD", "60"))
 STALE_JOB_TIMEOUT = 900          # Mark downloading/queued jobs as failed after 15 minutes
 STALE_JOB_CHECK_INTERVAL = 120   # Check for stale jobs every 2 minutes
 
@@ -459,15 +456,15 @@ DEFAULT_CONVERT_AUDIO = os.getenv(
 # revoked their OAuth client, so there is no honest public default any more;
 # this stays empty unless you point it at a self-hosted hifi-api of your own.
 MONOCHROME_HIFI_API_URL = os.getenv("MONOCHROME_HIFI_API_URL", "")
-# Current Monochrome playback is protected by a browser Turnstile exchange. A
-# short-lived JWT obtained by the real web app can be presented to the unified
-# playback API; SeleniumBase supplies the normal browser session only for that
-# exchange, while the audio itself still travels through httpx.
-MONOCHROME_BROWSER_FALLBACK_ENABLED = os.getenv(
-    "MONOCHROME_BROWSER_FALLBACK_ENABLED", "true"
-).lower() == "true"
-MONOCHROME_WEB_URL = os.getenv("MONOCHROME_WEB_URL", "https://monochrome.tf")
-MONOCHROME_BROWSER_AUTH_TIMEOUT = int(os.getenv("MONOCHROME_BROWSER_AUTH_TIMEOUT", "75"))
+# Monochrome's tracks API: plain HTTP search plus a direct FLAC per track, no
+# auth and no browser. Its address is read from the web client at
+# MONOCHROME_WEB_URL, so the next house move is followed on its own; the
+# fallback is where it lived when last checked. Set MONOCHROME_TRACKS_API_URL
+# to pin an address and skip the discovery entirely.
+MONOCHROME_WEB_URL = os.getenv("MONOCHROME_WEB_URL", "https://monochrome.st")
+MONOCHROME_TRACKS_API_URL = os.getenv("MONOCHROME_TRACKS_API_URL", "")
+MONOCHROME_TRACKS_API_FALLBACK = "https://tracks.monochrome.st"
+MONOCHROME_TRACKS_DISCOVERY_TTL = 6 * 3600
 # The Settings "Test Monochrome" diagnostic downloads this for real, then throws
 # it away. Radiohead's Creep is already the qbdlx probe track: old, everywhere,
 # and staying everywhere. Keep it to something no catalogue is likely to lose.
@@ -486,7 +483,7 @@ TIMEOUT_DEEZER = int(os.getenv("TIMEOUT_DEEZER", "10"))
 DEEZER_METADATA_MATCH_FLOOR = float(os.getenv("DEEZER_METADATA_MATCH_FLOOR", "0.65"))
 DEEZER_METADATA_SEARCH_LIMIT = int(os.getenv("DEEZER_METADATA_SEARCH_LIMIT", "5"))
 
-# qbdlx fallback: if browser-authenticated Monochrome playback comes up empty,
+# qbdlx fallback: if Monochrome's tracks API comes up empty,
 # sign the official Qobuz API using a shared free-account token (the same pool
 # the qbdlx web UI uses).
 # Heads up: the free shared tokens deliver 16/44.1 lossless FLAC, not 24-bit
