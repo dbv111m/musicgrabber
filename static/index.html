@@ -1072,20 +1072,12 @@
                         <span class="settings-hint settings-hint-full">When metadata has a track number, saved files use <code>1 - Track.ext</code>. Flat layouts keep the artist prefix: <code>Artist Name - 1 - Track.ext</code>.</span>
                     </label>
                     <label class="settings-label settings-label-wrap">
-                        <span>Auto-album routing for singles</span>
+                        <span>Auto-album routing</span>
                         <div class="toggle-switch">
                             <input type="checkbox" id="settingAutoAlbumSingles">
                             <span class="toggle-slider"></span>
                         </div>
-                        <span class="settings-hint settings-hint-full">When on, singles with a MusicBrainz album match land in <code>Artist/Album/Track.ext</code> (Singles or Albums folder, see below) with track number tags. Falls back to <code>Singles/Artist/Track.ext</code> for new or unrecognised tracks.</span>
-                    </label>
-                    <label class="settings-label settings-label-wrap" id="autoAlbumSinglesUseAlbumsDirRow">
-                        <span>Route to Albums folder</span>
-                        <div class="toggle-switch">
-                            <input type="checkbox" id="settingAutoAlbumSinglesUseAlbumsDir">
-                            <span class="toggle-slider"></span>
-                        </div>
-                        <span class="settings-hint settings-hint-full">When on, album-routed singles land in <code>Albums/Artist/Album/Track.ext</code> instead of the Singles folder. Requires auto-album routing to be enabled.</span>
+                        <span class="settings-hint settings-hint-full">When on, singles and playlist tracks with a MusicBrainz album match are filed in <code>Albums/Artist/Album/Track.ext</code> with track number tags, the same place a full album download goes. Playlists keep track of theirs through the M3U. A watched playlist with Create M3U off keeps its tracks in its own folder instead, since without an M3U that folder is the playlist, and compilation playlists (below) always stay together. Unrecognised tracks stay where they landed.</span>
                     </label>
                     <label class="settings-label settings-label-wrap">
                         <span>Group playlists as one compilation</span>

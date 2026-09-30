@@ -24,6 +24,14 @@ const RELEASE_NOTES = {
                     "Monochrome searches dig a little deeper now: when Deezer comes up short, Monochrome checks its own catalogue for what Deezer missed.",
                 ]
             },
+            {
+                heading: "Album routing, tidied",
+                items: [
+                    "With auto-album routing on, songs MusicBrainz recognises now always go to Albums/Artist/Album, singles and playlist tracks alike. One song, one home.",
+                    "Playlists keep up through their M3U, which points at each track wherever it lives. A watched playlist with Create M3U switched off keeps its songs in its own folder, since that folder is the playlist.",
+                    "\"Group playlists as one compilation\" still keeps a playlist together, and full album downloads always land in their own album folder, whatever else you have switched on.",
+                ]
+            },
         ]
     },
     "4.2.4": {

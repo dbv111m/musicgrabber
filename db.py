@@ -1697,6 +1697,16 @@ def init_db():
             )
             print("DB migrated to version 20: retired hifi-api and MP3Phoenix settings removed")
 
+        # v21: album routing always files into Albums now, singles and playlists
+        # alike, so the switch choosing between Singles and Albums has gone.
+        if db_version < 21:
+            conn.execute("DELETE FROM settings WHERE key = 'auto_album_singles_use_albums_dir'")
+            conn.execute("DELETE FROM user_settings WHERE key = 'auto_album_singles_use_albums_dir'")
+            conn.execute(
+                "INSERT OR REPLACE INTO settings (key, value) VALUES ('db_version', '21')"
+            )
+            print("DB migrated to version 21: album routing's Singles-or-Albums switch removed")
+
         # Defensive backstop: early dev builds of v1 silently dropped custom_subdir
         # when recreating watched_playlists. Re-add it for any DB that already
         # passed through that mangled migration. Harmless if the column is present.

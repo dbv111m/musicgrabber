@@ -7,6 +7,7 @@ Library scan triggers and M3U playlist generation.
 
 import json
 import math
+import os
 import re
 import shutil
 import sqlite3
@@ -2565,17 +2566,29 @@ def _playlist_album_tags(
     return name, "Various Artists", True
 
 
-def _auto_route_playlist_to_album(
+def _auto_route_to_album(
     audio_file: Path, artist: str, title: str,
-    mb_metadata: dict, job_id: str, playlist_base: Path,
-    user_id: str | None = None,
+    mb_metadata: dict, job_id: str, user_id: str | None = None,
+    playlist_name: str | None = None,
 ) -> tuple[Path, bool]:
-    """If auto_album_singles is enabled and MB returned an album name, move the file
-    from Playlists/Name/ into Playlists/Name/Artist/Album/.
+    """With album routing on, move a finished track into Albums/Artist/Album/.
 
-    Returns (new_path, routed); routed is True if the file was actually moved.
+    Singles and playlist tracks go to the same place an album download would
+    put them, so a song only ever has one home. A playlist track only moves
+    when its playlist keeps an M3U, because the M3U is what remembers the
+    playlist once the audio has gone to live with its album. Without one the
+    playlist folder *is* the playlist, and the track stays in it. Pass
+    playlist_name only for tracks that landed in a playlist folder.
+
+    Callers keep album downloads (override_dir) and compilation playlists out
+    of here: both already know exactly where their tracks belong.
+
+    Returns (path, routed); routed is True when the track is in its album folder.
+    Silent on fallback: new or obscure tracks with no MB album just stay put.
     """
     if not get_setting_bool("auto_album_singles", False, user_id=user_id):
+        return audio_file, False
+    if playlist_name and _watched_playlist_m3u_disabled(playlist_name, user_id):
         return audio_file, False
 
     album = (mb_metadata.get("album") or "").strip()
@@ -2585,84 +2598,10 @@ def _auto_route_playlist_to_album(
     album_artist = (mb_metadata.get("album_artist") or artist or "").strip()
     safe_artist = sanitize_filename(album_artist)
     safe_album  = sanitize_filename(album)
-    album_dir = playlist_base / safe_artist / safe_album
+    album_dir = get_albums_dir(user_id=user_id) / safe_artist / safe_album
 
     if audio_file.parent == album_dir:
         return audio_file, True
-
-    album_dir.mkdir(parents=True, exist_ok=True)
-    # Use _output_stem so the file lands as Title.flac (or Artist - Title.flac in flat mode),
-    # matching how singles are named inside their Artist/Album/ subfolder.
-    new_stem = _output_stem(album_artist, title, audio_file.stem, user_id=user_id)
-    new_path = album_dir / f"{new_stem}{audio_file.suffix}"
-
-    if new_path.exists():
-        print(f"Playlist album routing: target already exists, skipping move: {new_path}")
-        return audio_file, False
-
-    _move_completed_file(audio_file, new_path)
-    set_file_permissions(new_path)
-
-    old_lrc = audio_file.with_suffix(".lrc")
-    if old_lrc.exists():
-        new_lrc = new_path.with_suffix(".lrc")
-        _move_completed_file(old_lrc, new_lrc)
-        set_file_permissions(new_lrc)
-
-    # Whatever the file already says about its position wins, exactly as it did
-    # when the main tagging pass ran. Reaching for mb_metadata directly here used
-    # to undo that: a Soulseek FLAC arriving with a correct "2 of 14" was retagged
-    # as track 15 on the way into its album folder.
-    track_number, track_total = _resolve_track_number(new_path, None, None, mb_metadata)
-    if track_number or track_total:
-        apply_metadata_to_file(
-            new_path, artist, title, album,
-            mb_metadata.get("year"),
-            track_number=track_number,
-            track_total=track_total,
-            album_artist=album_artist,
-        )
-
-    old_dir = audio_file.parent
-    try:
-        if old_dir.exists() and not any(old_dir.iterdir()):
-            old_dir.rmdir()
-    except OSError:
-        pass
-
-    _update_job(job_id, override_dir=str(album_dir))
-    print(f"Playlist album routing: {artist} - {title} → {safe_artist}/{safe_album}/")
-    return new_path, True
-
-
-def _auto_route_single_to_album(
-    audio_file: Path, artist: str, title: str,
-    mb_metadata: dict, job_id: str, user_id: str | None
-) -> Path:
-    """If auto_album_singles is enabled and MB returned an album name, move the file
-    from Singles/Artist/ into Singles/Artist/Album/ and retag with track number.
-
-    Returns the new path (or the original if nothing changed or the setting is off).
-    Silent on fallback  -  new/obscure tracks with no MB album just stay put.
-    """
-    if not get_setting_bool("auto_album_singles", False, user_id=user_id):
-        return audio_file
-
-    album = (mb_metadata.get("album") or "").strip()
-    if not album:
-        return audio_file
-
-    album_artist = (mb_metadata.get("album_artist") or artist or "").strip()
-    safe_artist = sanitize_filename(album_artist)
-    safe_album  = sanitize_filename(album)
-    if get_setting_bool("auto_album_singles_use_albums_dir", False, user_id=user_id):
-        base_dir = get_albums_dir(user_id=user_id)
-    else:
-        base_dir = get_singles_dir(user_id=user_id)
-    album_dir = base_dir / safe_artist / safe_album
-
-    if audio_file.parent == album_dir:
-        return audio_file  # Already there
 
     album_dir.mkdir(parents=True, exist_ok=True)
     new_stem = _output_stem(album_artist, title, audio_file.stem, user_id=user_id)
@@ -2670,7 +2609,7 @@ def _auto_route_single_to_album(
 
     if new_path.exists():
         print(f"Auto-album routing: target already exists, skipping move: {new_path}")
-        return audio_file
+        return audio_file, False
 
     _move_completed_file(audio_file, new_path)
     set_file_permissions(new_path)
@@ -2695,7 +2634,7 @@ def _auto_route_single_to_album(
             album_artist=album_artist,
         )
 
-    # Tidy up the old artist dir if it's now empty
+    # Tidy up the old folder if it's now empty
     old_dir = audio_file.parent
     try:
         if old_dir.exists() and not any(old_dir.iterdir()):
@@ -2705,7 +2644,25 @@ def _auto_route_single_to_album(
 
     _update_job(job_id, override_dir=str(album_dir))
     print(f"Auto-album routing: {artist} - {title} → {safe_artist}/{safe_album}/")
-    return new_path
+    return new_path, True
+
+
+def _m3u_entry(audio_file: Path, m3u_dir: Path, user_id: str | None = None) -> str:
+    """How an M3U living in m3u_dir should refer to audio_file.
+
+    Our own files are written relative to the M3U, so the playlist still works
+    when the library is mounted somewhere else (Navidrome, Plex, a laptop), and
+    a playlist track routed off to Albums comes out as ../Albums/Artist/Album/.
+    Paths from outside the music folder, which is what Navidrome and Lidarr hand
+    back, are theirs to interpret and stay exactly as given.
+    """
+    music_dir = Path(get_setting("music_dir", str(MUSIC_DIR), user_id=user_id))
+    try:
+        audio_file.relative_to(music_dir)
+        m3u_dir.relative_to(music_dir)
+    except ValueError:
+        return str(audio_file)
+    return os.path.relpath(audio_file, m3u_dir)
 
 
 def _is_permission_error(stderr: str) -> bool:
@@ -3504,6 +3461,7 @@ def create_bulk_playlist(
     # Determine whether to write into the Playlists folder
     playlists_dir = get_playlists_dir(user_id=user_id) if use_playlists_dir else None
     safe_playlist = sanitize_playlist_name(playlist_name, bulk_import_id)
+    m3u_dir = playlists_dir or get_singles_dir(user_id=user_id)
 
     # Build M3U playlist
     playlist_files = []
@@ -3524,22 +3482,20 @@ def create_bulk_playlist(
                     found = True
                     break
             if not found:
-                # Track already existed in Singles (duplicate skip)  -  include it from wherever it lives
+                # Album-routed, or already in the library (duplicate skip): include
+                # it from wherever it lives.
                 audio_file = check_duplicate(artist, title, user_id=user_id)
                 if audio_file:
-                    playlist_files.append(str(audio_file))
+                    playlist_files.append(_m3u_entry(audio_file, m3u_dir, user_id=user_id))
         else:
             audio_file = check_duplicate(artist, title, user_id=user_id)
             if audio_file:
-                rel_path = audio_file.relative_to(get_singles_dir(user_id=user_id))
-                playlist_files.append(str(rel_path))
+                playlist_files.append(_m3u_entry(audio_file, m3u_dir, user_id=user_id))
 
     if playlist_files:
+        m3u_path = m3u_dir / f"{safe_playlist}.m3u"
         if playlists_dir:
-            m3u_path = playlists_dir / f"{safe_playlist}.m3u"
             playlists_dir.mkdir(parents=True, exist_ok=True)
-        else:
-            m3u_path = get_singles_dir(user_id=user_id) / f"{safe_playlist}.m3u"
         with open(m3u_path, 'w', encoding='utf-8') as f:
             f.write("#EXTM3U\n")
             for file_path in playlist_files:
@@ -3675,6 +3631,7 @@ def rebuild_watched_playlist_m3u(playlist_id: str, playlist_name: str, use_playl
     else:
         playlists_dir = None
     safe_playlist = sanitize_playlist_name(playlist_name, playlist_id)
+    m3u_dir = playlists_dir or get_singles_dir(user_id=user_id)
 
     playlist_files = []
     seen_paths = set()
@@ -3708,30 +3665,10 @@ def rebuild_watched_playlist_m3u(playlist_id: str, playlist_name: str, use_playl
         if stored_path_str:
             stored_path = Path(stored_path_str)
             if stored_path.exists():
-                if playlists_dir:
-                    # In playlist-folder mode the file is either inside the playlist folder
-                    # or borrowed from the Singles library. Use the same formatting as the
-                    # slow path: "PlaylistName/filename" for playlist-folder files, absolute
-                    # path for library files (Navidrome trusts absolute paths in M3U).
-                    try:
-                        rel = stored_path.relative_to(playlists_dir / safe_playlist)
-                        entry = f"{safe_playlist}/{rel}"
-                    except ValueError:
-                        try:
-                            # Not in *this* playlist's folder, but still somewhere in
-                            # the Playlists tree: a weekly playlist carrying a track
-                            # over from an earlier week's folder, most likely. It is
-                            # ours, so keep it relative and portable rather than
-                            # stamping in an absolute path that only works here.
-                            entry = str(stored_path.relative_to(playlists_dir))
-                        except ValueError:
-                            entry = stored_path_str  # genuinely elsewhere (library/Navidrome path)
-                else:
-                    # Singles-layout mode: use path relative to Singles dir
-                    try:
-                        entry = str(stored_path.relative_to(get_singles_dir(user_id=user_id)))
-                    except ValueError:
-                        entry = stored_path_str  # absolute fallback (Navidrome absolute path)
+                # Inside the playlist folder, an earlier week's folder, Singles or
+                # Albums: all ours, all relative to the M3U. Only a path from
+                # outside the music folder stays absolute.
+                entry = _m3u_entry(stored_path, m3u_dir, user_id=user_id)
                 if entry not in seen_paths:
                     seen_paths.add(entry)
                     playlist_files.append(entry)
@@ -3774,7 +3711,7 @@ def rebuild_watched_playlist_m3u(playlist_id: str, playlist_name: str, use_playl
                     navidrome_sentinel_hit = True
 
             if existing:
-                existing_path = str(existing)
+                existing_path = _m3u_entry(existing, m3u_dir, user_id=user_id)
                 if existing_path not in seen_paths:
                     seen_paths.add(existing_path)
                     playlist_files.append(existing_path)
@@ -3812,20 +3749,13 @@ def rebuild_watched_playlist_m3u(playlist_id: str, playlist_name: str, use_playl
 
             if audio_file:
                 _tag_track_comment(audio_file, _cm_artist, _cm_title)
-                try:
-                    rel_path = audio_file.relative_to(get_singles_dir(user_id=user_id))
-                    rel_path_str = str(rel_path)
-                    if rel_path_str not in seen_paths:
-                        seen_paths.add(rel_path_str)
-                        playlist_files.append(rel_path_str)
-                except ValueError:
-                    abs_path = str(audio_file)  # Navidrome absolute path  -  use as-is
-                    if abs_path not in seen_paths:
-                        seen_paths.add(abs_path)
-                        playlist_files.append(abs_path)
-                        # Navidrome says it exists but our filesystem disagrees = stale DB entry
-                        if not audio_file.exists():
-                            stale_navidrome_rows.append((row["wpt_artist"] or "", row["wpt_title"] or ""))
+                entry = _m3u_entry(audio_file, m3u_dir, user_id=user_id)
+                if entry not in seen_paths:
+                    seen_paths.add(entry)
+                    playlist_files.append(entry)
+                    # Navidrome says it exists but our filesystem disagrees = stale DB entry
+                    if not audio_file.exists():
+                        stale_navidrome_rows.append((row["wpt_artist"] or "", row["wpt_title"] or ""))
             elif navidrome_sentinel_hit:
                 synthetic_path_rows.append((row["wpt_artist"] or "", row["wpt_title"] or ""))
             else:
@@ -3839,11 +3769,9 @@ def rebuild_watched_playlist_m3u(playlist_id: str, playlist_name: str, use_playl
     if not playlist_files:
         return None
 
+    m3u_path = m3u_dir / f"{safe_playlist}.m3u"
     if playlists_dir:
-        m3u_path = playlists_dir / f"{safe_playlist}.m3u"
         playlists_dir.mkdir(parents=True, exist_ok=True)
-    else:
-        m3u_path = get_singles_dir(user_id=user_id) / f"{safe_playlist}.m3u"
 
     with open(m3u_path, 'w', encoding='utf-8') as f:
         f.write("#EXTM3U\n")
@@ -4008,11 +3936,11 @@ def process_playlist_download(job_id: str, playlist_id: str, playlist_name: str,
                 existing_file = check_duplicate(artist, title, user_id=user_id)
                 if existing_file:
                     skipped_tracks += 1
-                    if playlists_dir:
-                        stem = _playlist_stem(artist, title, video_id)
-                        downloaded_files.append(f"{safe_playlist}/{stem}{existing_file.suffix}")
-                    else:
-                        downloaded_files.append(str(existing_file.relative_to(get_singles_dir(user_id=user_id))))
+                    # Point at the copy we actually have, wherever it lives. This
+                    # used to guess it was in the playlist folder, and in Singles
+                    # mode fell over on anything filed under Albums.
+                    m3u_dir = playlists_dir or get_singles_dir(user_id=user_id)
+                    downloaded_files.append(_m3u_entry(existing_file, m3u_dir, user_id=user_id))
                     continue
 
                 # Create download directory
@@ -4148,6 +4076,7 @@ def process_playlist_download(job_id: str, playlist_id: str, playlist_name: str,
                 if cover:
                     pl_cover_art_bytes, pl_cover_art_mime = cover
 
+                album_routed = False
                 if mb_metadata:
                     mb_artist = mb_metadata.get("artist", artist)
                     mb_title = mb_metadata.get("title", title)
@@ -4176,6 +4105,13 @@ def process_playlist_download(job_id: str, playlist_id: str, playlist_name: str,
                         artist = mb_artist
                     if mb_title != title:
                         title = mb_title
+                    # Same rules as a single track: compilation mode keeps the
+                    # playlist together, and no M3U means the folder stays whole.
+                    if not pl_compilation:
+                        audio_file, album_routed = _auto_route_to_album(
+                            audio_file, artist, title, mb_metadata, job_id, user_id,
+                            playlist_name=playlist_name if playlists_dir else None,
+                        )
                 else:
                     tag_track_num, tag_track_total = _resolve_track_number(
                         audio_file, None, None, None, compilation=pl_compilation
@@ -4195,7 +4131,7 @@ def process_playlist_download(job_id: str, playlist_id: str, playlist_name: str,
                 audio_file = _rename_with_track_number_if_enabled(
                     audio_file, artist, title, video_id,
                     tag_track_num, tag_track_total, user_id=user_id,
-                    playlist_routed=bool(playlists_dir),
+                    playlist_routed=bool(playlists_dir) and not album_routed,
                 )
 
                 # Fetch and save lyrics
@@ -4207,10 +4143,8 @@ def process_playlist_download(job_id: str, playlist_id: str, playlist_name: str,
 
                 _copy_to_auto_import(audio_file, user_id=user_id)
 
-                if playlists_dir:
-                    downloaded_files.append(f"{safe_playlist}/{audio_file.name}")
-                else:
-                    downloaded_files.append(str(audio_file.relative_to(get_singles_dir(user_id=user_id))))
+                m3u_dir = playlists_dir or get_singles_dir(user_id=user_id)
+                downloaded_files.append(_m3u_entry(audio_file, m3u_dir, user_id=user_id))
                 completed_tracks += 1
 
             except Exception as track_error:
@@ -4685,22 +4619,20 @@ def process_slskd_download(job_id: str, username: str, filename: str, artist: st
             )
             # Use canonical artist/title from MusicBrainz
             if mb_artist != artist:
-                if not playlists_dir:
+                # Playlist tracks stay in their folder and album tracks in their
+                # album; only a plain single follows the artist's spelling.
+                if not playlists_dir and not override_dir:
                     final_file = _relocate_for_normalised_artist(final_file, artist, mb_artist, user_id=user_id)
                 artist = mb_artist
             title = tag_title
             playlist_album_routed = False
-            # Compilation mode keeps every track flat in the playlist folder, so
-            # skip the per-album subfolder routing that would split it up again.
+            # Album downloads already sit in their album, and compilation mode
+            # keeps a playlist together as one album of its own.
             if not override_dir and not pl_compilation:
-                if playlists_dir:
-                    final_file, playlist_album_routed = _auto_route_playlist_to_album(
-                        final_file, artist, title, mb_metadata, job_id, artist_dir, user_id
-                    )
-                else:
-                    final_file = _auto_route_single_to_album(
-                        final_file, artist, title, mb_metadata, job_id, user_id
-                    )
+                final_file, playlist_album_routed = _auto_route_to_album(
+                    final_file, artist, title, mb_metadata, job_id, user_id,
+                    playlist_name=playlist_name if playlists_dir else None,
+                )
             _update_job(job_id, artist=artist, title=title)
         else:
             playlist_album_routed = False
@@ -5199,16 +5131,13 @@ def _process_direct_mp3_download(job_id: str, download_url: str, artist_hint: st
         )
 
         playlist_album_routed = False
-        # Compilation mode keeps tracks flat in the playlist folder; don't re-split.
+        # Album downloads already sit in their album, and compilation mode
+        # keeps a playlist together as one album of its own.
         if not override_dir and mb_metadata and not pl_compilation:
-            if playlists_dir:
-                output_path, playlist_album_routed = _auto_route_playlist_to_album(
-                    output_path, artist, title, mb_metadata, job_id, artist_dir, user_id
-                )
-            else:
-                output_path = _auto_route_single_to_album(
-                    output_path, artist, title, mb_metadata, job_id, user_id
-                )
+            output_path, playlist_album_routed = _auto_route_to_album(
+                output_path, artist, title, mb_metadata, job_id, user_id,
+                playlist_name=playlist_name if playlists_dir else None,
+            )
 
         output_path = _rename_with_track_number_if_enabled(
             output_path, tag_album_artist or artist, title, job_id,
@@ -5330,13 +5259,6 @@ def _append_to_physical_m3u(audio_file: Path, playlist_name: str, use_playlists_
     safe_playlist = sanitize_playlist_name(playlist_name, playlist_name)
     if playlists_dir:
         m3u_path = playlists_dir / f"{safe_playlist}.m3u"
-        track_dir = playlists_dir / safe_playlist
-        # Keep paths inside the playlist folder relative (Rock Mix/Track.ext) so the M3U
-        # remains portable and consistent after full rebuilds.
-        if audio_file.is_absolute() and str(audio_file).startswith(str(track_dir) + "/"):
-            relative_path = f"{safe_playlist}/{audio_file.name}"
-        else:
-            relative_path = str(audio_file)
         try:
             playlists_dir.mkdir(parents=True, exist_ok=True)
         except Exception:
@@ -5344,16 +5266,17 @@ def _append_to_physical_m3u(audio_file: Path, playlist_name: str, use_playlists_
     else:
         # No Playlists folder configured. Drop the M3U into Singles so the user
         # still gets a playlist file rather than a silent no-op.
-        singles_dir = get_singles_dir(user_id=user_id)
-        m3u_path = singles_dir / f"{safe_playlist}.m3u"
-        relative_path = str(audio_file)
+        m3u_path = get_singles_dir(user_id=user_id) / f"{safe_playlist}.m3u"
+    # Relative to the M3U (Rock Mix/Track.ext, ../Albums/...), so it stays portable
+    # and matches what a full rebuild writes.
+    relative_path = _m3u_entry(audio_file, m3u_path.parent, user_id=user_id)
 
     try:
         # Write header if new file; avoid duplicate entries if it already exists
         is_new = not m3u_path.exists()
         if not is_new:
             existing = m3u_path.read_text(encoding="utf-8")
-            if relative_path in existing:
+            if relative_path in existing.splitlines():
                 return
         with m3u_path.open("a", encoding="utf-8") as f:
             if is_new:
@@ -5905,24 +5828,20 @@ def process_download(job_id: str, video_id: str, convert_audio: bool = True, sou
             )
             # Use the canonical artist/title from MusicBrainz everywhere
             if mb_artist != artist:
-                # Playlist-routed files must stay in the playlist folder.
-                if not playlists_dir:
+                # Playlist tracks stay in their folder and album tracks in their
+                # album; only a plain single follows the artist's spelling.
+                if not playlists_dir and not override_dir:
                     audio_file = _relocate_for_normalised_artist(audio_file, artist, mb_artist, user_id=user_id)
                 artist = mb_artist
             title = tag_title
-            # Auto-route to Artist/Album/ when the setting is on.
-            # For singles: Singles/Artist/Album/ (or Albums/Artist/Album/).
-            # For playlists: Playlists/Name/Artist/Album/, stays inside the playlist folder.
-            # Compilation mode skips this: the whole playlist stays flat as one album.
+            # Album routing sends singles and playlist tracks to Albums/Artist/Album/.
+            # Album downloads already sit in their album, and compilation mode
+            # keeps a playlist together as one album of its own.
             if not override_dir and not pl_compilation:
-                if playlists_dir:
-                    audio_file, playlist_album_routed = _auto_route_playlist_to_album(
-                        audio_file, artist, title, mb_metadata, job_id, artist_dir, user_id
-                    )
-                else:
-                    audio_file = _auto_route_single_to_album(
-                        audio_file, artist, title, mb_metadata, job_id, user_id
-                    )
+                audio_file, playlist_album_routed = _auto_route_to_album(
+                    audio_file, artist, title, mb_metadata, job_id, user_id,
+                    playlist_name=playlist_name if playlists_dir else None,
+                )
             _update_job(job_id, artist=artist, title=title)
         else:
             tag_title = forced_track_title or title

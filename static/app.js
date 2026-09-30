@@ -7811,7 +7811,7 @@
                                     <span class="toggle-slider"></span>
                                 </div>
                             </label>
-                            <label class="watched-card-toggle" title="Generate and update a .m3u playlist file as tracks are downloaded. Switching this off stops MusicGrabber updating it; any .m3u already written stays where it is, for you to keep or delete.">
+                            <label class="watched-card-toggle" title="Generate and update a .m3u playlist file as tracks are downloaded. Switching this off stops MusicGrabber updating it; any .m3u already written stays where it is, for you to keep or delete. With auto-album routing on, the M3U is also what lets tracks go off to their album folders: without one they stay in the playlist folder.">
                                 M3U
                                 <div class="toggle-switch">
                                     <input type="checkbox" ${p.make_m3u ? 'checked' : ''} onchange="updateWatchedPlaylistM3u('${p.id}', this.checked)">
@@ -11064,7 +11064,6 @@
             'organise_by_artist': 'settingOrganiseByArtist',
             'include_track_number_in_filename': 'settingIncludeTrackNumberInFilename',
             'auto_album_singles': 'settingAutoAlbumSingles',
-            'auto_album_singles_use_albums_dir': 'settingAutoAlbumSinglesUseAlbumsDir',
             'playlist_album_as_name': 'settingPlaylistAlbumAsName',
             'singles_only_mode': 'settingSinglesOnlyMode',
             'source_youtube_enabled': 'settingSourceYoutube',
@@ -11201,20 +11200,6 @@
                 if (organiseToggle) organiseToggle.onchange = _updatePathPreviews;
                 const trackNumberToggle = document.getElementById('settingIncludeTrackNumberInFilename');
                 if (trackNumberToggle) trackNumberToggle.onchange = _updatePathPreviews;
-
-                // Grey out "Route to Albums folder" when auto-album routing is off
-                function _updateAlbumsDirToggle() {
-                    const routeRow = document.getElementById('autoAlbumSinglesUseAlbumsDirRow');
-                    const routeInput = document.getElementById('settingAutoAlbumSinglesUseAlbumsDir');
-                    const autoAlbumOn = document.getElementById('settingAutoAlbumSingles')?.checked;
-                    if (routeRow) routeRow.style.opacity = autoAlbumOn ? '' : '0.4';
-                    if (routeInput) routeInput.disabled = !autoAlbumOn;
-                }
-                const autoAlbumToggle = document.getElementById('settingAutoAlbumSingles');
-                if (autoAlbumToggle) {
-                    autoAlbumToggle.addEventListener('change', _updateAlbumsDirToggle);
-                    _updateAlbumsDirToggle();
-                }
 
                 // Update browser API key status
                 updateBrowserApiKeyStatus();

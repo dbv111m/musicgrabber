@@ -581,29 +581,33 @@ def test_maybe_mark_monochrome_unhealthy_fails_open_when_probe_errors(monkeypatc
     assert calls == []
 
 
-def test_auto_route_single_uses_album_artist_for_folder(tmp_path, monkeypatch):
-    downloads = _import_downloads_or_skip()
-
+def _album_routing_on(monkeypatch, downloads, tmp_path, m3u_disabled=False):
     monkeypatch.setattr(downloads, "_update_job", lambda *args, **kwargs: None)
     monkeypatch.setattr(downloads, "set_file_permissions", lambda *args, **kwargs: None)
     monkeypatch.setattr(downloads, "get_singles_dir", lambda user_id=None: tmp_path / "Singles")
     monkeypatch.setattr(downloads, "get_albums_dir", lambda user_id=None: tmp_path / "Albums")
+    monkeypatch.setattr(downloads, "_watched_playlist_m3u_disabled",
+                        lambda name, user_id: m3u_disabled)
     monkeypatch.setattr(
         downloads,
         "get_setting_bool",
         lambda key, default=False, user_id=None: {
             "auto_album_singles": True,
-            "auto_album_singles_use_albums_dir": False,
             "organise_by_artist": False,
         }.get(key, default),
     )
+
+
+def test_auto_route_single_goes_to_albums_under_the_album_artist(tmp_path, monkeypatch):
+    downloads = _import_downloads_or_skip()
+    _album_routing_on(monkeypatch, downloads, tmp_path)
 
     source_dir = tmp_path / "Singles" / "Luis Fonsi, Daddy Yankee, Justin Bieber"
     source_dir.mkdir(parents=True)
     audio_file = source_dir / "Despacito (Remix).flac"
     audio_file.write_bytes(b"not real audio")
 
-    routed = downloads._auto_route_single_to_album(
+    routed, did_route = downloads._auto_route_to_album(
         audio_file,
         "Luis Fonsi, Daddy Yankee, Justin Bieber",
         "Despacito (Remix)",
@@ -612,42 +616,69 @@ def test_auto_route_single_uses_album_artist_for_folder(tmp_path, monkeypatch):
         None,
     )
 
-    assert routed == tmp_path / "Singles" / "Luis Fonsi" / "Vida" / "Luis Fonsi - Despacito (Remix).flac"
+    assert did_route is True
+    assert routed == tmp_path / "Albums" / "Luis Fonsi" / "Vida" / "Luis Fonsi - Despacito (Remix).flac"
     assert routed.exists()
+    assert not source_dir.exists()  # the emptied artist folder is tidied away
 
 
-def test_auto_route_playlist_uses_album_artist_for_folder_and_flat_filename(tmp_path, monkeypatch):
+def test_auto_route_playlist_track_goes_to_albums_not_the_playlist_folder(tmp_path, monkeypatch):
     downloads = _import_downloads_or_skip()
-
-    monkeypatch.setattr(downloads, "_update_job", lambda *args, **kwargs: None)
-    monkeypatch.setattr(downloads, "set_file_permissions", lambda *args, **kwargs: None)
-    monkeypatch.setattr(
-        downloads,
-        "get_setting_bool",
-        lambda key, default=False, user_id=None: {
-            "auto_album_singles": True,
-            "organise_by_artist": False,
-        }.get(key, default),
-    )
+    _album_routing_on(monkeypatch, downloads, tmp_path)
 
     playlist_dir = tmp_path / "Playlists" / "Test"
     playlist_dir.mkdir(parents=True)
     audio_file = playlist_dir / "Luis Fonsi, Daddy Yankee, Justin Bieber - Despacito (Remix).flac"
     audio_file.write_bytes(b"not real audio")
 
-    routed, did_route = downloads._auto_route_playlist_to_album(
+    routed, did_route = downloads._auto_route_to_album(
         audio_file,
         "Luis Fonsi, Daddy Yankee, Justin Bieber",
         "Despacito (Remix)",
         {"album": "Vida", "album_artist": "Luis Fonsi"},
         "job-id",
-        playlist_dir,
         None,
+        playlist_name="Test",
     )
 
     assert did_route is True
-    assert routed == playlist_dir / "Luis Fonsi" / "Vida" / "Luis Fonsi - Despacito (Remix).flac"
+    assert routed == tmp_path / "Albums" / "Luis Fonsi" / "Vida" / "Luis Fonsi - Despacito (Remix).flac"
     assert routed.exists()
+
+
+def test_auto_route_leaves_a_playlist_without_an_m3u_alone(tmp_path, monkeypatch):
+    """No M3U means the folder is the playlist; moving tracks out would lose it."""
+    downloads = _import_downloads_or_skip()
+    _album_routing_on(monkeypatch, downloads, tmp_path, m3u_disabled=True)
+
+    playlist_dir = tmp_path / "Playlists" / "Test"
+    playlist_dir.mkdir(parents=True)
+    audio_file = playlist_dir / "Ramones - Blitzkrieg Bop.flac"
+    audio_file.write_bytes(b"not real audio")
+
+    routed, did_route = downloads._auto_route_to_album(
+        audio_file, "Ramones", "Blitzkrieg Bop",
+        {"album": "Ramones", "album_artist": "Ramones"},
+        "job-id", None, playlist_name="Test",
+    )
+
+    assert did_route is False
+    assert routed == audio_file and audio_file.exists()
+    assert not (tmp_path / "Albums").exists()
+
+
+def test_m3u_entries_are_relative_to_the_m3u_unless_from_outside_the_library(tmp_path, monkeypatch):
+    downloads = _import_downloads_or_skip()
+    music = tmp_path / "music"
+    monkeypatch.setattr(downloads, "get_setting", lambda key, default=None, user_id=None:
+                        str(music) if key == "music_dir" else default)
+    playlists = music / "Playlists"
+
+    assert downloads._m3u_entry(playlists / "Rock Mix" / "a.flac", playlists) == "Rock Mix/a.flac"
+    assert downloads._m3u_entry(music / "Albums" / "Ramones" / "Ramones" / "b.flac", playlists) \
+        == "../Albums/Ramones/Ramones/b.flac"
+    # Navidrome's own filesystem path: not ours to rewrite
+    assert downloads._m3u_entry(pathlib.Path("/navidrome/music/c.flac"), playlists) == "/navidrome/music/c.flac"
 
 
 def _setup_job_album_context_db(monkeypatch, downloads):
@@ -1277,9 +1308,12 @@ def test_download_job_shape(api, base_url):
 # Notation used in test names:
 #   single  = download_type default, lands in Singles/
 #   pl      = use_playlists_dir=True, lands in Playlists/Name/
-#   album   = auto_album_singles=True
-#   albums  = auto_album_singles_use_albums_dir=True (route to Albums/ not Singles/)
+#   album   = auto_album_singles=True (singles and playlist tracks go to Albums/)
 #   trackno = include_track_number_in_filename=True
+#
+# The tests run as whoever's credentials are in .test-credentials, and inherit
+# that account's settings, so playlist tests pin "group as one compilation"
+# rather than finding out the hard way what the user chose.
 #
 # Tests using a short clip: MB won't match (<30s, fingerprint skipped), so
 #   album routing never fires. Used to verify routing is OFF.
@@ -1313,59 +1347,34 @@ def test_single_album_routing_off_no_override_dir(api, base_url):
     _cleanup_downloaded_file(api, base_url, job_id)
 
 
-@pytest.mark.slow
-def test_single_album_routing_on_sets_override_dir(api, base_url):
-    """With album routing on, a track MB recognises lands in Singles/Artist/Album/.
+def _albums_subdir(api, base_url):
+    settings = api.get(f"{base_url}/api/settings", timeout=10).json()
+    return settings.get("albums_subdir") or "Albums"
 
-    override_dir is set by _auto_route_single_to_album and must not be inside
-    the Albums directory (that's a separate setting).
-    """
-    with _temp_settings(api, base_url,
-                        auto_album_singles=True,
-                        auto_album_singles_use_albums_dir=False):
-        job_id, _ = _queue_download(api, base_url,
-                                    video_id=_MATCH_YT_ID,
-                                    title=_MATCH_TITLE,
-                                    artist=_MATCH_ARTIST)
-        job = _wait_for_job(api, base_url, job_id, timeout=300)
-        # Tidy up before any assert or skip can bail out and leave the file behind.
-        _cleanup_downloaded_file(api, base_url, job_id)
+
+def _queue_matchable(api, base_url, **kwargs):
+    """Download MATCHABLE_SONG and wait. The file is deleted before returning,
+    so no assert or skip afterwards can leave it behind."""
+    job_id, _ = _queue_download(api, base_url, video_id=_MATCH_YT_ID,
+                                title=_MATCH_TITLE, artist=_MATCH_ARTIST, **kwargs)
+    job = _wait_for_job(api, base_url, job_id, timeout=300)
+    _cleanup_downloaded_file(api, base_url, job_id)
+    return job
+
+
+@pytest.mark.slow
+def test_single_album_routing_on_lands_in_albums(api, base_url):
+    """With album routing on, a track MB recognises lands in Albums/Artist/Album/."""
+    with _temp_settings(api, base_url, auto_album_singles=True):
+        job = _queue_matchable(api, base_url)
 
     _assert_completed(job)
     _mb_skip_if_no_override(job, _MATCH_ARTIST, _MATCH_TITLE)
 
     od = pathlib.Path(job["override_dir"])
-    settings = api.get(f"{base_url}/api/settings", timeout=10).json()
-    singles_subdir = settings.get("singles_subdir") or "Singles"
-    assert singles_subdir in od.parts, \
-        f"Expected override_dir inside Singles dir ({singles_subdir}), got: {od}"
-    albums_subdir = settings.get("albums_subdir") or "Albums"
-    assert albums_subdir not in od.parts, \
-        f"override_dir should NOT be in Albums dir with use_albums_dir=False, got: {od}"
-
-
-@pytest.mark.slow
-def test_single_album_routing_on_albums_dir(api, base_url):
-    """With auto_album_singles_use_albums_dir on, the track lands in Albums/Artist/Album/."""
-    with _temp_settings(api, base_url,
-                        auto_album_singles=True,
-                        auto_album_singles_use_albums_dir=True):
-        job_id, _ = _queue_download(api, base_url,
-                                    video_id=_MATCH_YT_ID,
-                                    title=_MATCH_TITLE,
-                                    artist=_MATCH_ARTIST)
-        job = _wait_for_job(api, base_url, job_id, timeout=300)
-        # Tidy up before any assert or skip can bail out and leave the file behind.
-        _cleanup_downloaded_file(api, base_url, job_id)
-
-    _assert_completed(job)
-    _mb_skip_if_no_override(job, _MATCH_ARTIST, _MATCH_TITLE)
-
-    od = pathlib.Path(job["override_dir"])
-    settings = api.get(f"{base_url}/api/settings", timeout=10).json()
-    albums_subdir = settings.get("albums_subdir") or "Albums"
-    assert albums_subdir in od.parts, \
-        f"Expected override_dir inside Albums dir ({albums_subdir}), got: {od}"
+    assert _albums_subdir(api, base_url) in od.parts, \
+        f"Expected override_dir inside the Albums dir, got: {od}"
+    assert od.parts[-2:] == ("Ramones", "Ramones"), f"expected Albums/Ramones/Ramones, got: {od}"
 
 
 @pytest.mark.slow
@@ -1401,39 +1410,38 @@ def test_playlist_routed_single_album_routing_off(api, base_url):
 
 @pytest.mark.slow
 def test_playlist_routed_single_album_routing_on(api, base_url):
-    """Single track routed to Playlists/ with album routing on -- override_dir must be
-    inside the playlist folder (Playlists/Name/Artist/Album/).
-
-    This is the core test for the album-routing-inside-playlist fix.
-    """
+    """A playlist track with album routing on goes to Albums/Artist/Album/, not
+    the playlist folder: the M3U is what keeps it in the playlist (unit tests
+    cover the entry it writes)."""
     with _temp_settings(api, base_url,
                         playlists_subdir="Playlists",
                         auto_album_singles=True,
-                        auto_album_singles_use_albums_dir=False):
-        job_id, _ = _queue_download(api, base_url,
-                                    video_id=_MATCH_YT_ID,
-                                    title=_MATCH_TITLE,
-                                    artist=_MATCH_ARTIST,
-                                    playlist_name="Combo Test",
-                                    use_playlists_dir=True)
-        job = _wait_for_job(api, base_url, job_id, timeout=300)
-        # Tidy up before any assert or skip can bail out and leave the file behind.
-        _cleanup_downloaded_file(api, base_url, job_id)
+                        playlist_album_as_name=False):
+        job = _queue_matchable(api, base_url, playlist_name="Combo Test", use_playlists_dir=True)
 
     _assert_completed(job)
     _mb_skip_if_no_override(job, _MATCH_ARTIST, _MATCH_TITLE)
 
     od = pathlib.Path(job["override_dir"])
-    assert "Combo Test" in od.parts, \
-        f"override_dir should be inside the playlist folder, got: {od}"
-    # Playlists/Combo Test/Artist/Album -- 4+ parts below filesystem root
-    assert len(od.parts) >= 4, \
-        f"override_dir too shallow for Artist/Album nesting inside playlist: {od}"
-    # Must NOT be inside the Albums dir (that would be wrong for playlist routing)
-    settings = api.get(f"{base_url}/api/settings", timeout=10).json()
-    albums_subdir = settings.get("albums_subdir") or "Albums"
-    assert albums_subdir not in od.parts, \
-        f"Playlist-routed track must stay in Playlists/, not Albums/: {od}"
+    assert _albums_subdir(api, base_url) in od.parts, \
+        f"Album-routed playlist track should be in Albums/, got: {od}"
+    assert "Combo Test" not in od.parts, f"should have left the playlist folder: {od}"
+
+
+@pytest.mark.slow
+def test_playlist_routed_compilation_stays_in_the_playlist_folder(api, base_url):
+    """Compilation mode wins over album routing: the playlist stays together."""
+    with _temp_settings(api, base_url,
+                        playlists_subdir="Playlists",
+                        auto_album_singles=True,
+                        playlist_album_as_name=True):
+        job = _queue_matchable(api, base_url, playlist_name="Combo Test", use_playlists_dir=True)
+
+    _assert_completed(job)
+    assert job.get("override_dir") is None, \
+        f"compilation playlist tracks must not be album-routed, got: {job['override_dir']}"
+    assert "/Combo Test/" in (job.get("final_path") or ""), \
+        f"expected the track in the playlist folder, got: {job.get('final_path')}"
 
 
 @pytest.mark.slow
@@ -1454,32 +1462,21 @@ def test_playlist_routed_single_track_number_completes(api, base_url):
 
 @pytest.mark.slow
 def test_playlist_routed_single_all_settings_on(api, base_url):
-    """Album routing + track numbers + playlist folder all enabled simultaneously.
-
-    override_dir should still land inside the playlist folder, not Albums/.
-    Track number in filename doesn't affect override_dir but must not crash the pipeline.
-    """
+    """Album routing + track numbers + playlist folder all on at once: still Albums,
+    and the track-number naming must not trip up the pipeline."""
     with _temp_settings(api, base_url,
                         playlists_subdir="Playlists",
                         auto_album_singles=True,
-                        auto_album_singles_use_albums_dir=False,
+                        playlist_album_as_name=False,
                         include_track_number_in_filename=True):
-        job_id, _ = _queue_download(api, base_url,
-                                    video_id=_MATCH_YT_ID,
-                                    title=_MATCH_TITLE,
-                                    artist=_MATCH_ARTIST,
-                                    playlist_name="Combo Test",
-                                    use_playlists_dir=True)
-        job = _wait_for_job(api, base_url, job_id, timeout=300)
-        # Tidy up before any assert or skip can bail out and leave the file behind.
-        _cleanup_downloaded_file(api, base_url, job_id)
+        job = _queue_matchable(api, base_url, playlist_name="Combo Test", use_playlists_dir=True)
 
     _assert_completed(job)
     _mb_skip_if_no_override(job, _MATCH_ARTIST, _MATCH_TITLE)
 
     od = pathlib.Path(job["override_dir"])
-    assert "Combo Test" in od.parts, \
-        f"override_dir should be inside the playlist folder with all settings on, got: {od}"
+    assert _albums_subdir(api, base_url) in od.parts, \
+        f"override_dir should be in Albums/ with all settings on, got: {od}"
 
 
 # Two jobs downloading the same track used to share one output directory and
@@ -1593,7 +1590,6 @@ def test_auto_route_single_does_not_overwrite_the_files_own_track_number(tmp_pat
         downloads, "get_setting_bool",
         lambda key, default=False, user_id=None: {
             "auto_album_singles": True,
-            "auto_album_singles_use_albums_dir": False,
             "organise_by_artist": False,
         }.get(key, default),
     )
@@ -1607,7 +1603,7 @@ def test_auto_route_single_does_not_overwrite_the_files_own_track_number(tmp_pat
         TRACKNUMBER="2", TRACKTOTAL="14",
     )
 
-    routed = downloads._auto_route_single_to_album(
+    routed, _ = downloads._auto_route_to_album(
         audio_file, "Paramore", "Ignorance",
         # MusicBrainz, having found the track on a radio promo compilation
         {"album": "Brand New Eyes", "album_artist": "Paramore",
@@ -1634,7 +1630,6 @@ def test_auto_route_single_still_fills_in_a_missing_track_number(tmp_path, monke
         downloads, "get_setting_bool",
         lambda key, default=False, user_id=None: {
             "auto_album_singles": True,
-            "auto_album_singles_use_albums_dir": False,
             "organise_by_artist": False,
         }.get(key, default),
     )
@@ -1643,7 +1638,7 @@ def test_auto_route_single_still_fills_in_a_missing_track_number(tmp_path, monke
     source_dir.mkdir(parents=True)
     audio_file = _tagged_flac(source_dir / "Ignorance.flac", ARTIST="Paramore", TITLE="Ignorance")
 
-    routed = downloads._auto_route_single_to_album(
+    routed, _ = downloads._auto_route_to_album(
         audio_file, "Paramore", "Ignorance",
         {"album": "brand new eyes", "album_artist": "Paramore",
          "track_number": 2, "track_total": 11},
@@ -1926,6 +1921,9 @@ def test_weekly_carry_over_track_stays_relative_to_the_playlists_folder(tmp_path
     playlists_dir = tmp_path / "Playlists"
     playlists_dir.mkdir()
     conn = _weekly_playlist_db(monkeypatch, downloads, playlists_dir)
+    real_get_setting = downloads.get_setting
+    monkeypatch.setattr(downloads, "get_setting", lambda key, default=None, user_id=None:
+                        str(tmp_path) if key == "music_dir" else real_get_setting(key, default, user_id=user_id))
 
     last_week = "Weekly Jams for kaisernerox, week of 2026-09-14"
     this_week = "Weekly Jams for kaisernerox, week of 2026-09-21"

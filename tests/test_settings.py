@@ -224,7 +224,7 @@ def test_migration_removes_obsolete_qobuz_proxy_setting(tmp_path, monkeypatch):
                 "SELECT value FROM settings WHERE key = 'db_version'"
             ).fetchone()[0]
         assert row is None
-        assert version == "20"  # migrations run to the latest version in one boot
+        assert version == "21"  # migrations run to the latest version in one boot
     finally:
         _drain(migration_pool)
 
@@ -278,7 +278,7 @@ def test_migration_removes_retired_monochrome_browser_setting(tmp_path, monkeypa
             ).fetchone()[0]
         assert leftovers == 0
         assert neighbour == ("false",)  # somebody's deliberate choice; leave it be
-        assert version == "20"
+        assert version == "21"
     finally:
         _drain(migration_pool)
 
@@ -309,7 +309,36 @@ def test_migration_removes_retired_qbdlx_setting(tmp_path, monkeypatch):
                 "SELECT value FROM settings WHERE key = 'db_version'"
             ).fetchone()[0]
         assert row is None
-        assert version == "20"
+        assert version == "21"
+    finally:
+        _drain(migration_pool)
+
+
+def test_migration_removes_retired_albums_dir_switch(tmp_path, monkeypatch):
+    """Album routing always files into Albums now, so the switch goes."""
+    old_db = tmp_path / "pre-albums-dir-removal.db"
+    with sqlite3.connect(old_db) as conn:
+        conn.execute("""
+            CREATE TABLE settings (
+                key TEXT PRIMARY KEY,
+                value TEXT,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        conn.executemany(
+            "INSERT INTO settings (key, value) VALUES (?, ?)",
+            [("db_version", "20"), ("auto_album_singles_use_albums_dir", "true")],
+        )
+
+    migration_pool = _migrate_old_db(old_db, monkeypatch)
+    try:
+        db.init_db()
+        with db.db_conn() as conn:
+            row = conn.execute(
+                "SELECT value FROM settings WHERE key = 'auto_album_singles_use_albums_dir'"
+            ).fetchone()
+        assert row is None
+        assert "auto_album_singles_use_albums_dir" not in SETTINGS_SCHEMA
     finally:
         _drain(migration_pool)
 
@@ -342,7 +371,7 @@ def test_migrations_leave_no_hifi_api_url_behind(tmp_path, monkeypatch):
                 "SELECT value FROM settings WHERE key = 'db_version'"
             ).fetchone()[0]
         assert row is None
-        assert version == "20"
+        assert version == "21"
     finally:
         _drain(migration_pool)
 
