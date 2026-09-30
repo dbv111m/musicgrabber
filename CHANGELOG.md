@@ -1,6 +1,6 @@
 # Changelog
 
-## v4.2.4 (DEV)
+## v4.2.4 (2026-09-30)
 
 ### Changed
 - **Monochrome downloads work again, and Chrome no longer has to come along**: Monochrome moved from `monochrome.tf` to `monochrome.st` and switched its Turnstile-guarded unified playback off entirely, so the browser route died on a 503 before Chrome had even got its coat on, and every Monochrome download failed. The site now plays from a plain tracks API with no token, no Turnstile and no browser: search by artist and title, keep the result with exactly the right ISRC, and fetch the FLAC straight from it. That is now Monochrome's primary download route, ahead of the Deezer ISRC rescue and the Tidal stream. Downloads resolve in a couple of seconds rather than a few tens of them, and previews play the real FLAC directly instead of a decrypted MP3 snippet made on the spot. The API address is read from Monochrome's own web client and remembered for six hours, following the meta-refresh a retired domain leaves behind, so the next house move should be followed without a release; `MONOCHROME_TRACKS_API_URL` pins an address if it is not, and `MONOCHROME_WEB_URL` now defaults to `https://monochrome.st`. The API drops the occasional lone 502 between perfectly good answers, so, like Monochrome's own player, a gateway error gets two quick retries before anyone is told it is down. One honest catch: the tracks API only serves 16-bit/44.1kHz FLAC and ignores any request for more, so Monochrome no longer reaches 24-bit hi-res.
