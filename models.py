@@ -216,7 +216,6 @@ class SettingsUpdate(BaseModel):
 
     # Search sources
     source_youtube_enabled: Optional[bool] = None
-    source_mp3phoenix_enabled: Optional[bool] = None
     source_soundcloud_enabled: Optional[bool] = None
     source_zvu4no_enabled: Optional[bool] = None
     source_freemp3cloud_enabled: Optional[bool] = None
@@ -228,8 +227,6 @@ class SettingsUpdate(BaseModel):
     source_health_check_interval_minutes: Optional[int] = None
     source_health_cooldown_minutes: Optional[int] = None
     search_concurrency: Optional[int] = Field(default=None, ge=1, le=5)
-    # Monochrome (Qobuz / Tidal via hifi-api)
-    monochrome_hifi_api_url: Optional[str] = None
     # Soulseek/slskd
     slskd_url: Optional[str] = None
     slskd_user: Optional[str] = None

@@ -38,9 +38,16 @@ RETIRED = ("<head><meta http-equiv='refresh' content='0; url=https://new.example
            "</head><h1>meow :3</h1>")
 
 
+def _forget_discovery(monkeypatch):
+    """Clear the cache under its lock, so a background lookup already under way
+    finishes first rather than writing its answer in straight afterwards."""
+    with tracks._discovery_lock:
+        monkeypatch.setattr(tracks, "_discovered", None)
+
+
 @pytest.fixture(autouse=True)
 def fresh_discovery(monkeypatch):
-    monkeypatch.setattr(tracks, "_discovered", None)
+    _forget_discovery(monkeypatch)
     monkeypatch.setattr(tracks, "MONOCHROME_TRACKS_API_URL", "")
     monkeypatch.setattr(tracks, "MONOCHROME_WEB_URL", "https://old.example")
     monkeypatch.setattr(tracks.time, "sleep", lambda seconds: None)
@@ -62,6 +69,13 @@ def _serve(monkeypatch, routes):
 
 # ---------------------------------------------------------------------------
 # Discovery
+#
+# Importing app.py starts the boot-time source health sweep in a daemon thread,
+# and some earlier tests do import it, so Monochrome's health check can call
+# api_base() at any moment during this file. The discovery tests therefore call
+# _discover_api_base() directly, and the caching tests count discoveries rather
+# than inspecting the shared cache, so a stray background call cannot change
+# what they see.
 # ---------------------------------------------------------------------------
 
 def test_discovery_follows_a_retired_domain_to_the_new_one(monkeypatch):
@@ -71,35 +85,45 @@ def test_discovery_follows_a_retired_domain_to_the_new_one(monkeypatch):
         "https://new.example/assets/": FakeResponse("https://new.example/assets/index-AbC123.js", BUNDLE),
         "https://new.example": FakeResponse("https://new.example", PAGE),
     })
-    assert tracks.api_base() == "https://tracks.example.st"
+    assert tracks._discover_api_base() == "https://tracks.example.st"
 
 
-def test_discovery_failure_falls_back_to_last_known_address(monkeypatch):
+def test_discovery_raises_when_the_site_is_down(monkeypatch):
     _serve(monkeypatch, {"https://old.example": FakeResponse("https://old.example", "", status=500)})
-    assert tracks.api_base() == tracks.MONOCHROME_TRACKS_API_FALLBACK
+    with pytest.raises(httpx.HTTPStatusError):
+        tracks._discover_api_base()
 
 
-def test_bundle_without_the_client_falls_back(monkeypatch):
+def test_discovery_raises_when_the_bundle_has_no_client(monkeypatch):
     _serve(monkeypatch, {
         "https://old.example/assets/": FakeResponse("https://old.example/assets/x.js", "nothing to see"),
         "https://old.example": FakeResponse("https://old.example", PAGE),
     })
+    with pytest.raises(RuntimeError, match="not found"):
+        tracks._discover_api_base()
+
+
+def test_failed_discovery_falls_back_to_last_known_address(monkeypatch):
+    monkeypatch.setattr(tracks, "_discover_api_base",
+                        lambda: (_ for _ in ()).throw(RuntimeError("bundle moved")))
+    _forget_discovery(monkeypatch)
     assert tracks.api_base() == tracks.MONOCHROME_TRACKS_API_FALLBACK
 
 
 def test_discovery_is_remembered_between_calls(monkeypatch):
-    seen = _serve(monkeypatch, {
-        "https://old.example/assets/": FakeResponse("https://old.example/assets/x.js", BUNDLE),
-        "https://old.example": FakeResponse("https://old.example", PAGE),
-    })
-    tracks.api_base()
-    tracks.api_base()
-    assert len(seen) == 2  # one page, one bundle, and then nothing
+    calls = []
+    monkeypatch.setattr(tracks, "_discover_api_base",
+                        lambda: calls.append(1) or "https://tracks.example.st")
+    _forget_discovery(monkeypatch)
+    assert tracks.api_base() == "https://tracks.example.st"
+    assert tracks.api_base() == "https://tracks.example.st"
+    assert len(calls) == 1  # whoever asked first, nobody asked twice
 
 
 def test_explicit_address_skips_discovery(monkeypatch):
     monkeypatch.setattr(tracks, "MONOCHROME_TRACKS_API_URL", "https://pinned.example/")
-    _serve(monkeypatch, {})
+    monkeypatch.setattr(tracks, "_discover_api_base",
+                        lambda: (_ for _ in ()).throw(AssertionError("pinned means no discovery")))
     assert tracks.api_base() == "https://pinned.example"
 
 

@@ -127,37 +127,12 @@ TIMEOUT_AMAZON_BROWSER = 180     # Amazon Music playlist scraping (3 minutes)
 TIMEOUT_AMAZON_ALBUM_BROWSER = 90  # Amazon Music album naming; only needs a page title
 AMAZON_ALBUM_TITLE_WAIT = 45     # How long the album script waits for Amazon to name the page
 TIMEOUT_FPCALC = 30              # Audio fingerprinting via fpcalc
-TIMEOUT_MP3PHOENIX_SEARCH = int(os.getenv("TIMEOUT_MP3PHOENIX_SEARCH", "30"))
-TIMEOUT_MP3PHOENIX_DOWNLOAD = int(os.getenv("TIMEOUT_MP3PHOENIX_DOWNLOAD", "180"))
-# A preview takes the opening chunk and hangs up rather than pulling the lot, so
-# it waits nothing like as long as a download. A megabyte is roughly 25 seconds
-# at 320 kbps, which is ample for deciding whether it is the right song, and MP3
-# is quite happy being cut off mid-flow.
-TIMEOUT_MP3PHOENIX_PREVIEW = int(os.getenv("TIMEOUT_MP3PHOENIX_PREVIEW", "45"))
-MP3PHOENIX_PREVIEW_BYTES = int(os.getenv("MP3PHOENIX_PREVIEW_BYTES", str(1024 * 1024)))
-# How long the Chrome bootstrap gets to clear Cloudflare and hand back cookies.
-# Forwarded to mp3phoenix_browser.py; the parent's own kill timer allows this
-# plus a buffer, so the child isn't killed mid-clearance.
-MP3PHOENIX_BROWSER_TIMEOUT = int(os.getenv("MP3PHOENIX_BROWSER_TIMEOUT", "75"))
-MP3PHOENIX_SESSION_TTL = int(os.getenv("MP3PHOENIX_SESSION_TTL", "3600"))
-MP3PHOENIX_BROWSER_FAILURE_LIMIT = 3
-MP3PHOENIX_BROWSER_FAILURE_COOLDOWN = int(os.getenv("MP3PHOENIX_BROWSER_FAILURE_COOLDOWN", "600"))
-# Cloudflare's hard "you have been blocked" page is a firewall rule, not a puzzle:
-# no browser gets past it, so stop asking for hours rather than minutes.
-MP3PHOENIX_BLOCK_COOLDOWN = int(os.getenv("MP3PHOENIX_BLOCK_COOLDOWN", "21600"))
 TIMEOUT_ZVU4NO_SEARCH = 15       # zvu4no HTML search
 TIMEOUT_ZVU4NO_DOWNLOAD = int(os.getenv("TIMEOUT_ZVU4NO_DOWNLOAD", "120"))  # zvu4no direct MP3 stream
 TIMEOUT_FREEMP3CLOUD_SEARCH = 20    # FreeMp3Cloud landing + form POST (two round-trips)
 TIMEOUT_FREEMP3CLOUD_DOWNLOAD = int(os.getenv("TIMEOUT_FREEMP3CLOUD_DOWNLOAD", "120"))  # FreeMp3Cloud direct MP3 stream
-TIMEOUT_MONOCHROME_SEARCH = 15   # Monochrome tracks API and hifi-api catalogue lookups
-# Whole Tidal metadata leg, across every endpoint and query variant
-MONOCHROME_HIFI_SEARCH_BUDGET = float(os.getenv("MONOCHROME_HIFI_SEARCH_BUDGET", "15"))
+TIMEOUT_MONOCHROME_SEARCH = 15   # Monochrome tracks API catalogue lookups
 TIMEOUT_MONOCHROME_DOWNLOAD = int(os.getenv("TIMEOUT_MONOCHROME_DOWNLOAD", "300"))  # Monochrome FLAC download (FLACs are big)
-
-# Preview snippets: audio a browser cannot fetch for itself (MP3Phoenix sits
-# behind Cloudflare) is parked locally under a short-lived token.
-PREVIEW_SNIPPET_TTL = int(os.getenv("PREVIEW_SNIPPET_TTL", "600"))
-PREVIEW_SNIPPET_MAX_CACHED = int(os.getenv("PREVIEW_SNIPPET_MAX_CACHED", "20"))
 STALE_JOB_TIMEOUT = 900          # Mark downloading/queued jobs as failed after 15 minutes
 STALE_JOB_CHECK_INTERVAL = 120   # Check for stale jobs every 2 minutes
 
@@ -209,7 +184,6 @@ SOUNDCLOUD_SEARCH_MIN_FETCH = 15 # Minimum results to fetch for scoring
 SLSKD_MAX_RESULTS = 20           # Max Soulseek results to return
 SEARCH_MAX_PER_SOURCE = 4        # Baseline contribution cap for an "All" search; sparse source sets can expand to fill the requested page
 SEARCH_MAX_PER_SOURCE_YOUTUBE = 6
-SEARCH_MAX_PER_SOURCE_MP3PHOENIX = 4
 SEARCH_MAX_PER_SOURCE_SOUNDCLOUD = 4
 SEARCH_MAX_PER_SOURCE_ZVU4NO = 4
 SEARCH_MAX_PER_SOURCE_FREEMP3CLOUD = 4
@@ -451,11 +425,6 @@ DEFAULT_CONVERT_AUDIO = os.getenv(
     os.getenv("DEFAULT_CONVERT_TO_FLAC", "false"),
 ).lower() == "true"
 
-# Monochrome (Qobuz/Tidal). The known public instances (us-west/api/eu-central
-# .monochrome.tf, monochrome-api.samidy.com) all stopped working once Tidal
-# revoked their OAuth client, so there is no honest public default any more;
-# this stays empty unless you point it at a self-hosted hifi-api of your own.
-MONOCHROME_HIFI_API_URL = os.getenv("MONOCHROME_HIFI_API_URL", "")
 # Monochrome's tracks API: plain HTTP search plus a direct FLAC per track, no
 # auth and no browser. Its address is read from the web client at
 # MONOCHROME_WEB_URL, so the next house move is followed on its own; the

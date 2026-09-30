@@ -14,7 +14,6 @@ from constants import (
     BOT_BACKOFF_MIN_SECONDS, BOT_BACKOFF_MAX_SECONDS,
     TIMEOUT_SPOTIFY_BROWSER, SPOTIFY_BROWSER_STALL_SECONDS,
     MUSIC_DIR, DB_PATH,
-    MONOCHROME_HIFI_API_URL,
 )
 from db import db_conn
 
@@ -279,7 +278,6 @@ SETTINGS_SCHEMA = {
     "acoustid_api_key": {"type": "str", "default": "0NILMQojj4", "env": "ACOUSTID_API_KEY"},
     # Search sources
     "source_youtube_enabled": {"type": "bool", "default": True, "env": "SOURCE_YOUTUBE_ENABLED"},
-    "source_mp3phoenix_enabled": {"type": "bool", "default": False, "env": "SOURCE_MP3PHOENIX_ENABLED"},
     "source_soundcloud_enabled": {"type": "bool", "default": True, "env": "SOURCE_SOUNDCLOUD_ENABLED"},
     "source_zvu4no_enabled": {"type": "bool", "default": True, "env": "SOURCE_ZVU4NO_ENABLED"},
     "source_freemp3cloud_enabled": {"type": "bool", "default": True, "env": "SOURCE_FREEMP3CLOUD_ENABLED"},
@@ -291,7 +289,6 @@ SETTINGS_SCHEMA = {
     "source_health_check_interval_minutes": {"type": "int", "default": 10, "env": "SOURCE_HEALTH_CHECK_INTERVAL_MINUTES"},
     "source_health_cooldown_minutes": {"type": "int", "default": 10, "env": "SOURCE_HEALTH_COOLDOWN_MINUTES"},
     "search_concurrency": {"type": "int", "default": 1, "env": "SEARCH_CONCURRENCY"},
-    "monochrome_hifi_api_url": {"type": "str", "default": MONOCHROME_HIFI_API_URL, "env": "MONOCHROME_HIFI_API_URL"},
     # YouTube
     "youtube_cookies": {"type": "str", "default": "", "env": "YOUTUBE_COOKIES", "sensitive": True},
     "youtube_bot_backoff_min": {"type": "int", "default": BOT_BACKOFF_MIN_SECONDS, "env": "YOUTUBE_BOT_BACKOFF_MIN"},

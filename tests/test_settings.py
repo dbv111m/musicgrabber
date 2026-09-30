@@ -224,7 +224,7 @@ def test_migration_removes_obsolete_qobuz_proxy_setting(tmp_path, monkeypatch):
                 "SELECT value FROM settings WHERE key = 'db_version'"
             ).fetchone()[0]
         assert row is None
-        assert version == "19"  # migrations run to the latest version in one boot
+        assert version == "20"  # migrations run to the latest version in one boot
     finally:
         _drain(migration_pool)
 
@@ -278,7 +278,7 @@ def test_migration_removes_retired_monochrome_browser_setting(tmp_path, monkeypa
             ).fetchone()[0]
         assert leftovers == 0
         assert neighbour == ("false",)  # somebody's deliberate choice; leave it be
-        assert version == "19"
+        assert version == "20"
     finally:
         _drain(migration_pool)
 
@@ -309,14 +309,14 @@ def test_migration_removes_retired_qbdlx_setting(tmp_path, monkeypatch):
                 "SELECT value FROM settings WHERE key = 'db_version'"
             ).fetchone()[0]
         assert row is None
-        assert version == "19"
+        assert version == "20"
     finally:
         _drain(migration_pool)
 
 
-def test_migration_clears_dead_default_hifi_api_url_but_not_a_self_hosted_one(tmp_path, monkeypatch):
-    """A stored value that's still one of the dead public defaults gets cleared;
-    a genuinely self-hosted URL is left alone, since it may still work fine."""
+def test_migrations_leave_no_hifi_api_url_behind(tmp_path, monkeypatch):
+    """v14 cleared the dead public defaults and spared self-hosted URLs; v20
+    retired the setting outright, so by the end neither survives."""
     old_db = tmp_path / "pre-hifi-cleanup.db"
     with sqlite3.connect(old_db) as conn:
         conn.execute("""
@@ -342,7 +342,7 @@ def test_migration_clears_dead_default_hifi_api_url_but_not_a_self_hosted_one(tm
                 "SELECT value FROM settings WHERE key = 'db_version'"
             ).fetchone()[0]
         assert row is None
-        assert version == "19"
+        assert version == "20"
     finally:
         _drain(migration_pool)
 
@@ -367,8 +367,7 @@ def test_migration_clears_dead_default_hifi_api_url_but_not_a_self_hosted_one(tm
             row = conn.execute(
                 "SELECT value FROM settings WHERE key = 'monochrome_hifi_api_url'"
             ).fetchone()
-        assert row is not None
-        assert row[0] == "https://hifi.example-self-hosted.test"
+        assert row is None
     finally:
         _drain(migration_pool)
 

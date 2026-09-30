@@ -23,18 +23,13 @@ from contextlib import contextmanager
 import pytest
 
 
-# Reliable, short public video -- "Me at the zoo", 18 seconds.
+from live_media import MATCHABLE_SONG, next_short_clip, tidy_up
+
+# Short clips come from live_media's pool, a different one per download.
 # AcoustID fingerprinting is skipped for <30s files, so MB won't match.
-_SHORT_YT_ID   = "jNQXAC9IVRw"
-_SHORT_YT_ARTIST = "jawed"
-_SHORT_YT_TITLE  = "Me at the zoo"
 
 # A track MusicBrainz reliably identifies via AcoustID fingerprint.
-# "Thriller" by Michael Jackson -- known album, predictable routing.
-# NOTE: these tests take several minutes each because the full track downloads.
-_THRILLER_YT_ID  = "sOnqjkJTMaA"
-_THRILLER_ARTIST = "Michael Jackson"
-_THRILLER_TITLE  = "Thriller"
+_MATCH_YT_ID, _MATCH_ARTIST, _MATCH_TITLE = MATCHABLE_SONG
 
 _TERMINAL = ("completed", "failed", "completed_with_errors")
 
@@ -92,10 +87,11 @@ def _wait_for_job(api, base_url, job_id, timeout=120):
 
 def _queue_download(api, base_url, **kwargs):
     """POST /api/download with the given payload. Returns (job_id, response_json)."""
+    video_id, artist, title = next_short_clip()
     payload = {
-        "video_id": _SHORT_YT_ID,
-        "title": _SHORT_YT_TITLE,
-        "artist": _SHORT_YT_ARTIST,
+        "video_id": video_id,
+        "title": title,
+        "artist": artist,
         "source": "youtube",
         "convert_to_flac": True,
         **kwargs,
@@ -110,7 +106,7 @@ def _queue_download(api, base_url, **kwargs):
 
 def _cleanup_downloaded_file(api, base_url, job_id=None):
     if job_id:
-        api.delete(f"{base_url}/api/jobs/{job_id}/file", timeout=10)
+        tidy_up(api, base_url, job_id)
 
 
 @contextmanager
@@ -128,10 +124,20 @@ def _temp_settings(api, base_url, **overrides):
 def _assert_completed(job):
     assert job["status"] in ("completed", "completed_with_errors"), \
         f"Download failed or timed out: {job.get('error')}"
+    assert not (job.get("error") or "").startswith("Already exists"), \
+        f"Nothing downloaded, the dupe check matched a file left behind: {job['error']}"
 
 
 def _mb_skip_if_no_override(job, artist, title):
-    """Skip (not fail) when MB returned no album so routing never triggered."""
+    """Skip (not fail) when MB returned no album so routing never triggered.
+
+    A dupe hit is a failure, not a skip: the test song is in the library, so
+    nothing downloaded and nothing was routed, and a skip hides that forever.
+    """
+    assert not (job.get("error") or "").startswith("Already exists"), (
+        f"'{artist} - {title}' is already in the library, so routing was never "
+        f"exercised ({job['error']}). Pick another MATCHABLE_SONG in live_media.py."
+    )
     if not job.get("override_dir"):
         pytest.skip(
             f"MusicBrainz didn't return album metadata for '{artist} - {title}'; "
@@ -1275,10 +1281,10 @@ def test_download_job_shape(api, base_url):
 #   albums  = auto_album_singles_use_albums_dir=True (route to Albums/ not Singles/)
 #   trackno = include_track_number_in_filename=True
 #
-# Tests using _SHORT_YT_ID: MB won't match (18s, fingerprint skipped), so
+# Tests using a short clip: MB won't match (<30s, fingerprint skipped), so
 #   album routing never fires. Used to verify routing is OFF.
-# Tests using _THRILLER_YT_ID: MB should match and return album info.
-#   These are several minutes each. Skipped gracefully if MB doesn't match.
+# Tests using _MATCH_YT_ID: MB should match and return album info.
+#   About a minute each. Skipped gracefully if MB doesn't match.
 # ---------------------------------------------------------------------------
 
 @pytest.mark.slow
@@ -1318,13 +1324,15 @@ def test_single_album_routing_on_sets_override_dir(api, base_url):
                         auto_album_singles=True,
                         auto_album_singles_use_albums_dir=False):
         job_id, _ = _queue_download(api, base_url,
-                                    video_id=_THRILLER_YT_ID,
-                                    title=_THRILLER_TITLE,
-                                    artist=_THRILLER_ARTIST)
+                                    video_id=_MATCH_YT_ID,
+                                    title=_MATCH_TITLE,
+                                    artist=_MATCH_ARTIST)
         job = _wait_for_job(api, base_url, job_id, timeout=300)
+        # Tidy up before any assert or skip can bail out and leave the file behind.
+        _cleanup_downloaded_file(api, base_url, job_id)
 
     _assert_completed(job)
-    _mb_skip_if_no_override(job, _THRILLER_ARTIST, _THRILLER_TITLE)
+    _mb_skip_if_no_override(job, _MATCH_ARTIST, _MATCH_TITLE)
 
     od = pathlib.Path(job["override_dir"])
     settings = api.get(f"{base_url}/api/settings", timeout=10).json()
@@ -1334,7 +1342,6 @@ def test_single_album_routing_on_sets_override_dir(api, base_url):
     albums_subdir = settings.get("albums_subdir") or "Albums"
     assert albums_subdir not in od.parts, \
         f"override_dir should NOT be in Albums dir with use_albums_dir=False, got: {od}"
-    _cleanup_downloaded_file(api, base_url, job_id)
 
 
 @pytest.mark.slow
@@ -1344,20 +1351,21 @@ def test_single_album_routing_on_albums_dir(api, base_url):
                         auto_album_singles=True,
                         auto_album_singles_use_albums_dir=True):
         job_id, _ = _queue_download(api, base_url,
-                                    video_id=_THRILLER_YT_ID,
-                                    title=_THRILLER_TITLE,
-                                    artist=_THRILLER_ARTIST)
+                                    video_id=_MATCH_YT_ID,
+                                    title=_MATCH_TITLE,
+                                    artist=_MATCH_ARTIST)
         job = _wait_for_job(api, base_url, job_id, timeout=300)
+        # Tidy up before any assert or skip can bail out and leave the file behind.
+        _cleanup_downloaded_file(api, base_url, job_id)
 
     _assert_completed(job)
-    _mb_skip_if_no_override(job, _THRILLER_ARTIST, _THRILLER_TITLE)
+    _mb_skip_if_no_override(job, _MATCH_ARTIST, _MATCH_TITLE)
 
     od = pathlib.Path(job["override_dir"])
     settings = api.get(f"{base_url}/api/settings", timeout=10).json()
     albums_subdir = settings.get("albums_subdir") or "Albums"
     assert albums_subdir in od.parts, \
         f"Expected override_dir inside Albums dir ({albums_subdir}), got: {od}"
-    _cleanup_downloaded_file(api, base_url, job_id)
 
 
 @pytest.mark.slow
@@ -1403,15 +1411,17 @@ def test_playlist_routed_single_album_routing_on(api, base_url):
                         auto_album_singles=True,
                         auto_album_singles_use_albums_dir=False):
         job_id, _ = _queue_download(api, base_url,
-                                    video_id=_THRILLER_YT_ID,
-                                    title=_THRILLER_TITLE,
-                                    artist=_THRILLER_ARTIST,
+                                    video_id=_MATCH_YT_ID,
+                                    title=_MATCH_TITLE,
+                                    artist=_MATCH_ARTIST,
                                     playlist_name="Combo Test",
                                     use_playlists_dir=True)
         job = _wait_for_job(api, base_url, job_id, timeout=300)
+        # Tidy up before any assert or skip can bail out and leave the file behind.
+        _cleanup_downloaded_file(api, base_url, job_id)
 
     _assert_completed(job)
-    _mb_skip_if_no_override(job, _THRILLER_ARTIST, _THRILLER_TITLE)
+    _mb_skip_if_no_override(job, _MATCH_ARTIST, _MATCH_TITLE)
 
     od = pathlib.Path(job["override_dir"])
     assert "Combo Test" in od.parts, \
@@ -1424,7 +1434,6 @@ def test_playlist_routed_single_album_routing_on(api, base_url):
     albums_subdir = settings.get("albums_subdir") or "Albums"
     assert albums_subdir not in od.parts, \
         f"Playlist-routed track must stay in Playlists/, not Albums/: {od}"
-    _cleanup_downloaded_file(api, base_url, job_id)
 
 
 @pytest.mark.slow
@@ -1456,20 +1465,21 @@ def test_playlist_routed_single_all_settings_on(api, base_url):
                         auto_album_singles_use_albums_dir=False,
                         include_track_number_in_filename=True):
         job_id, _ = _queue_download(api, base_url,
-                                    video_id=_THRILLER_YT_ID,
-                                    title=_THRILLER_TITLE,
-                                    artist=_THRILLER_ARTIST,
+                                    video_id=_MATCH_YT_ID,
+                                    title=_MATCH_TITLE,
+                                    artist=_MATCH_ARTIST,
                                     playlist_name="Combo Test",
                                     use_playlists_dir=True)
         job = _wait_for_job(api, base_url, job_id, timeout=300)
+        # Tidy up before any assert or skip can bail out and leave the file behind.
+        _cleanup_downloaded_file(api, base_url, job_id)
 
     _assert_completed(job)
-    _mb_skip_if_no_override(job, _THRILLER_ARTIST, _THRILLER_TITLE)
+    _mb_skip_if_no_override(job, _MATCH_ARTIST, _MATCH_TITLE)
 
     od = pathlib.Path(job["override_dir"])
     assert "Combo Test" in od.parts, \
         f"override_dir should be inside the playlist folder with all settings on, got: {od}"
-    _cleanup_downloaded_file(api, base_url, job_id)
 
 
 # Two jobs downloading the same track used to share one output directory and

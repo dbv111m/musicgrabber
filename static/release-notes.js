@@ -9,7 +9,22 @@
 const RELEASE_NOTES = {
     "4.3.0": {
         title: "What's New in v4.3.0: Death of the Phoenix",
-        sections: []
+        sections: [
+            {
+                heading: "Goodbye, MP3Phoenix",
+                items: [
+                    "MP3Phoenix has been blocking everyone, everywhere, for weeks, so it has been retired. Again. Your existing downloads and history are all still there; you just can't get anything new from it.",
+                    "If you had it switched on, nothing else changes: your other sources carry on exactly as before.",
+                ]
+            },
+            {
+                heading: "Monochrome, simplified",
+                items: [
+                    "The Monochrome settings have been cleared out. The old hifi-api box only helped people running their own server, and the public ones died long ago. All that's left is the Test Downloads button.",
+                    "Monochrome searches dig a little deeper now: when Deezer comes up short, Monochrome checks its own catalogue for what Deezer missed.",
+                ]
+            },
+        ]
     },
     "4.2.4": {
         title: "What's New in v4.2.4",

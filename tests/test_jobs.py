@@ -8,16 +8,13 @@ Run with: pytest -m "not slow" to skip them.
 import time
 import pytest
 
+from live_media import next_short_clip, tidy_up
+
 
 JOB_KEYS = [
     "id", "video_id", "title", "artist", "status",
     "error", "download_type", "source", "convert_audio", "convert_to_flac",
 ]
-
-# A very short, well-known track on YouTube - Aphex Twin's "Avril 14th" excerpt (official)
-# Using a known public video; if YouTube breaks, the job will fail but not 500
-_YT_VIDEO_ID = "dX3k_QDnzHE"  # "Bohemian Rhapsody" official - widely available, reliable
-_SHORT_YT_ID = "jNQXAC9IVRw"  # "Me at the zoo" - first YouTube video, 18 seconds, lightweight
 
 
 def test_jobs_list(api, base_url):
@@ -44,10 +41,11 @@ def test_jobs_list_shape(api, base_url):
 
 def test_queue_download(api, base_url):
     """Queue a download job and verify that it is created."""
+    video_id, artist, title = next_short_clip()
     payload = {
-        "video_id": _SHORT_YT_ID,
-        "title": "Me at the zoo",
-        "artist": "jawed",
+        "video_id": video_id,
+        "title": title,
+        "artist": artist,
         "source": "youtube",
         "convert_audio": True,
     }
@@ -65,11 +63,12 @@ def test_queue_download(api, base_url):
     assert d.get("status") in ("queued", "downloading", "completed", "failed", "completed_with_errors")
     assert d["convert_audio"] is True
     assert bool(d["convert_to_flac"]) is True  # Legacy response field remains compatible.
+    tidy_up(api, base_url, job_id)
 
 def test_queue_download_duplicate_fields(api, base_url):
     """Response shape should include job_id."""
     payload = {
-        "video_id": _SHORT_YT_ID,
+        "video_id": next_short_clip()[0],
         "title": "Test track",
         "artist": "Test artist",
         "source": "youtube",
@@ -79,15 +78,17 @@ def test_queue_download_duplicate_fields(api, base_url):
     assert r.status_code == 200
     d = r.json()
     assert "job_id" in d or "id" in d, "POST /api/download response has no job identifier"
+    tidy_up(api, base_url, d.get("job_id") or d.get("id"))
 
 
 @pytest.mark.slow
 def test_live_youtube_download_completes(api, base_url):
     """Actually wait for a short YouTube download to finish. Slow - network dependent."""
+    video_id, artist, title = next_short_clip()
     payload = {
-        "video_id": _SHORT_YT_ID,
-        "title": "Me at the zoo",
-        "artist": "jawed",
+        "video_id": video_id,
+        "title": title,
+        "artist": artist,
         "source": "youtube",
         "convert_to_flac": False,  # skip FLAC conversion to speed up
     }

@@ -2,6 +2,18 @@
 
 ## v4.3.0 (DEV)
 
+Death of the Phoenix. A release mostly about taking things away, which is the most satisfying kind.
+
+### Removed
+- **MP3Phoenix, retired for the second time**: since September its Cloudflare has answered every connection anyone has tried, from three countries, with a flat "you have been blocked", and no browser trick gets past a firewall rule. Rather than keep a source that can only ever tell you it is closed, it goes: the source itself, its Search Sources toggle (tidied away by DB migration v20), the Selenium-cleared session behind it, and the server-side preview snippets it needed because Cloudflare would not serve an `<audio>` element directly, `/api/preview-audio` included. `SOURCE_MP3PHOENIX_ENABLED` and every `MP3PHOENIX_*` setting are now ignored, and `curl_cffi` has left the image. Your history is untouched: old queue rows and library files keep their MP3Phoenix labels, and retrying an old MP3Phoenix job is refused with a plain message rather than attempted. SeleniumBase and Chrome stay in the image, because the Amazon Music album namer still needs them. v4.2.4 is the last release carrying it, should the bird ever rise a third time.
+- **The Monochrome hifi-api setting**: every public hifi-api died when Tidal revoked their OAuth client, so it only ever did anything for people running their own, and its hint had been wrong for a while (Tidal playlist import stopped using it long ago). The Tidal search top-up and the last-resort Tidal stream behind it go too. `MONOCHROME_HIFI_API_URL` and `MONOCHROME_HIFI_SEARCH_BUDGET` are now ignored, and DB migration v20 removes the stored value. The Monochrome section of Settings is now a single Test Downloads button, which is about the right amount of Monochrome to have to think about.
+
+### Changed
+- **Monochrome search tops up from its own catalogue**: when Deezer's page comes back short, or full of near misses that do not match what you asked for, Monochrome now searches the tracks API directly and merges in whatever Deezer missed. That used to be the hifi-api's job, which in practice meant nobody's.
+- **Deno 2.9.5 to 2.9.7**: the JavaScript runtime yt-dlp uses to solve YouTube's player challenges, kept current because that particular arms race does not take weekends off. yt-dlp itself is always fetched fresh when the image is built.
+- **Unknown sources are refused at the door**: asking `/api/download` for a source that does not exist, such as a retired one clicked in a browser tab opened before the upgrade, now gets a plain "Unknown source" instead of wandering down the YouTube path and failing on a baffling "truncated YouTube ID".
+- **The live tests stopped looking like a bot**: every slow run used to download "Me at the zoo" a dozen times and fire the same three searches, which is exactly what a scraper looks like from YouTube's side, and let two tests' downloads of the same video trip over each other. Downloads now draw from a pool of four short clips, shuffled per run, and searches pick from ten songs at random (`tests/live_media.py`). Fast tests now wait for their download to finish before deleting it, rather than deleting a file that did not exist yet and leaving the real one behind. The MusicBrainz routing tests turned out never to have routed anything: of 195 Thriller test jobs since 11 August, not one was routed and 186 were dupe hits, because Thriller was already in the library, so the dupe check finished every job before a byte was downloaded. They now use the Ramones' "Blitzkrieg Bop", which is not, and a dupe hit fails the test with instructions instead of skipping quietly.
+
 ## v4.2.4 (2026-09-30)
 
 ### Changed

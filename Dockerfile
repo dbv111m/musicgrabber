@@ -28,14 +28,13 @@ RUN ARCH=$(dpkg --print-architecture) && \
 # is the entire configuration. The official bin image is a single static binary
 # built for both our architectures, which beats unzipping release archives per
 # arch. 92MB on a 2.2GB image, and yt-dlp has deprecated going without.
-COPY --from=denoland/deno:bin-2.9.5 /deno /usr/local/bin/deno
+COPY --from=denoland/deno:bin-2.9.7 /deno /usr/local/bin/deno
 
 # Install Python dependencies
 RUN pip install --no-cache-dir \
     fastapi~=0.128.0 \
     uvicorn[standard]~=0.40.0 \
     httpx~=0.28.1 \
-    curl_cffi~=0.13.0 \
     pydantic~=2.12.5 \
     mutagen~=1.47.0 \
     playwright~=1.58.0 \
@@ -43,8 +42,8 @@ RUN pip install --no-cache-dir \
     bcrypt~=4.2.0
 
 # SeleniumBase is kept beside Playwright rather than replacing the working
-# Spotify/Amazon scrapers. Experimental MP3Phoenix uses it briefly to seed
-# curl_cffi with clearance.
+# Spotify/Amazon playlist scrapers. Its undetected mode is what gets an Amazon
+# Music album page to name itself (amazonalbum.py); Playwright cannot.
 RUN pip install --no-cache-dir seleniumbase~=4.49.0
 
 # Install Playwright browsers into a fixed path so non-root users (PUID/PGID) can find them.

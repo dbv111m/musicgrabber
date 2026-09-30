@@ -1,7 +1,7 @@
 # Music Grabber
 **v4.2.4 (2026-09-30)**
 
-A self-hosted music acquisition service. Search YouTube, SoundCloud, zvu4no, FreeMp3Cloud, Monochrome, optional MP3Phoenix, and optional Soulseek, tap a result and it downloads the best quality audio straight into your music library. You'll have a choice to convert to a common format, or store as is.
+A self-hosted music acquisition service. Search YouTube, SoundCloud, zvu4no, FreeMp3Cloud, Monochrome, and optional Soulseek, tap a result and it downloads the best quality audio straight into your music library. You'll have a choice to convert to a common format, or store as is.
 
 If you find it useful, consider buying me a coffee: https://ko-fi.com/geekphreek
 
@@ -23,7 +23,7 @@ MusicGrabber is intentionally narrow. It is **not**:
 
 ## Features
 
-- **Multi-source search:** the Tracks tab searches YouTube, SoundCloud, zvu4no, FreeMp3Cloud, Monochrome, optional MP3Phoenix, and optional Soulseek in parallel; relevance-ranked results include source badges and score explanations, plus a separate audio-quality tier where the provider declares one. MP3Phoenix is an off-by-default source that briefly launches Selenium to obtain Cloudflare clearance, then searches, previews and downloads through a reusable Chrome-impersonating HTTP session. Soulseek results also show the peer's current queue depth and use it as a bounded ranking penalty, so an idle peer wins an otherwise equal contest without a busy peer disappearing altogether. The single-song search collapses when you leave Tracks, keeping the other workspaces focused on their own jobs
+- **Multi-source search:** the Tracks tab searches YouTube, SoundCloud, zvu4no, FreeMp3Cloud, Monochrome, and optional Soulseek in parallel; relevance-ranked results include source badges and score explanations, plus a separate audio-quality tier where the provider declares one. Soulseek results also show the peer's current queue depth and use it as a bounded ranking penalty, so an idle peer wins an otherwise equal contest without a busy peer disappearing altogether. The single-song search collapses when you leave Tracks, keeping the other workspaces focused on their own jobs
 - **Live search progress:** results stream in as each source answers, with live status for completed, slow, parked, or unavailable sources; repeated timeouts automatically bench an unhealthy source until a background probe clears it. yt-dlp searches and metadata lookups share a bounded retry policy for throttling, timeouts, gateway failures, and reduced format manifests, while genuinely private/deleted media fails immediately
 - **Monochrome source:** searches Deezer metadata, keeps only results Monochrome's own tracks API actually stocks (matched by ISRC), and downloads the FLAC from it, with a Deezer ISRC rescue and a self-hosted Tidal stream as fallbacks. If Deezer is down, the tracks API is searched directly. Monochrome downloads are 16-bit/44.1kHz FLAC. No account or API key is required. Enabled by default and configurable in Search Sources
 - **Watched playlists:** monitor Spotify, YouTube (including Mixes), Amazon Music, Apple Music, SoundCloud, Tidal, Beatport, Monochrome, and ListenBrainz playlists; auto-downloads new tracks and grabs the best match available. Per-playlist sync mode: Append (M3U grows as tracks arrive) or Mirror (M3U stays in sync with the upstream; removed tracks drop out). Each card shows live refresh state and stage. "Missing" button shows tracks that never made it; Retry and Search buttons to fix them. M3U updates immediately as each track finishes
@@ -444,9 +444,9 @@ The easiest way to configure MusicGrabber is via the **Settings tab** in the UI.
 - **General**: MusicBrainz and Deezer metadata, lyrics fetching, default conversion, minimum bitrate, live-version rejection, and optional loudness normalisation
 - **Audio format**: FLAC, ALAC/AAC-in-M4A, Opus, or MP3, including MP3/Opus/ALAC quality presets
 - **Library layout**: Singles, Playlists, and Albums subfolders, track-number filenames, auto-album routing, playlist album/comment tagging, automatic Music import, singles-only mode, and file permissions
-- **Search sources**: enable/disable YouTube, SoundCloud, zvu4no, FreeMp3Cloud, MP3Phoenix, Soulseek, and Monochrome; configure cross-source fallback, automatic health checks, and a per-provider search limit from 1–5 (default 1). MP3Phoenix and Soulseek are disabled by default. An off-by-default YouTube playlist option can use the exact upstream video only after every confident alternative fails. Download concurrency remains deliberately internal and conservative
+- **Search sources**: enable/disable YouTube, SoundCloud, zvu4no, FreeMp3Cloud, Soulseek, and Monochrome; configure cross-source fallback, automatic health checks, and a per-provider search limit from 1–5 (default 1). Soulseek is disabled by default. An off-by-default YouTube playlist option can use the exact upstream video only after every confident alternative fails. Download concurrency remains deliberately internal and conservative
 - **Track upgrades**: scan the library for files below the configured quality tier and control the scan interval
-- **Monochrome**: optional self-hosted hifi-api URL, and a Test Downloads button
+- **Monochrome**: a Test Downloads button that proves the whole route end to end
 - **Soulseek (slskd)**: enable toggle, URL, credentials, downloads path
 - **Navidrome**: URL and credentials for library refresh
 - **Jellyfin**: URL and API key for library refresh
@@ -524,7 +524,6 @@ Settings are stored in the database and persist across container restarts.
 | `LIDARR_URL` | - | Lidarr server URL |
 | `LIDARR_API_KEY` | - | Lidarr API key for library refresh |
 | `SOURCE_YOUTUBE_ENABLED` | `true` | Enable YouTube search results |
-| `SOURCE_MP3PHOENIX_ENABLED` | `false` | Enable the Selenium-assisted MP3Phoenix source |
 | `SOURCE_SOUNDCLOUD_ENABLED` | `true` | Enable SoundCloud search results |
 | `SOURCE_ZVU4NO_ENABLED` | `true` | Enable zvu4no search results |
 | `SOURCE_FREEMP3CLOUD_ENABLED` | `true` | Enable FreeMp3Cloud search results |
@@ -535,7 +534,6 @@ Settings are stored in the database and persist across container restarts.
 | `SOURCE_HEALTH_CHECK_INTERVAL_MINUTES` | `10` | Minutes between scheduled source health probes |
 | `SOURCE_HEALTH_COOLDOWN_MINUTES` | `10` | Minimum time a failed source remains parked before it can be probed again |
 | `SEARCH_CONCURRENCY` | `1` | Maximum simultaneous searches admitted per provider, from 1 to 5. This does not increase download concurrency |
-| `MONOCHROME_HIFI_API_URL` | *(blank)* | Optional self-hosted hifi-api compatible endpoint(s) for Tidal metadata top-up. Comma or newline separated lists are tried in order. The public instances that used to ship as the default have been dead since Tidal revoked their OAuth client, so there is no honest public default any more; Monochrome works fine without this set |
 | `MONOCHROME_WEB_URL` | `https://monochrome.st` | Monochrome web client, read to discover where its tracks API currently lives. A retired domain's redirect is followed automatically |
 | `MONOCHROME_TRACKS_API_URL` | *(blank)* | Pin the Monochrome tracks API address and skip discovery. Only needed if Monochrome moves and discovery cannot follow; blank uses what the web client says, falling back to `https://tracks.monochrome.st` |
 | `SLSKD_URL` | - | slskd API URL (e.g., `http://slskd:5030`) |
@@ -572,17 +570,9 @@ Settings are stored in the database and persist across container restarts.
 | `DOWNLOAD_TOKEN_TTL_SECONDS` | `60` | Single-use browser download token lifetime |
 | `MAX_CONCURRENT_DOWNLOADS` | `3` | Internal bulk/watched download-worker limit. Kept out of the normal Settings UI to discourage accidental provider hammering |
 | `SEARCH_ALL_DEADLINE` | `30` | Maximum collection time for one multi-source search before slow sources are left behind. Per-provider admission is bounded by `SEARCH_CONCURRENCY`, so abandoned calls cannot stack without limit |
-| `MONOCHROME_HIFI_SEARCH_BUDGET` | `15` | Wall-clock budget shared by all hifi-api endpoints and query variants in one Monochrome search |
 | `TIMEOUT_YTDLP_DOWNLOAD` | `300` | Timeout in seconds for yt-dlp to download a single track. Increase for long mixes or slow connections |
 | `TIMEOUT_YTDLP_PREVIEW` | `30` | Timeout in seconds for resolving a preview URL. YouTube's player challenge is solved via Deno and can be slow when the answer is not cached |
 | `TIMEOUT_FFMPEG_CONVERT` | `120` | Timeout in seconds for ffmpeg format conversion. Increase if long tracks are producing broken files |
-| `TIMEOUT_MP3PHOENIX_SEARCH` | `30` | Maximum seconds for an MP3Phoenix search, including Selenium startup when the session is cold |
-| `TIMEOUT_MP3PHOENIX_DOWNLOAD` | `180` | Maximum seconds for an MP3Phoenix streamed MP3 download |
-| `TIMEOUT_MP3PHOENIX_PREVIEW` | `45` | Maximum seconds to fetch the opening chunk of an MP3Phoenix preview |
-| `MP3PHOENIX_PREVIEW_BYTES` | `1048576` | Bytes fetched for an MP3Phoenix preview; roughly 25 seconds at 320 kbps |
-| `MP3PHOENIX_SESSION_TTL` | `3600` | Maximum age in seconds of MP3Phoenix's Selenium-seeded HTTP session |
-| `MP3PHOENIX_BROWSER_FAILURE_COOLDOWN` | `600` | Seconds to park MP3Phoenix after three consecutive session failures |
-| `MP3PHOENIX_BLOCK_COOLDOWN` | `21600` | Seconds to park MP3Phoenix after Cloudflare serves its hard "you have been blocked" page, which no browser can get past |
 | `TIMEOUT_ZVU4NO_DOWNLOAD` | `120` | Timeout in seconds for zvu4no direct MP3 downloads |
 | `TIMEOUT_FREEMP3CLOUD_DOWNLOAD` | `120` | Timeout in seconds for FreeMp3Cloud direct MP3 downloads |
 | `TIMEOUT_MONOCHROME_DOWNLOAD` | `300` | Timeout in seconds for Monochrome FLAC downloads |
@@ -652,7 +642,7 @@ This is a refresh nudge, not a promise that Lidarr will suddenly become reasonab
 
 ### Monochrome Source (Optional)
 
-Monochrome is enabled by default. MusicGrabber searches Deezer (and a self-hosted Tidal hifi-api, if you have one) and uses the ISRC to pin down the exact recording. Downloads go through Monochrome's own tracks API, the same one its web player uses: a plain HTTP catalogue with no account, token or browser involved. MusicGrabber searches it by artist and title, keeps only the result carrying exactly the right ISRC, and downloads the FLAC directly. The same check runs at search time, so Monochrome only offers what it can actually deliver; if the tracks API cannot be reached, results are still shown but marked unverified. If Deezer comes back empty, the tracks API is searched directly instead. At download time, a miss gets an ISRC rescue through Deezer, and finally a lossless Tidal stream where the result carries a genuine Tidal track ID and you run your own hifi-api.
+Monochrome is enabled by default. MusicGrabber searches Deezer and uses the ISRC to pin down the exact recording. Downloads go through Monochrome's own tracks API, the same one its web player uses: a plain HTTP catalogue with no account, token or browser involved. MusicGrabber searches it by artist and title, keeps only the result carrying exactly the right ISRC, and downloads the FLAC directly. The same check runs at search time, so Monochrome only offers what it can actually deliver; if the tracks API cannot be reached, results are still shown but marked unverified. When Deezer comes back light, unconvincing or empty, the tracks API is searched directly to top it up. At download time, a miss gets an ISRC rescue through Deezer and a second try with the corrected ISRC.
 
 Monochrome downloads are 16-bit/44.1kHz FLAC. The tracks API ignores requests for anything higher, so 24-bit hi-res is not on offer from this source.
 
@@ -663,48 +653,9 @@ You can turn it off in Settings, Search Sources, or use:
 ```yaml
 environment:
   - SOURCE_MONOCHROME_ENABLED=false
-  - MONOCHROME_HIFI_API_URL=https://your-own-hifi-api-instance
 ```
 
-You can point the hifi-api URL at a self-hosted compatible service if you run one. Monochrome results without an ISRC are ignored, because the playback services cannot resolve them and pretending otherwise just wastes everyone's afternoon.
-
-### MP3Phoenix Source
-
-MP3Phoenix is disabled by default. Enable it in Settings under Search Sources,
-or set `SOURCE_MP3PHOENIX_ENABLED=true`. Cloudflare rejects ordinary HTTP
-clients, so MusicGrabber briefly opens SeleniumBase UC/CDP to obtain clearance,
-then hands the cookies and exact browser user-agent to `curl_cffi`, impersonating
-Chrome's network fingerprint. That HTTP session handles AJAX searches and
-streams MP3s into private staging. It is reused for up to one hour; a Cloudflare
-rejection forces an immediate browser refresh and one retry instead of waiting
-for the clock. The container includes `tini` as PID 1 so each short-lived Chrome
-bootstrap is properly reaped rather than returning later in zombie form.
-
-Only one MP3Phoenix operation runs at a time. Three consecutive browser,
-challenge, search, or media failures trip a ten-minute circuit breaker; normal
-automatic work then falls through to the next allowed source. Preview failures
-do not trip that shared breaker: a stale browser result or invented media token
-is allowed to fail its own audition without parking searches and downloads for
-everyone else.
-
-A hard Cloudflare block is a different animal from a challenge. If MP3Phoenix
-answers with "Sorry, you have been blocked", that is a firewall rule on your
-address or region, and no browser gets past it. MusicGrabber spots that page with
-one plain request before ever launching Chrome, parks the source for six hours
-(`MP3PHOENIX_BLOCK_COOLDOWN`), and says so in search results and source health
-rather than cheerfully calling it healthy. As of September 2026 it serves that
-page to every connection we have tried: two in the UK, plus VPN exits in Brazil
-and the US. If it does the same to you, leaving it switched off costs nothing.
-
-Preview works like every other source, but the route is different: Cloudflare
-will not serve an `<audio>` element directly, so the opening megabyte (roughly
-25 seconds at 320 kbps) comes down through the cleared session and is served
-back from MusicGrabber's own address under a short-lived token. Only that first
-chunk is fetched, never the whole file, and resolved previews are cached in the
-browser for two minutes so a second look at the same result costs nothing. It
-does still spend the guarded session, which is serialised with search and
-download, so `MP3PHOENIX_PREVIEW_BYTES` and `TIMEOUT_MP3PHOENIX_PREVIEW` are
-there if you want it leaner.
+Monochrome results without an ISRC are ignored, because the playback services cannot resolve them and pretending otherwise just wastes everyone's afternoon.
 
 ### Notifications (Optional)
 
@@ -837,7 +788,7 @@ Bulk Import also accepts **MusicBrainz release URLs**, which are handled differe
 - **Spotify large playlists (100+ tracks)**: Automatically falls back to headless browser scraping
 - **Tidal playlists**: Direct scrape of Tidal's embed player (`embed.tidal.com/playlists/UUID`), which server-renders the full track list. Downloads can use any enabled source
 - **Beatport playlists**: Top 100, genre charts, and editorial charts read straight from the page's server-rendered JSON. Folder names are derived from the URL (`/top-100` becomes "Beatport Top 100", `/genre/techno/6/top-100` becomes "Techno Top 100")
-- **Monochrome playlists**: Public `monochrome.tf/playlist/...` URLs are fetched via the same hifi-api fallback list as Monochrome search, so the playlist importer benefits from the endpoint rotation when one host wanders off
+- **Monochrome playlists**: Public `monochrome.tf/playlist/...` URLs carry a Tidal playlist UUID, so they are read through Tidal's embed player exactly like a Tidal link
 
 **MusicBrainz album URLs:**
 
@@ -1009,7 +960,7 @@ Notes:
 
 1. **Single tracks:** search for a song on the **Tracks** tab, tap/click the result to download. Searches all enabled sources in parallel
 2. **Preview:** on desktop, hover over a result for 2 seconds to hear a preview where the source supports it. Enable **Preview Button on Desktop** under Settings → General if you prefer an explicit button; that disables hover-start on that browser. Phones and tablets always use the button. Starting another preview cancels the request already in flight, and pressing a loading button again cancels it. Soulseek is the only source without previews
-3. **Minimum quality:** filter results to 192/256/320 kbps or lossless. Soulseek, Monochrome, MP3Phoenix, and FreeMp3Cloud declare a quality before download; YouTube and SoundCloud declare nothing, so they count as *undeclared* and are hidden as soon as you set a minimum. Tick "Keep undeclared" to keep them. Note that results are ordered by search relevance, not audio quality, so an undeclared YouTube result with an exact title match will otherwise outrank genuine lossless ones. The choice is remembered between searches
+3. **Minimum quality:** filter results to 192/256/320 kbps or lossless. Soulseek, Monochrome, and FreeMp3Cloud declare a quality before download; YouTube and SoundCloud declare nothing, so they count as *undeclared* and are hidden as soon as you set a minimum. Tick "Keep undeclared" to keep them. Note that results are ordered by search relevance, not audio quality, so an undeclared YouTube result with an exact title match will otherwise outrank genuine lossless ones. The choice is remembered between searches
 4. **Playlists:** paste a supported playlist URL in Bulk Import or Watched Playlists to fetch the track list, then queue downloads through your enabled sources
 5. **Processing feedback:** shows "Processing..." immediately when tapped, then "Added to queue"
 
@@ -1262,19 +1213,18 @@ music.yourdomain.com {
 | `GET` | `/api/sources` | List available search sources (for source selector UI) |
 | `GET` | `/api/sources/health` | Get current source health, including whether Monochrome's tracks API can serve a download |
 | `POST` | `/api/sources/health/recheck` | Start an admin-only background re-check of every source |
-| `POST` | `/api/search` | Search sources (`{"query": "...", "limit": 15, "source": "all/youtube/soundcloud/mp3phoenix/zvu4no/freemp3cloud/monochrome/soulseek"}`); results expose `relevance_score` for ordering and `quality_tier` for declared audio quality |
+| `POST` | `/api/search` | Search sources (`{"query": "...", "limit": 15, "source": "all/youtube/soundcloud/zvu4no/freemp3cloud/monochrome/soulseek"}`); results expose `relevance_score` for ordering and `quality_tier` for declared audio quality |
 | `POST` | `/api/search/stream` | Stream per-source status and ranked results as NDJSON, using the same `relevance_score`/`quality_tier` result contract |
 | `POST` | `/api/search/slskd` | Search Soulseek via slskd (if configured); results use the same ranking and quality fields |
 | `GET` | `/api/search/artwork` | Find display artwork for a search result (`?artist=...&title=...` or `?artist=...&album=...`); album lookups use Deezer `/search/album` as the fallback |
 | `GET` | `/api/preview/{video_id}` | Get a streamable audio URL. Monochrome accepts its complete `url` plus optional `artist` and `title` hints for lossless fallback resolution |
-| `GET` | `/api/preview-audio/{token}` | Serve an MP3Phoenix preview snippet fetched server-side by `/api/preview`, since Cloudflare will not serve an `<audio>` element directly and the element cannot carry the token any other way |
 | `POST` | `/api/explore/similar` | Get similar artists via MusicBrainz + ListenBrainz Labs (`{"artist": "...", "mode": "easy", "limit": 25}`) |
 
 ### Downloads
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/api/download` | Queue download (`{"video_id": "...", "title": "...", "source": "youtube/soundcloud/mp3phoenix/zvu4no/freemp3cloud/monochrome/soulseek", "download_type": "single/playlist"}`). The Tracks UI also returns its valid `search_token` and numeric `selected_duration_secs`; together they enable manual-result completeness checking |
+| `POST` | `/api/download` | Queue download (`{"video_id": "...", "title": "...", "source": "youtube/soundcloud/zvu4no/freemp3cloud/monochrome/soulseek", "download_type": "single/playlist"}`). The Tracks UI also returns its valid `search_token` and numeric `selected_duration_secs`; together they enable manual-result completeness checking |
 | `GET` | `/api/jobs` | List recent jobs, including metadata provenance plus persistent acquisition cycle/attempt summaries and the latest 20 attempt records for linked tracks. `q` searches artist, title, album or playlist name before applying `limit` (default 20). `?import_id=...` instead returns every job belonging to one bulk import, in input order and unlimited; it can be combined with `q`. Results respect user visibility. `queue_totals` counts all visible jobs by status regardless of the search or limit, and is `null` when scoped to an import |
 | `GET` | `/api/jobs/downloadable` | Paginated list of completed jobs available to save to device (`?page=1&per_page=50`) |
 | `GET` | `/api/jobs/{id}` | Get job status, metadata/source provenance, and persistent acquisition attempt history |

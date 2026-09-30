@@ -29,7 +29,6 @@ SOURCE_URL_HOSTS: dict[str, tuple[str, ...]] = {
     "youtube": ("youtube.com", "youtu.be", "youtube-nocookie.com"),
     # Search returns the track permalink; yt-dlp does the rest.
     "soundcloud": ("soundcloud.com", "snd.sc"),
-    "mp3phoenix": ("mp3phoenix.net",),
     # The site rebranded from zvu4no.org and serves audio off data.<host>.
     "zvu4no": ("zvu4it.org",),
     # Search runs on freemp3cloud.com, the actual MP3s come off meln.top.

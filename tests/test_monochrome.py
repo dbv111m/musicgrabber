@@ -24,7 +24,7 @@ def test_download_leg_health_is_the_tracks_api(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# Stream fallback chain: tracks API, Deezer ISRC rescue, Tidal stream
+# Stream ladder: tracks API, then a Deezer ISRC rescue
 # ---------------------------------------------------------------------------
 
 def test_preview_uses_the_tracks_api(monkeypatch):
@@ -68,22 +68,6 @@ def test_preview_rescues_isrc_with_artist_and_title(monkeypatch):
     )
     assert url == "https://tracks.test/track/2"
     assert tracks_calls == ["GBOLD2500001", "GBNEW2500001"]
-
-
-def test_preview_uses_tidal_lossless_as_final_leg(monkeypatch):
-    import monochrome
-    monkeypatch.setattr("monochrome_tracks.resolve_stream_url", lambda *a: None)
-    monkeypatch.setattr(monochrome, "_deezer_isrc_rescue", lambda *a: "")
-    tidal_calls = []
-    monkeypatch.setattr(
-        monochrome, "_tidal_stream_url",
-        lambda tidal_id, quality: tidal_calls.append((tidal_id, quality)) or "https://tidal.test/lossless.flac",
-    )
-    url = monochrome.get_monochrome_preview_url(
-        "monochrome://18420572?isrc=GBZZZ9900001&quality=HI_RES_LOSSLESS&src=tidal"
-    )
-    assert url == "https://tidal.test/lossless.flac"
-    assert tidal_calls == [("18420572", "LOSSLESS")]
 
 
 def test_download_fails_cleanly_when_the_tracks_api_has_nothing(monkeypatch, tmp_path):
@@ -140,222 +124,7 @@ def test_source_registry_has_monochrome_default_enabled_true():
 
 
 # ---------------------------------------------------------------------------
-# Legacy search tests (unchanged)
-# ---------------------------------------------------------------------------
-
-def test_monochrome_search_retries_with_punctuation_normalised(monkeypatch):
-    import monochrome
-
-    calls = []
-
-    class FakeResponse:
-        def __init__(self, items):
-            self._items = items
-
-        def raise_for_status(self):
-            pass
-
-        def json(self):
-            return {"data": {"items": self._items}}
-
-    def fake_get(url, params, headers, timeout, follow_redirects=False):
-        calls.append(params["s"])
-        if params["s"] == "Artist1 Artist2 trackName":
-            return FakeResponse([
-                {
-                    "id": "123",
-                    "title": "trackName",
-                    "artist": {"name": "Artist1"},
-                    "duration": 180,
-                    "isrc": "GBABC1234567",
-                    "mediaMetadata": {"tags": ["LOSSLESS"]},
-                    "album": {"title": "Album", "cover": ""},
-                }
-            ])
-        return FakeResponse([])
-
-    monkeypatch.setattr(monochrome, "_hifi_api_url", lambda: "https://api.example.test")
-    monkeypatch.setattr(monochrome.httpx, "get", fake_get)
-
-    results = monochrome.search_monochrome("Artist1, Artist2 - trackName", limit=5)
-
-    assert calls == ["Artist1, Artist2 - trackName", "Artist1 Artist2 trackName"]
-    assert results
-    assert results[0]["source"] == "monochrome"
-
-
-def test_monochrome_search_searches_normalised_variant_even_when_exact_query_returns_items(monkeypatch):
-    import monochrome
-
-    calls = []
-
-    class FakeResponse:
-        def __init__(self, items):
-            self._items = items
-
-        def raise_for_status(self):
-            pass
-
-        def json(self):
-            return {"data": {"items": self._items}}
-
-    def fake_get(url, params, headers, timeout, follow_redirects=False):
-        calls.append(params["s"])
-        if params["s"] == "Artist Featured Track":
-            return FakeResponse([
-                {
-                    "id": "456",
-                    "title": "Track",
-                    "artist": {"name": "Artist"},
-                    "duration": 219,
-                    "isrc": "USGF19942501",
-                    "mediaMetadata": {"tags": ["HIRES_LOSSLESS"]},
-                    "album": {"title": "Album", "cover": ""},
-                }
-            ])
-        return FakeResponse([
-            {
-                "id": "999",
-                "title": "Irrelevant Raw Hit",
-                "artist": {"name": "Other"},
-                "duration": 180,
-                "isrc": "USGF19949999",
-                "mediaMetadata": {"tags": ["LOSSLESS"]},
-                "album": {"title": "Other Album", "cover": ""},
-            }
-        ])
-
-    monkeypatch.setattr(monochrome, "_hifi_api_url", lambda: "https://api.example.test")
-    monkeypatch.setattr(monochrome.httpx, "get", fake_get)
-
-    results = monochrome.search_monochrome("Artist, Featured - Track", limit=5)
-
-    assert calls == ["Artist, Featured - Track", "Artist Featured Track"]
-    assert results
-    assert results[0]["title"] == "Track"
-
-
-def test_monochrome_search_continues_to_normalised_variant_after_exact_query_error(monkeypatch):
-    import monochrome
-
-    calls = []
-
-    class FakeResponse:
-        def __init__(self, items):
-            self._items = items
-
-        def raise_for_status(self):
-            pass
-
-        def json(self):
-            return {"data": {"items": self._items}}
-
-    class BrokenResponse:
-        def raise_for_status(self):
-            raise RuntimeError("503 Service Unavailable")
-
-    def fake_get(url, params, headers, timeout, follow_redirects=False):
-        calls.append(params["s"])
-        if params["s"] == "ILLENIUM Emma Grace Brave Soul":
-            return FakeResponse([
-                {
-                    "id": "mono-1",
-                    "title": "Brave Soul",
-                    "artist": {"name": "ILLENIUM & Emma Grace"},
-                    "duration": 217,
-                    "isrc": "USAT22100001",
-                    "mediaMetadata": {"tags": ["LOSSLESS"]},
-                    "album": {"title": "Fallen Embers", "cover": ""},
-                }
-            ])
-        return BrokenResponse()
-
-    monkeypatch.setattr(monochrome, "_hifi_api_url", lambda: "https://api.example.test")
-    monkeypatch.setattr(monochrome.httpx, "get", fake_get)
-
-    results = monochrome.search_monochrome("ILLENIUM, Emma Grace - Brave Soul", limit=5)
-
-    assert calls == ["ILLENIUM, Emma Grace - Brave Soul", "ILLENIUM Emma Grace Brave Soul"]
-    assert results
-    assert results[0]["source"] == "monochrome"
-    assert results[0]["title"] == "Brave Soul"
-
-
-def test_monochrome_search_falls_back_to_next_hifi_api_endpoint(monkeypatch):
-    import monochrome
-
-    calls = []
-    monochrome._hifi_api_url_cache = None
-
-    class FakeResponse:
-        def __init__(self, items):
-            self._items = items
-
-        def raise_for_status(self):
-            pass
-
-        def json(self):
-            return {"data": {"items": self._items}}
-
-    class BrokenResponse:
-        def raise_for_status(self):
-            raise RuntimeError("503 Service Unavailable")
-
-    def fake_get(url, params, headers, timeout, follow_redirects=False):
-        calls.append((url, params["s"]))
-        if url.startswith("https://dead.example.test"):
-            return BrokenResponse()
-        return FakeResponse([
-            {
-                "id": "mono-2",
-                "title": "Brave Soul",
-                "artist": {"name": "ILLENIUM & Emma Grace"},
-                "duration": 277,
-                "isrc": "ZZOPM2106210",
-                "mediaMetadata": {"tags": ["LOSSLESS"]},
-                "album": {"title": "Fallen Embers", "cover": ""},
-            }
-        ])
-
-    monkeypatch.setattr(
-        monochrome,
-        "_hifi_api_url",
-        lambda: "https://dead.example.test,https://working.example.test",
-    )
-    monkeypatch.setattr(monochrome.httpx, "get", fake_get)
-
-    results = monochrome.search_monochrome("ILLENIUM, Emma Grace - Brave Soul", limit=5)
-
-    assert calls[0][0] == "https://dead.example.test/search"
-    assert any(url == "https://working.example.test/search" for url, _query in calls)
-    assert results
-    assert results[0]["source"] == "monochrome"
-    assert monochrome._hifi_api_url_cache == "https://working.example.test"
-
-
-def test_hifi_search_leg_stops_at_its_wall_clock_budget(monkeypatch):
-    import monochrome
-    clock = {"now": 100.0}
-    calls = []
-
-    monkeypatch.setattr(monochrome, "MONOCHROME_HIFI_SEARCH_BUDGET", 5.0)
-    monkeypatch.setattr(monochrome, "_hifi_api_urls", lambda: ["https://one.test", "https://two.test"])
-    monkeypatch.setattr(monochrome, "_monochrome_search_queries", lambda query: [query, f"{query} alt"])
-    monkeypatch.setattr(monochrome.time, "monotonic", lambda: clock["now"])
-
-    def slow_failure(url, params, headers, timeout, follow_redirects):
-        calls.append((url, timeout))
-        clock["now"] += timeout
-        raise httpx.ReadTimeout("timed out")
-
-    monkeypatch.setattr(monochrome.httpx, "get", slow_failure)
-
-    assert monochrome._hifi_search_leg("Artist - Track", 5) == []
-    assert calls == [("https://one.test/search", 5.0)]
-
-
-# ---------------------------------------------------------------------------
-# Tracks API search fallback (when Deezer and the hifi-api are both empty)
+# Tracks API search leg (tops up a light Deezer page, or stands in for Deezer)
 # ---------------------------------------------------------------------------
 
 def _make_tracks_item(track_id="155142501534011392", isrc="USQX91300108",
@@ -375,11 +144,11 @@ def _make_tracks_item(track_id="155142501534011392", isrc="USQX91300108",
     }
 
 
-def test_tracks_search_fallback_maps_items(monkeypatch):
+def test_tracks_search_leg_maps_items(monkeypatch):
     import monochrome
     monkeypatch.setattr("monochrome_tracks.search_tracks", lambda q, limit: [_make_tracks_item()])
 
-    results = monochrome._tracks_search_fallback("daft punk get lucky", 5)
+    results = monochrome._tracks_search_leg("daft punk get lucky", 5)
 
     assert len(results) == 1
     r = results[0]
@@ -395,7 +164,7 @@ def test_tracks_search_fallback_maps_items(monkeypatch):
     assert any("tracks-api" in b for b in r["score_breakdown"])
 
 
-def test_tracks_search_fallback_skips_junk_and_unplayable(monkeypatch):
+def test_tracks_search_leg_skips_junk_and_unplayable(monkeypatch):
     import monochrome
     items = [
         _make_tracks_item(track_id="1", isrc="", title="No ISRC"),
@@ -405,12 +174,12 @@ def test_tracks_search_fallback_skips_junk_and_unplayable(monkeypatch):
     ]
     monkeypatch.setattr("monochrome_tracks.search_tracks", lambda q, limit: items)
 
-    results = monochrome._tracks_search_fallback("x", 5)
+    results = monochrome._tracks_search_leg("x", 5)
 
     assert [r["title"] for r in results] == ["Good"]
 
 
-def test_tracks_search_fallback_dedupes_by_isrc(monkeypatch):
+def test_tracks_search_leg_dedupes_by_isrc(monkeypatch):
     import monochrome
     items = [
         _make_tracks_item(track_id="10", title="Get Lucky"),
@@ -418,22 +187,21 @@ def test_tracks_search_fallback_dedupes_by_isrc(monkeypatch):
     ]
     monkeypatch.setattr("monochrome_tracks.search_tracks", lambda q, limit: items)
 
-    assert len(monochrome._tracks_search_fallback("x", 5)) == 1
+    assert len(monochrome._tracks_search_leg("x", 5)) == 1
 
 
-def test_tracks_search_fallback_shrugs_off_an_outage(monkeypatch):
+def test_tracks_search_leg_shrugs_off_an_outage(monkeypatch):
     import monochrome
     monkeypatch.setattr(
         "monochrome_tracks.search_tracks",
         lambda *a: (_ for _ in ()).throw(httpx.ConnectError("down")),
     )
-    assert monochrome._tracks_search_fallback("x", 5) == []
+    assert monochrome._tracks_search_leg("x", 5) == []
 
 
-def test_search_monochrome_falls_back_to_tracks_api_when_deezer_and_hifi_are_empty(monkeypatch):
+def test_search_monochrome_uses_the_tracks_api_when_deezer_is_empty(monkeypatch):
     import monochrome
     monkeypatch.setattr(monochrome, "_deezer_search_leg", lambda q, limit: [])
-    monkeypatch.setattr(monochrome, "_hifi_search_leg", lambda q, limit: [])
     monkeypatch.setattr("monochrome_tracks.search_tracks", lambda q, limit: [_make_tracks_item()])
 
     results = monochrome.search_monochrome("daft punk get lucky", 5)
@@ -444,7 +212,7 @@ def test_search_monochrome_falls_back_to_tracks_api_when_deezer_and_hifi_are_emp
 
 
 # ---------------------------------------------------------------------------
-# Deezer ISRC leg (v2.9.4): search, rescue, and the Tidal stream fallback
+# Deezer ISRC leg (v2.9.4): search and rescue
 # ---------------------------------------------------------------------------
 
 def _make_deezer_item(track_id=62847142, isrc="GB28K1100036", title="Titanium (feat. Sia)",
@@ -471,28 +239,6 @@ def test_isrc_valid():
     assert not monochrome._isrc_valid("QTJC2622262")  # eleven characters
     assert not monochrome._isrc_valid("")
     assert not monochrome._isrc_valid("GB28K110003X") # designation must be digits
-
-
-def test_parse_tidal_track_payload_shapes():
-    import base64
-    import json as jsonlib
-    import monochrome
-
-    assert monochrome._parse_tidal_track_payload(
-        {"data": {"OriginalTrackUrl": "http://cdn.test/a.flac"}}
-    ) == "http://cdn.test/a.flac"
-    assert monochrome._parse_tidal_track_payload(
-        {"data": {"urls": ["http://cdn.test/b.flac"]}}
-    ) == "http://cdn.test/b.flac"
-    bts = base64.b64encode(jsonlib.dumps({"urls": ["http://cdn.test/c.flac"]}).encode()).decode()
-    assert monochrome._parse_tidal_track_payload(
-        {"data": {"manifest": bts, "manifestMimeType": "application/vnd.tidal.bts"}}
-    ) == "http://cdn.test/c.flac"
-    # DASH means Widevine means no; and error payloads yield nothing.
-    assert monochrome._parse_tidal_track_payload(
-        {"data": {"manifest": bts, "manifestMimeType": "application/dash+xml"}}
-    ) == ""
-    assert monochrome._parse_tidal_track_payload({"detail": "Upstream API error"}) == ""
 
 
 def test_deezer_search_leg_verifies_against_the_tracks_api(monkeypatch):
@@ -585,7 +331,7 @@ def test_deezer_isrc_rescue_no_hints_no_network(monkeypatch):
     assert monochrome._deezer_isrc_rescue("", "", "QT&JC2622262") == ""
 
 
-def test_search_monochrome_skips_hifi_when_deezer_delivers(monkeypatch):
+def test_search_monochrome_skips_the_tracks_leg_when_deezer_delivers(monkeypatch):
     import monochrome
     fake_results = [
         {"relevance_score": 100 - i, "source_url": f"monochrome://x{i}?isrc=GBABC123456{i}&src=deezer"}
@@ -594,22 +340,22 @@ def test_search_monochrome_skips_hifi_when_deezer_delivers(monkeypatch):
     monkeypatch.setattr(monochrome, "_deezer_search_leg", lambda q, limit: fake_results)
 
     def boom(*a, **k):
-        raise AssertionError("hifi leg should not run when Deezer fills the limit")
-    monkeypatch.setattr(monochrome, "_hifi_search_leg", boom)
+        raise AssertionError("tracks leg should not run when Deezer fills the limit")
+    monkeypatch.setattr(monochrome, "_tracks_search_leg", boom)
 
     results = monochrome.search_monochrome("query", 5)
     assert len(results) == 5
 
 
-def test_search_monochrome_tops_up_from_hifi_and_dedupes(monkeypatch):
+def test_search_monochrome_tops_up_from_the_tracks_api_and_dedupes(monkeypatch):
     import monochrome
     deezer = [{"relevance_score": 90, "source_url": "monochrome://1?isrc=GB28K1100036&src=deezer"}]
-    hifi = [
-        {"relevance_score": 80, "source_url": "monochrome://2?isrc=GB28K1100036&src=tidal"},  # dupe
-        {"relevance_score": 70, "source_url": "monochrome://3?isrc=USUM71703861&src=tidal"},
+    tracks = [
+        {"relevance_score": 80, "source_url": "monochrome://2?isrc=GB28K1100036&src=tracks"},  # dupe
+        {"relevance_score": 70, "source_url": "monochrome://3?isrc=USUM71703861&src=tracks"},
     ]
     monkeypatch.setattr(monochrome, "_deezer_search_leg", lambda q, limit: deezer)
-    monkeypatch.setattr(monochrome, "_hifi_search_leg", lambda q, limit: hifi)
+    monkeypatch.setattr(monochrome, "_tracks_search_leg", lambda q, limit: tracks)
 
     results = monochrome.search_monochrome("query", 5)
 
@@ -659,37 +405,24 @@ def test_download_rescues_malformed_isrc_via_deezer(monkeypatch, tmp_path):
     assert stream_calls == ["GB28K1100036"]
     assert output.exists() and output.stat().st_size > 0
 
-def test_download_falls_back_to_tidal_stream_for_tidal_results(monkeypatch, tmp_path):
+def test_jobs_from_older_releases_still_resolve_by_isrc(monkeypatch, tmp_path):
+    """A queued job from a Tidal- or qbdlx-era search still downloads: only the ISRC matters."""
     import monochrome
-    monkeypatch.setattr("monochrome_tracks.resolve_stream_url", lambda *a: None)
-    monkeypatch.setattr(monochrome, "_deezer_isrc_rescue", lambda *a: "")
-    tidal_calls = []
+    asked = []
     monkeypatch.setattr(
-        monochrome, "_tidal_stream_url",
-        lambda tidal_id, quality: tidal_calls.append((tidal_id, quality)) or "https://tidal.test/track.flac",
+        "monochrome_tracks.resolve_stream_url",
+        lambda isrc, artist, title: asked.append(isrc) or "https://tracks.test/track/9",
     )
     monkeypatch.setattr(monochrome.httpx, "stream", lambda *a, **k: _FakeStreamResponse())
-    output = tmp_path / "track.flac"
-    monochrome.download_monochrome_track(
-        "monochrome://18420572?isrc=GBZZZ9900001&quality=LOSSLESS&src=tidal", output,
-    )
-    assert tidal_calls == [("18420572", "LOSSLESS")]
-    assert output.exists()
-
-def test_download_never_uses_tidal_stream_for_non_tidal_results(monkeypatch, tmp_path):
-    import monochrome
-    monkeypatch.setattr("monochrome_tracks.resolve_stream_url", lambda *a: None)
-    monkeypatch.setattr(monochrome, "_deezer_isrc_rescue", lambda *a: "")
-    monkeypatch.setattr(
-        monochrome, "_tidal_stream_url",
-        lambda *a: (_ for _ in ()).throw(AssertionError("Tidal must not run for non-Tidal results")),
-    )
-    output = tmp_path / "track.flac"
-    with pytest.raises(RuntimeError, match="no stream available"):
+    for n, src in enumerate(("tidal", "qbdlx")):
+        output = tmp_path / f"track-{n}.flac"
         monochrome.download_monochrome_track(
-            "monochrome://8767428?isrc=GBZZZ9900001&quality=LOSSLESS&src=tracks", output,
+            f"monochrome://18420572?isrc=GBZZZ9900001&quality=HI_RES_LOSSLESS&src={src}", output,
+            artist_hint="Artist", title_hint="Track",
         )
-    assert not output.exists()
+        assert output.exists()
+    assert asked == ["GBZZZ9900001", "GBZZZ9900001"]
+
 
 def test_monochrome_playlist_urls_detect_as_monochrome():
     from watched_playlists import detect_playlist_platform

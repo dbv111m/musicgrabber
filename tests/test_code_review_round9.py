@@ -34,7 +34,8 @@ class TestSourceUrlValidation:
         # The classic allowlist bypass: a lookalike registrable domain.
         ("soundcloud", "https://soundcloud.com.evil.tld/track"),
         ("soundcloud", "file:///etc/passwd"),
-        ("mp3phoenix", "https://mp3phoenix.net.evil.tld/getmp3/1"),
+        # Retired in v4.3.0: even its genuine URLs are no longer fetched.
+        ("mp3phoenix", "https://mp3phoenix.net/getmp3/123"),
         ("zvu4no", "https://data.zvu4no.org/download-track/x.mp3"),
         ("freemp3cloud", "http://nas.local/admin"),
         ("monochrome", "http://127.0.0.1/x"),
@@ -49,7 +50,6 @@ class TestSourceUrlValidation:
     @pytest.mark.parametrize("source,url", [
         ("soundcloud", "https://soundcloud.com/artist/track"),
         ("soundcloud", "https://m.soundcloud.com/artist/track"),
-        ("mp3phoenix", "https://mp3phoenix.net/getmp3/123"),
         ("zvu4no", "https://data.zvu4it.org/download-track/x.mp3"),
         ("freemp3cloud", "https://cdn5.meln.top/x.mp3"),
         ("monochrome", "monochrome://12345?isrc=GBAYE9200070"),
@@ -76,7 +76,7 @@ class TestSourceUrlValidation:
         body = (Path(__file__).resolve().parent.parent / "downloads.py").read_text(encoding="utf-8")
         guard = body[body.index("if is_url_source and not ("):]
         guard = guard[:guard.index("):")]
-        for flag in ("is_soundcloud", "is_mp3phoenix", "is_zvu4no",
+        for flag in ("is_soundcloud", "is_zvu4no",
                      "is_freemp3cloud", "is_monochrome", "is_youtube_url"):
             assert flag in guard, f"{flag} missing from the refusal guard"
 

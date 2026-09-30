@@ -33,6 +33,8 @@ from contextlib import contextmanager
 import pytest
 import requests
 
+from live_media import next_short_clip
+
 
 pytestmark = pytest.mark.slow
 
@@ -48,10 +50,9 @@ _SPOTIFY_PLAYLIST_URL = os.environ.get(
 _ALBUM_ARTIST = os.environ.get("MG_QA_ALBUM_ARTIST", "Nirvana")
 _ALBUM_TITLE  = os.environ.get("MG_QA_ALBUM_TITLE", "Hormoaning")
 
-# Single under test. Reliable, copyright-free, short track.
-_SINGLE_VIDEO_ID = "jNQXAC9IVRw"  # "Me at the zoo", 18 seconds
-_SINGLE_ARTIST   = "jawed"
-_SINGLE_TITLE    = "Me at the zoo"
+# Single under test: one short clip, kept for the whole test, because Phase B
+# queues the same one again to prove the dupe check catches it.
+_SINGLE_VIDEO_ID, _SINGLE_ARTIST, _SINGLE_TITLE = next_short_clip()
 
 _TERMINAL = ("completed", "failed", "completed_with_errors")
 

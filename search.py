@@ -26,7 +26,6 @@ from constants import (
     SOUNDCLOUD_SEARCH_MULTIPLIER, SOUNDCLOUD_SEARCH_MIN_FETCH,
     SEARCH_MAX_PER_SOURCE,
     SEARCH_MAX_PER_SOURCE_YOUTUBE,
-    SEARCH_MAX_PER_SOURCE_MP3PHOENIX,
     SEARCH_MAX_PER_SOURCE_SOUNDCLOUD, SEARCH_MAX_PER_SOURCE_ZVU4NO,
     SEARCH_MAX_PER_SOURCE_FREEMP3CLOUD,
     SEARCH_MAX_PER_SOURCE_SOULSEEK, SEARCH_MAX_PER_SOURCE_MONOCHROME,
@@ -37,7 +36,6 @@ from db import get_blacklisted_video_ids, get_blacklisted_uploaders
 from metadata import fetch_mb_expected_duration, search_artist_mbid, lookup_musicbrainz
 from settings import get_setting_bool, get_setting_int
 from monochrome import search_monochrome, monochrome_enabled
-from mp3phoenix import search_mp3phoenix
 from slskd import slskd_enabled, search_slskd
 from zvu4no import search_zvu4no
 from freemp3cloud import search_freemp3cloud
@@ -189,18 +187,6 @@ SOURCE_REGISTRY = {
         "search_fn": search_youtube,
         "has_preview": True,
     },
-    "mp3phoenix": {
-        "label": "MP3Phoenix",
-        "badge": "PX",
-        "colour": "#e05c00",
-        "search_fn": search_mp3phoenix,
-        # Preview streams through the cleared session and back out of our own
-        # address, since Cloudflare will not serve the browser directly.
-        "has_preview": True,
-        # Off by default, like Soulseek: it briefly launches Chrome for Cloudflare
-        # clearance, which is not something to spring on an install that never asked.
-        "default_enabled": False,
-    },
     "soundcloud": {
         "label": "SoundCloud",
         "badge": "SC",
@@ -242,7 +228,6 @@ SOURCE_REGISTRY = {
 
 SEARCH_MAX_PER_SOURCE_BY_SOURCE = {
     "youtube": SEARCH_MAX_PER_SOURCE_YOUTUBE,
-    "mp3phoenix": SEARCH_MAX_PER_SOURCE_MP3PHOENIX,
     "soundcloud": SEARCH_MAX_PER_SOURCE_SOUNDCLOUD,
     "zvu4no": SEARCH_MAX_PER_SOURCE_ZVU4NO,
     "freemp3cloud": SEARCH_MAX_PER_SOURCE_FREEMP3CLOUD,
@@ -381,9 +366,8 @@ def _mb_album_lookup(query: str) -> dict | None:
 # which is a shorter list than you might hope:
 #
 #   Soulseek     "FLAC", "FLAC 24bit/96kHz", "MP3 320", "AAC 256", "WAV", ...
-#   MP3Phoenix   "320kbps"
 #   FreeMp3Cloud "320kbps" or "128kbps"
-#   Monochrome   "HI_RES_LOSSLESS", "LOSSLESS", "HIGH"  (tiers, not kbps)
+#   Monochrome   "LOSSLESS"                             (a tier, not kbps)
 #   zvu4no       "MP3"                                  (format only, no bitrate)
 #   YouTube      nothing at all
 #   SoundCloud   nothing at all

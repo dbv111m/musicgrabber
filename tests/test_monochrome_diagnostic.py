@@ -36,7 +36,6 @@ def happy_monochrome(monkeypatch, tmp_path):
     monkeypatch.setattr(
         "monochrome_tracks.health", lambda: (True, "Monochrome tracks API answering at https://tracks.example")
     )
-    monkeypatch.setattr(monochrome, "_hifi_api_urls", lambda: ["https://hifi.example"])
 
     class FakeResponse:
         def raise_for_status(self):
@@ -172,14 +171,6 @@ def test_diagnostic_warns_when_monochrome_is_switched_off(happy_monochrome, monk
     assert _statuses(report)["Monochrome source"] == "warn"
 
 
-def test_unconfigured_hifi_api_is_skipped_not_warned(happy_monochrome, monkeypatch):
-    """It is optional, self-hosted only; its absence is not a problem to report."""
-    monkeypatch.setattr(happy_monochrome, "_hifi_api_urls", lambda: [])
-    report = happy_monochrome.run_download_diagnostic()
-    assert report["success"] is True
-    assert _statuses(report)["hifi-api reachable"] == "skip"
-
-
 def test_diagnostic_fails_cleanly_when_search_finds_nothing(happy_monochrome, monkeypatch):
     monkeypatch.setattr(happy_monochrome, "search_monochrome", lambda q, limit: [])
     report = happy_monochrome.run_download_diagnostic()
@@ -210,17 +201,19 @@ def test_resolver_records_each_leg_it_tries(monkeypatch):
         "monochrome_tracks.resolve_stream_url",
         lambda *a: (_ for _ in ()).throw(RuntimeError("tracks API not reachable")),
     )
-    monkeypatch.setattr(monochrome, "_deezer_isrc_rescue", lambda *a: "")
-    monkeypatch.setattr(monochrome, "_tidal_stream_url", lambda tidal_id, tier: "https://cdn.example/x.flac")
+    monkeypatch.setattr(monochrome, "_deezer_isrc_rescue", lambda *a: "GBNEW2500001")
 
     trace = []
-    url = monochrome._resolve_monochrome_stream_url(
-        TEST_RESULT["source_url"], artist_hint="Radiohead", title_hint="Creep", trace=trace,
-    )
-    assert url == "https://cdn.example/x.flac"
-    legs = {entry["leg"]: entry["ok"] for entry in trace}
-    assert legs["Monochrome tracks API"] is False
-    assert legs["Tidal stream via hifi-api"] is True
+    with pytest.raises(RuntimeError, match="no stream available"):
+        monochrome._resolve_monochrome_stream_url(
+            TEST_RESULT["source_url"], artist_hint="Radiohead", title_hint="Creep", trace=trace,
+        )
+    legs = [(entry["leg"], entry["ok"]) for entry in trace]
+    assert legs == [
+        ("Monochrome tracks API", False),
+        ("Deezer ISRC rescue", True),
+        ("Monochrome tracks API", False),
+    ]
 
 
 def test_resolver_trace_is_optional():

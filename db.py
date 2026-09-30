@@ -26,8 +26,11 @@ from constants import (
     LIBRARY_RECONCILE_INTERVAL,
     SEARCH_LOG_RETENTION_DAYS,
     WATCHED_REFRESH_STALE_SECONDS,
-    MONOCHROME_HIFI_API_URL,
 )
+
+# The hifi-api setting was retired in v4.3.0 (migration v20). Its old default
+# was blank; the historical migrations below still reference it by name.
+MONOCHROME_HIFI_API_URL = ""
 
 
 def _is_lock_error(exc: sqlite3.Error) -> bool:
@@ -1681,6 +1684,18 @@ def init_db():
                 "INSERT OR REPLACE INTO settings (key, value) VALUES ('db_version', '19')"
             )
             print("DB migrated to version 19: retired qbdlx fallback setting removed")
+
+        # v20: nobody has a public hifi-api to point at since Tidal revoked their
+        # OAuth client, and the tracks API does everything it did, so the setting
+        # goes, along with MP3Phoenix's source toggle (retired in the same release).
+        if db_version < 20:
+            for key in ("monochrome_hifi_api_url", "source_mp3phoenix_enabled"):
+                conn.execute("DELETE FROM settings WHERE key = ?", (key,))
+                conn.execute("DELETE FROM user_settings WHERE key = ?", (key,))
+            conn.execute(
+                "INSERT OR REPLACE INTO settings (key, value) VALUES ('db_version', '20')"
+            )
+            print("DB migrated to version 20: retired hifi-api and MP3Phoenix settings removed")
 
         # Defensive backstop: early dev builds of v1 silently dropped custom_subdir
         # when recreating watched_playlists. Re-add it for any DB that already

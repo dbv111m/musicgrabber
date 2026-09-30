@@ -151,7 +151,7 @@ from longform_split import (
     detect_longform_candidate, validate_segments, create_longform_split, cancel_longform_split,
 )
 
-URL_BASED_SOURCES = {"soundcloud", "mp3phoenix", "zvu4no", "freemp3cloud", "monochrome"}
+URL_BASED_SOURCES = {"soundcloud", "zvu4no", "freemp3cloud", "monochrome"}
 DIRECT_PREVIEW_SOURCES = {"zvu4no", "freemp3cloud"}
 MONOCHROME_PREVIEW_SOURCES = {"monochrome"}
 
@@ -1964,25 +1964,6 @@ def get_preview_url(http_request: Request, video_id: str, source: str = "youtube
             )
             return {"url": cdn_url, "video_id": video_id}
 
-        if source == "mp3phoenix":
-            if not url:
-                raise HTTPException(status_code=400, detail="MP3Phoenix preview requires url parameter")
-            try:
-                validate_source_url(source, url)
-            except ValueError as e:
-                raise HTTPException(status_code=400, detail=str(e))
-            # Cloudflare will not serve an <audio> element directly, so the opening
-            # seconds come down through the cleared session and go back out from
-            # here. MP3 does not mind being cut off mid-flow, so no ffmpeg needed.
-            from mp3phoenix import fetch_mp3phoenix_preview, is_mp3phoenix_url
-            if not is_mp3phoenix_url(url):
-                raise HTTPException(status_code=400, detail="Invalid MP3Phoenix download URL")
-            from preview_snippets import store_snippet
-            token = store_snippet(
-                fetch_mp3phoenix_preview(url), getattr(http_request.state, "user", None)
-            )
-            return {"url": f"/api/preview-audio/{token}", "video_id": video_id}
-
         if source == "youtube":
             if not is_valid_youtube_id(video_id):
                 raise HTTPException(status_code=400, detail="Invalid YouTube video ID")
@@ -2039,20 +2020,6 @@ def get_preview_url(http_request: Request, video_id: str, source: str = "youtube
     except Exception as e:
         print(f"preview error: {e}")
         raise HTTPException(status_code=500, detail="Failed to get preview URL")
-
-
-@app.get("/api/preview-audio/{token}")
-def get_preview_audio(token: str):
-    """Serve a decrypted preview snippet prepared by /api/preview.
-
-    Authenticated by the token itself, resolved back to its owner in the auth
-    middleware, because an <audio> element cannot carry a Bearer header.
-    """
-    from preview_snippets import snippet_path
-    path = snippet_path(token)
-    if not path or not path.exists():
-        raise HTTPException(status_code=404, detail="Preview snippet has expired")
-    return FileResponse(path=str(path), media_type="audio/mpeg")
 
 
 @app.get("/api/sources")
@@ -2344,6 +2311,12 @@ def download(body: DownloadRequest, http_request: Request):
         source = body.source or "youtube"
         if source == "soulseek" and not (body.slskd_username and body.slskd_filename):
             source = "youtube"  # Fallback if slskd fields missing
+
+        # A retired source (MP3Phoenix, most recently) can still turn up from a
+        # browser tab opened before the upgrade. Without this it fell through to
+        # the YouTube path and failed with a baffling "truncated YouTube ID".
+        if source not in SOURCE_REGISTRY:
+            raise HTTPException(status_code=400, detail=f"Unknown source: {source}")
 
         # Validate based on source
         if source == "youtube":

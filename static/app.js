@@ -1351,7 +1351,7 @@
                     // Build preview URL with source params
                     const previewSource = (result && result.source) || 'youtube';
                     const params = new URLSearchParams({ source: previewSource });
-                    if ((previewSource === 'soundcloud' || previewSource === 'zvu4no' || previewSource === 'freemp3cloud' || previewSource === 'monochrome' || previewSource === 'mp3phoenix') && result.source_url) {
+                    if ((previewSource === 'soundcloud' || previewSource === 'zvu4no' || previewSource === 'freemp3cloud' || previewSource === 'monochrome') && result.source_url) {
                         params.set('url', result.source_url);
                     }
                     if (previewSource === 'monochrome' && result) {
@@ -1633,7 +1633,6 @@
             monochrome: 'MonoC',
             youtube: 'YT',
             soundcloud: 'SC',
-            mp3phoenix: 'Phoenix',
             zvu4no: 'zvu4no',
             freemp3cloud: 'MP3C',
             soulseek: 'SLSK',
@@ -2933,7 +2932,7 @@
                     source: top.source || 'youtube'
                 };
                 if (top.artist || top.channel) payload.artist = top.artist || top.channel;
-                if ((top.source === 'soundcloud' || top.source === 'mp3phoenix' || top.source === 'zvu4no' || top.source === 'freemp3cloud' || top.source === 'monochrome') && top.source_url) {
+                if ((top.source === 'soundcloud' || top.source === 'zvu4no' || top.source === 'freemp3cloud' || top.source === 'monochrome') && top.source_url) {
                     payload.source_url = top.source_url;
                 }
                 if (top.source === 'soulseek') {
@@ -3705,7 +3704,7 @@
                 }
 
                 // URL-based sources need the full URL for downloading
-                if ((result.source === 'soundcloud' || result.source === 'mp3phoenix' || result.source === 'zvu4no' || result.source === 'freemp3cloud' || result.source === 'monochrome') && result.source_url) {
+                if ((result.source === 'soundcloud' || result.source === 'zvu4no' || result.source === 'freemp3cloud' || result.source === 'monochrome') && result.source_url) {
                     payload.source_url = result.source_url;
                 }
 
@@ -11069,7 +11068,6 @@
             'playlist_album_as_name': 'settingPlaylistAlbumAsName',
             'singles_only_mode': 'settingSinglesOnlyMode',
             'source_youtube_enabled': 'settingSourceYoutube',
-            'source_mp3phoenix_enabled': 'settingSourceMp3phoenix',
             'source_soundcloud_enabled': 'settingSourceSoundcloud',
             'source_zvu4no_enabled': 'settingSourceZvu4no',
             'source_freemp3cloud_enabled': 'settingSourceFreemp3cloud',
@@ -11081,7 +11079,6 @@
             'source_health_check_interval_minutes': 'settingSourceHealthInterval',
             'source_health_cooldown_minutes': 'settingSourceHealthCooldown',
             'search_concurrency': 'settingSearchConcurrency',
-            'monochrome_hifi_api_url': 'settingMonochromeHifiUrl',
             'slskd_url': 'settingSlskdUrl',
             'slskd_user': 'settingSlskdUser',
             'slskd_pass': 'settingSlskdPass',

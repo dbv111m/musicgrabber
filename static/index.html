@@ -896,13 +896,6 @@
                                     <span class="toggle-slider"></span>
                                 </div>
                             </label>
-                            <label class="source-toggle-item" title="Selenium clears Cloudflare, then a Chrome-impersonating HTTP session handles MP3Phoenix search, preview and download. Disabled by default, since it briefly launches Chrome.">
-                                <span class="source-toggle-text">MP3Phoenix <i class="fa-solid fa-circle-info source-toggle-help" aria-label="MP3Phoenix help"></i></span>
-                                <div class="toggle-switch">
-                                    <input type="checkbox" id="settingSourceMp3phoenix">
-                                    <span class="toggle-slider"></span>
-                                </div>
-                            </label>
                             <label class="source-toggle-item" title="Search zvu4no for direct MP3 downloads. Another quick fallback source with variable catalogue quality.">
                                 <span class="source-toggle-text">zvu4no <i class="fa-solid fa-circle-info source-toggle-help" aria-label="zvu4no help"></i></span>
                                 <div class="toggle-switch">
@@ -1469,13 +1462,8 @@
                     Enable Monochrome in Search Sources above to get lossless audio. No account or API key is required: MusicGrabber downloads through Monochrome's own tracks API, as 16-bit FLAC.
                 </div>
                 <div class="settings-form">
-                    <div class="settings-row">
-                        <label for="settingMonochromeHifiUrl">hifi-api URL</label>
-                        <input type="text" id="settingMonochromeHifiUrl" placeholder="https://eu-central.monochrome.tf">
-                        <span class="settings-hint-sm">Tidal metadata proxy (hifi-api). Used for search and Tidal playlist import.</span>
-                    </div>
                     <button type="button" class="btn test-btn" id="testMonochromeBtn">Test Downloads</button>
-                    <span class="settings-hint-sm">Downloads a real track end to end, checks the audio, then deletes it. Tests your <strong>saved</strong> settings, so save first. Allow a minute for the download.</span>
+                    <span class="settings-hint-sm">Downloads a real track end to end, checks the audio, then deletes it. Allow a minute for the download.</span>
                     <div id="monochromeTestResult" class="test-result"></div>
                     <div id="monochromeTestSteps" class="diag-steps" hidden></div>
                 </div>

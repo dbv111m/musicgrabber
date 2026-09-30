@@ -5,6 +5,8 @@ marked 'slow'. Run the fast suite with: pytest -m "not slow"
 
 import pytest
 
+from live_media import search_song
+
 
 RESULT_KEYS = ["video_id", "title", "relevance_score", "source"]
 
@@ -13,7 +15,7 @@ RESULT_KEYS = ["video_id", "title", "relevance_score", "source"]
 def test_search_returns_results(api, base_url):
     r = api.post(
         f"{base_url}/api/search",
-        json={"query": "Bohemian Rhapsody Queen", "limit": 5, "source": "youtube"},
+        json={"query": search_song(), "limit": 5, "source": "youtube"},
         timeout=30,
     )
     assert r.status_code == 200
@@ -25,7 +27,7 @@ def test_search_returns_results(api, base_url):
 def test_search_result_shape(api, base_url):
     r = api.post(
         f"{base_url}/api/search",
-        json={"query": "Bohemian Rhapsody Queen", "limit": 3, "source": "youtube"},
+        json={"query": search_song(), "limit": 3, "source": "youtube"},
         timeout=30,
     )
     assert r.status_code == 200
@@ -41,7 +43,7 @@ def test_search_all_sources(api, base_url):
     """Multi-source search should return results from at least one source."""
     r = api.post(
         f"{base_url}/api/search",
-        json={"query": "Nirvana Come As You Are", "limit": 10, "source": "all"},
+        json={"query": search_song(), "limit": 10, "source": "all"},
         timeout=45,
     )
     assert r.status_code == 200
@@ -53,7 +55,7 @@ def test_search_all_sources(api, base_url):
 def test_search_scores_are_numeric(api, base_url):
     r = api.post(
         f"{base_url}/api/search",
-        json={"query": "Radiohead Creep", "limit": 5, "source": "youtube"},
+        json={"query": search_song(), "limit": 5, "source": "youtube"},
         timeout=30,
     )
     results = r.json().get("results", [])
@@ -89,18 +91,28 @@ def test_monochrome_preview_rejects_non_monochrome_url(api, base_url):
     assert r.status_code == 400
 
 
-@pytest.mark.parametrize("url", [
-    "https://mp3phoenix.net/",
-    "https://mp3phoenix.net/ajax/music/not-a-track",
-    "http://mp3phoenix.net/getmp3/token/file.mp3",
-])
-def test_mp3phoenix_preview_rejects_non_media_urls_without_fetching(api, base_url, url):
+def test_retired_mp3phoenix_preview_is_refused(api, base_url):
+    """Old results can linger in a browser tab; asking for their preview gets a
+    plain refusal rather than a fetch from a source that no longer exists."""
     r = api.get(
-        f"{base_url}/api/preview/px_not_a_track",
-        params={"source": "mp3phoenix", "url": url},
+        f"{base_url}/api/preview/px_old_result",
+        params={"source": "mp3phoenix", "url": "https://mp3phoenix.net/getmp3/123"},
         timeout=10,
     )
     assert r.status_code == 400
+
+
+def test_retired_mp3phoenix_download_is_refused_not_misrouted(api, base_url):
+    """An unknown source used to fall through to the YouTube path and fail on a
+    'truncated YouTube ID'. It should be refused at the door, and plainly."""
+    r = api.post(
+        f"{base_url}/api/download",
+        json={"video_id": "px_old_result", "title": "Old", "source": "mp3phoenix",
+              "source_url": "https://mp3phoenix.net/getmp3/123"},
+        timeout=10,
+    )
+    assert r.status_code == 400
+    assert "Unknown source" in r.json()["detail"]
 
 
 @pytest.mark.slow
@@ -141,7 +153,7 @@ def _collect_stream_events(api, base_url, query, source="all", timeout=60):
 @pytest.mark.slow
 def test_search_stream_event_sequence(api, base_url):
     """The stream opens with 'start', emits a 'source' per source, ends with 'done'."""
-    events = _collect_stream_events(api, base_url, "Nirvana Come As You Are", source="all")
+    events = _collect_stream_events(api, base_url, search_song(), source="all")
     assert events, "stream returned no events"
     assert events[0]["type"] == "start"
     assert isinstance(events[0].get("sources"), list)
@@ -162,7 +174,7 @@ def test_search_stream_event_sequence(api, base_url):
 
 @pytest.mark.slow
 def test_search_stream_done_carries_token_and_parked(api, base_url):
-    events = _collect_stream_events(api, base_url, "Radiohead Creep", source="all")
+    events = _collect_stream_events(api, base_url, search_song(), source="all")
     done = events[-1]
     assert done["type"] == "done"
     assert "search_token" in done
@@ -171,7 +183,7 @@ def test_search_stream_done_carries_token_and_parked(api, base_url):
 
 @pytest.mark.slow
 def test_search_stream_results_have_expected_shape(api, base_url):
-    events = _collect_stream_events(api, base_url, "Bohemian Rhapsody Queen", source="youtube")
+    events = _collect_stream_events(api, base_url, search_song(), source="youtube")
     done_sources = [e for e in events if e["type"] == "source" and e["status"] == "done"]
     flat = [r for e in done_sources for r in e.get("results", [])]
     assert flat, "stream produced no results"

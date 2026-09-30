@@ -5,26 +5,18 @@ The resolution ladder, in order of preference:
 
   Search:   Deezer (clean ISRCs, typo-tolerant, machine-readable version labels),
             each result checked against the tracks API
-            -> Tidal hifi-api top-up (catalogue gaps, Deezer outage)
-            -> tracks API search (everything else face-down)
-  Download: Monochrome tracks API -> Deezer ISRC rescue
-            -> Tidal stream via hifi-api -> fail honestly
+            -> tracks API search (Deezer light, unconvincing or face-down)
+  Download: Monochrome tracks API -> Deezer ISRC rescue -> fail honestly
 
 Search endpoint:  GET {DEEZER}/search?q=query (ISRC arrives inline, free of charge)
-Tidal search:     GET {HIFI_API}/search?s=query
-Tidal stream:     GET {HIFI_API}/track/?id=ID&quality=LOSSLESS (last-ditch leg)
 Tracks API:       see monochrome_tracks.py (search by artist/title, match the ISRC)
 
-source_url format: monochrome://track_id?isrc=ISRC&quality=HI_RES_LOSSLESS&src=tidal
-The `src` param records which leg found the track (tidal/deezer/tracks); only
-tidal-sourced results may use the Tidal stream fallback, because for the other
-legs the netloc is not a Tidal ID and resolving it as one could fetch a
-completely different song. Nobody wants surprise polka.
+source_url format: monochrome://track_id?isrc=ISRC&quality=LOSSLESS&src=deezer
+The download keys off the ISRC alone; the netloc and `src` (deezer/tracks, or
+tidal/qbdlx on jobs from older releases) only record where a result came from.
 """
 
-import base64
 import hashlib
-import json
 import re
 import shutil
 import tempfile
@@ -38,10 +30,7 @@ from urllib.parse import urlencode, urlparse, parse_qs
 import httpx
 
 from constants import (
-    TIMEOUT_MONOCHROME_SEARCH,
-    MONOCHROME_HIFI_SEARCH_BUDGET,
     TIMEOUT_MONOCHROME_DOWNLOAD,
-    MONOCHROME_HIFI_API_URL,
     DEEZER_API_URL,
     TIMEOUT_DEEZER,
 )
@@ -58,13 +47,6 @@ _ISRC_RE = re.compile(r"^[A-Za-z]{2}[A-Za-z0-9]{3}\d{7}$")
 def _isrc_valid(isrc: str) -> bool:
     return bool(_ISRC_RE.fullmatch((isrc or "").strip()))
 
-# Quality map: Tidal tag → (quality string stored in source_url, Qobuz format ID)
-_QUALITY_MAP = {
-    "HIRES_LOSSLESS": ("HI_RES_LOSSLESS", 27),
-    "LOSSLESS":       ("LOSSLESS",         7),
-    "HIGH":           ("HIGH",             6),
-}
-
 # Score bonuses per quality tier. Kept near Soulseek's stack so Monochrome can
 # compete on overall ranking, but the HIRES-over-LOSSLESS delta is deliberately
 # small (15). Anything more lets piano covers and tribute bands ride the HIRES
@@ -79,78 +61,18 @@ _HEADERS = {
     "User-Agent": "Mozilla/5.0 (X11; Linux x86_64; rv:120.0) Gecko/20100101 Firefox/120.0",
 }
 
-_KNOWN_PUBLIC_HIFI_API_URLS = {
-    "https://us-west.monochrome.tf",
-    "https://monochrome-api.samidy.com",
-    "https://api.monochrome.tf",
-    "https://eu-central.monochrome.tf",
-}
-_hifi_api_url_cache = None
-
 def monochrome_enabled() -> bool:
     return get_setting_bool("source_monochrome_enabled", True)
-
-
-def _hifi_api_url() -> str:
-    from settings import get_setting
-    return get_setting("monochrome_hifi_api_url", MONOCHROME_HIFI_API_URL).rstrip("/")
-
-
-def _split_endpoint_urls(value: str) -> list[str]:
-    urls = []
-    seen = set()
-    for part in re.split(r"[\s,]+", value or ""):
-        url = part.strip().rstrip("/")
-        if not url or not re.match(r"https?://", url, re.I) or url in seen:
-            continue
-        seen.add(url)
-        urls.append(url)
-    return urls
-
-
-def _hifi_api_urls() -> list[str]:
-    configured = _split_endpoint_urls(_hifi_api_url())
-    defaults = _split_endpoint_urls(MONOCHROME_HIFI_API_URL)
-
-    if not configured:
-        candidates = defaults
-    elif len(configured) == 1 and configured[0] in _KNOWN_PUBLIC_HIFI_API_URLS:
-        candidates = configured + defaults
-    else:
-        candidates = configured
-
-    if _hifi_api_url_cache and _hifi_api_url_cache in candidates:
-        candidates = [_hifi_api_url_cache] + [url for url in candidates if url != _hifi_api_url_cache]
-
-    deduped = []
-    seen = set()
-    for url in candidates:
-        if url not in seen:
-            seen.add(url)
-            deduped.append(url)
-    return deduped or defaults
-
-
-def _remember_hifi_api_url(base: str) -> None:
-    global _hifi_api_url_cache
-    _hifi_api_url_cache = base
 
 
 def download_leg_healthy() -> tuple[bool, str]:
     """Health check for the source layer: can Monochrome actually stream a FLAC?
 
     One small live search against the tracks API, the route that serves
-    Monochrome downloads (the Tidal stream needs a self-hosted hifi-api).
+    Monochrome downloads.
     """
     from monochrome_tracks import health as tracks_health
     return tracks_health()
-
-
-def _cover_url(cover_uuid: str) -> str:
-    """Convert Tidal cover UUID to a resources.tidal.com thumbnail URL."""
-    if not cover_uuid:
-        return ""
-    return f"https://resources.tidal.com/images/{cover_uuid.replace('-', '/')}/320x320.jpg"
 
 
 # When several copies of a track sit at the same quality tier, prefer the
@@ -223,50 +145,6 @@ def _version_penalty(version: str, query: str) -> tuple[int, str | None]:
 def _album_edition_penalty(album_title: str, query: str) -> tuple[int, str | None]:
     """Return (penalty, reason) for the Tidal album title, query-aware."""
     return _apply_penalty_set(album_title, query.lower(), _ALBUM_PENALTIES)
-
-
-def _popularity_bonus(popularity: int | None) -> tuple[int, str | None]:
-    """Small tiebreaker. Maps Tidal popularity (0 to 100) to a 0 to +10 bump."""
-    if not popularity:
-        return 0, None
-    bonus = min(10, max(0, popularity // 10))
-    if not bonus:
-        return 0, None
-    return bonus, f"tidal_popularity=+{bonus}"
-
-
-def _best_quality(tags: list[str]) -> tuple[str, int]:
-    """Return (quality_string, qobuz_fmt) for the best available quality tier."""
-    for tag in ("HIRES_LOSSLESS", "LOSSLESS", "HIGH"):
-        if tag in tags:
-            return _QUALITY_MAP[tag]
-    return ("HIGH", 6)
-
-
-def _normalise_query_for_hifi_api(query: str) -> str:
-    """Return a Monochrome/Tidal search query with punctuation softened.
-
-    The hifi-api search endpoint is much less forgiving of separator punctuation
-    than the other providers. Bulk imports naturally produce queries such as
-    "Artist1, Artist2 - Track", which can return zero results even though
-    "Artist1 Artist2 Track" succeeds.
-    """
-    normalised = re.sub(r"[\W_]+", " ", query or "", flags=re.UNICODE)
-    return re.sub(r"\s+", " ", normalised).strip()
-
-
-def _monochrome_search_queries(query: str) -> list[str]:
-    """Return hifi-api query variants, preserving the user's exact query first."""
-    queries = []
-    original = (query or "").strip()
-    if original:
-        queries.append(original)
-
-    normalised = _normalise_query_for_hifi_api(original)
-    if normalised and normalised.lower() != original.lower():
-        queries.append(normalised)
-
-    return queries
 
 
 def _deezer_search_tracks(query: str, limit: int) -> list[dict]:
@@ -370,7 +248,7 @@ def _tracks_result_fields(track: dict) -> dict:
 
 
 def _deezer_rank_bonus(rank: int | None) -> tuple[int, str | None]:
-    """Deezer rank (0 to ~1M) squeezed into the same 0 to +10 tiebreaker as Tidal."""
+    """Deezer rank (0 to ~1M) squeezed into a small 0 to +10 tiebreaker."""
     if not rank:
         return 0, None
     bonus = min(10, max(0, int(rank) // 100_000))
@@ -810,19 +688,20 @@ def _deezer_isrc_rescue(artist: str, title: str, bad_isrc: str) -> str:
     return ""
 
 
-def _tracks_search_fallback(query: str, limit: int) -> list[dict]:
-    """Search Monochrome's tracks API directly when Deezer and hifi-api are empty.
+def _tracks_search_leg(query: str, limit: int) -> list[dict]:
+    """Search Monochrome's tracks API directly.
 
-    Deezer is the usual front door; this keeps Monochrome searchable when Deezer
-    has a bad day. Anything it returns is by definition something the tracks API
-    can serve, so there is nothing to verify, and the quality is honestly
-    LOSSLESS (16/44.1), which is all it ever serves.
+    Deezer is the usual front door; this tops it up when Deezer comes back light
+    or unconvincing, and keeps Monochrome searchable when Deezer has a bad day.
+    Anything it returns is by definition something the tracks API can serve, so
+    there is nothing to verify, and the quality is honestly LOSSLESS (16/44.1),
+    which is all it ever serves.
     """
     try:
         from monochrome_tracks import search_tracks, track_id
         raw_items = search_tracks(query, limit * 2)
     except Exception as exc:
-        print(f"Monochrome: tracks API search fallback errored: {exc}")
+        print(f"Monochrome: tracks API search leg errored: {exc}")
         return []
 
     results = []
@@ -847,7 +726,7 @@ def _tracks_search_fallback(query: str, limit: int) -> list[dict]:
         bonus = _QUALITY_BONUS["LOSSLESS"]
         relevance_score += bonus
         score_breakdown.append(f"source_quality=+{bonus}")
-        score_breakdown.append("via=tracks-api (Deezer empty)")
+        score_breakdown.append("via=tracks-api")
 
         results.append(_build_monochrome_result(
             track_id=tid,
@@ -863,8 +742,6 @@ def _tracks_search_fallback(query: str, limit: int) -> list[dict]:
         ))
 
     results.sort(key=lambda x: x["relevance_score"], reverse=True)
-    if results:
-        print(f"Monochrome: Deezer and hifi-api empty, served {len(results)} result(s) via the tracks API")
     return results[:limit]
 
 
@@ -883,9 +760,9 @@ _DEEZER_CONFIDENT_MATCH_FLOOR = 0.8
 def _has_confident_match(results: list[dict], query: str) -> bool:
     """True if any result is a confident artist/title match for the query.
 
-    Used to decide whether a full Deezer page is good enough to skip the Tidal
-    leg. Needs a clean 'Artist - Title' split to judge against; without one we
-    can't fairly score, so we keep the old "a full page is fine" behaviour.
+    Used to decide whether a full Deezer page is good enough to skip the tracks
+    API search. Needs a clean 'Artist - Title' split to judge against; without
+    one we can't fairly score, so we keep the old "a full page is fine" behaviour.
     """
     artist, title = _parse_query_artist_title(query)
     if not (artist and title):
@@ -907,224 +784,34 @@ def search_monochrome(query: str, limit: int) -> list[dict]:
     """Search the Monochrome ladder and return normalised result dicts.
 
     Deezer is the primary leg (clean ISRCs, typo-tolerant, each result checked
-    against the tracks API). The Tidal hifi-api tops up when Deezer comes back
-    light (catalogue gaps, or Deezer itself having a moment), and a direct
-    tracks API search is the final safety net when both are face-down.
+    against the tracks API). A direct tracks API search tops it up when Deezer
+    comes back light or unconvincing, and is the whole answer when Deezer has
+    nothing at all.
     """
     deezer_results = _deezer_search_leg(query, limit)
     # A full page of Deezer hits is only worth trusting if one of them actually
     # matches what was asked for. Deezer loves to return a tidy ten fuzzy
-    # near-misses, and that used to short-circuit the Tidal leg, the very source
+    # near-misses, and those would otherwise short-circuit the one catalogue
     # that might hold the track Deezer's ranking buried. So: full page AND a
     # confident match before we call it a day.
     if len(deezer_results) >= limit and _has_confident_match(deezer_results, query):
         return deezer_results[:limit]
 
-    hifi_results = _hifi_search_leg(query, limit)
-    if hifi_results:
-        seen = {_result_isrc(r) for r in deezer_results}
-        merged = deezer_results + [r for r in hifi_results if _result_isrc(r) not in seen]
-        merged.sort(key=lambda x: x["relevance_score"], reverse=True)
-        return merged[:limit]
-    if deezer_results:
-        return deezer_results[:limit]
-    return _tracks_search_fallback(query, limit)
-
-
-def _hifi_search_leg(query: str, limit: int) -> list[dict]:
-    """Search Tidal via hifi-api and return normalised result dicts."""
-    try:
-        deadline = time.monotonic() + MONOCHROME_HIFI_SEARCH_BUDGET
-        items = []
-        seen_raw_ids = set()
-        search_errors = []
-
-        for base in _hifi_api_urls():
-            endpoint_had_success = False
-            for hifi_query in _monochrome_search_queries(query):
-                remaining = deadline - time.monotonic()
-                if remaining <= 0:
-                    break
-                try:
-                    resp = httpx.get(
-                        f"{base}/search",
-                        params={"s": hifi_query, "limit": limit * 3},
-                        headers=_HEADERS,
-                        timeout=min(TIMEOUT_MONOCHROME_SEARCH, max(0.1, remaining)),
-                        follow_redirects=True,
-                    )
-                    resp.raise_for_status()
-                    endpoint_had_success = True
-                    _remember_hifi_api_url(base)
-                except Exception as exc:
-                    search_errors.append(f"{base} {hifi_query!r}: {exc}")
-                    continue
-
-                for item in resp.json().get("data", {}).get("items", []):
-                    tidal_id = item.get("id")
-                    if not tidal_id or tidal_id in seen_raw_ids:
-                        continue
-                    seen_raw_ids.add(tidal_id)
-                    items.append(item)
-
-            if items or endpoint_had_success:
-                break
-            if time.monotonic() >= deadline:
-                break
-
-        if not items and search_errors:
-            print(f"Monochrome search error: {'; '.join(search_errors)}")
-
-        results = []
-        seen_ids = set()
-
-        for item in items:
-            tidal_id = item.get("id")
-            if not tidal_id or tidal_id in seen_ids:
-                continue
-            seen_ids.add(tidal_id)
-
-            title     = item.get("title", "")
-            artist    = (item.get("artist") or {}).get("name", "")
-            duration  = item.get("duration") or 0
-            isrc      = item.get("isrc", "")
-            tags      = (item.get("mediaMetadata") or {}).get("tags", [])
-            album     = (item.get("album") or {}).get("title", "")
-            cover_id  = (item.get("album") or {}).get("cover", "")
-            version   = item.get("version") or ""
-            popularity = item.get("popularity") or 0
-
-            if not (title and artist):
-                continue
-            # No ISRC means the tracks API can't match it, which means we can't download or even
-            # preview it. Pretending otherwise just leads to broken results and angry users.
-            if not isrc:
-                continue
-
-            quality_str, _ = _best_quality(tags)
-            bonus = _QUALITY_BONUS.get(quality_str, 30)
-
-            combined = f"{artist} - {title}"
-            relevance_score, score_breakdown = score_search_result_with_breakdown(
-                combined, artist, query,
-                duration_seconds=duration or None,
-                view_count=None,
-                album=album,
-            )
-            relevance_score += bonus
-            score_breakdown.append(f"source_quality=+{bonus}")
-
-            for delta, reason in (
-                _version_penalty(version, query),
-                _album_edition_penalty(album, query),
-                _popularity_bonus(popularity),
-            ):
-                if delta:
-                    relevance_score += delta
-                    score_breakdown.append(reason)
-
-            params = urlencode({"isrc": isrc, "quality": quality_str, "src": "tidal"})
-            source_url = f"monochrome://{tidal_id}?{params}"
-            video_id = f"mono_{hashlib.md5(source_url.encode()).hexdigest()[:12]}"
-
-            results.append({
-                "video_id": video_id,
-                "title": title,
-                "channel": artist,
-                "duration": parse_duration(duration) if duration else "",
-                "thumbnail": _cover_url(cover_id),
-                "is_playlist": False,
-                "video_count": None,
-                "source": "monochrome",
-                "source_url": source_url,
-                "quality": quality_str,
-                "relevance_score": relevance_score,
-                "score_breakdown": score_breakdown,
-                "slskd_username": None,
-                "slskd_filename": None,
-                "slskd_size": None,
-            })
-
-        results.sort(key=lambda x: x["relevance_score"], reverse=True)
-        return results[:limit]
-
-    except Exception as e:
-        # The caller (search_monochrome) decides what to fall back to;
-        # this leg just reports honestly that it came up empty.
-        print(f"Monochrome search error: {e}")
-        return []
-
-
-def _parse_tidal_track_payload(body) -> str:
-    """Extract a direct (non-DRM) stream URL from a hifi-api /track response.
-
-    The instances drift between response shapes as they update, so accept the
-    known variants: a bare URL field, a urls list, or a base64 BTS manifest.
-    A DASH/Widevine manifest yields "" because we don't do DRM circumvention;
-    LOSSLESS and below come through as plain BTS with direct URLs.
-    """
-    data = body.get("data") if isinstance(body, dict) else None
-    if not isinstance(data, dict):
-        return ""
-    for key in ("OriginalTrackUrl", "originalTrackUrl", "url"):
-        url = data.get(key)
-        if isinstance(url, str) and url.startswith("http"):
-            return url
-    urls = data.get("urls")
-    if isinstance(urls, list) and urls and isinstance(urls[0], str) and urls[0].startswith("http"):
-        return urls[0]
-    manifest = data.get("manifest")
-    mime = (data.get("manifestMimeType") or "").lower()
-    if isinstance(manifest, str) and "dash" not in mime:
-        try:
-            decoded = json.loads(base64.b64decode(manifest))
-            decoded_urls = decoded.get("urls") or []
-            if decoded_urls and isinstance(decoded_urls[0], str) and decoded_urls[0].startswith("http"):
-                return decoded_urls[0]
-        except Exception:
-            pass
-    return ""
-
-
-def _tidal_stream_url(tidal_id: str, quality: str) -> str:
-    """Resolve a direct stream URL from the Tidal hifi-api /track endpoint.
-
-    Last-ditch leg for tracks the tracks API simply doesn't stock (or whose ISRC is
-    beyond rescue) but which Tidal happily streams; this is exactly how the
-    Monochrome web player serves them. Caps at LOSSLESS (16/44.1 FLAC), since
-    Tidal's hi-res is Widevine-wrapped and we are not in that business.
-    """
-    last_err: Exception | None = None
-    for base in _hifi_api_urls():
-        try:
-            resp = httpx.get(
-                f"{base}/track/",
-                params={"id": tidal_id, "quality": quality},
-                headers=_HEADERS,
-                timeout=TIMEOUT_MONOCHROME_SEARCH,
-                follow_redirects=True,
-            )
-            resp.raise_for_status()
-            url = _parse_tidal_track_payload(resp.json())
-            if url:
-                _remember_hifi_api_url(base)
-                return url
-            last_err = RuntimeError(f"{base}: no direct URL in /track payload")
-        except Exception as exc:
-            last_err = exc
-            continue
-    raise RuntimeError(f"Tidal stream unavailable for id {tidal_id} at {quality}: {last_err}")
+    seen = {_result_isrc(r) for r in deezer_results}
+    merged = deezer_results + [
+        r for r in _tracks_search_leg(query, limit) if _result_isrc(r) not in seen
+    ]
+    merged.sort(key=lambda x: x["relevance_score"], reverse=True)
+    return merged[:limit]
 
 
 def _resolve_monochrome_stream_url(source_url: str, artist_hint: str = "",
                                    title_hint: str = "", *,
-                                   lossless_only: bool = False,
                                    trace: list | None = None) -> str:
-    """Resolve a Monochrome result through the shared stream fallback ladder.
+    """Resolve a Monochrome result to a direct FLAC URL.
 
-    Monochrome's own tracks API is primary; a Deezer ISRC rescue and the Tidal
-    stream are fallbacks. Previews use ``lossless_only=True`` so they never
-    quietly step down to a lossy tier.
+    Monochrome's own tracks API does the work; if it has nothing under the ISRC
+    we were handed, a Deezer ISRC rescue gives it a second go with the right one.
 
     Pass ``trace`` (a list) to collect a per-leg record of what was tried and
     what it said. The Settings diagnostic uses it to tell a user which leg
@@ -1137,11 +824,7 @@ def _resolve_monochrome_stream_url(source_url: str, artist_hint: str = "",
     parsed = urlparse(source_url)
     if parsed.scheme != "monochrome":
         raise RuntimeError(f"Invalid Monochrome source URL {source_url!r}")
-    tidal_id = parsed.netloc
-    params = parse_qs(parsed.query)
-    isrc    = (params.get("isrc") or [""])[0]
-    quality = (params.get("quality") or ["LOSSLESS"])[0]
-    src_leg = (params.get("src") or [""])[0]
+    isrc = (parse_qs(parsed.query).get("isrc") or [""])[0]
 
     if not isrc:
         raise RuntimeError(f"Monochrome: no ISRC in source_url {source_url!r}")
@@ -1158,25 +841,8 @@ def _resolve_monochrome_stream_url(source_url: str, artist_hint: str = "",
             isrc = rescue_isrc
             rescued = True
 
-    # Previewing a few seconds should not quietly fall back to the lossy HIGH
-    # tier. Only the Tidal stream has tiers to choose between these days.
-    tier_order = ["HI_RES_LOSSLESS", "LOSSLESS", "HIGH"]
-    if lossless_only:
-        candidates = ["LOSSLESS"]
-        quality = "LOSSLESS"
-    elif quality in tier_order:
-        candidates = tier_order[tier_order.index(quality):]
-    else:
-        candidates = tier_order
-
-    last_error: Exception | None = None
-
     def _resolve_via_tracks_api() -> str:
-        """Resolve through Monochrome's tracks API: one search, exact ISRC match.
-
-        It serves 16/44.1 FLAC whatever was asked for, which is at or above
-        every tier the ladder allows, so there is no tier loop here.
-        """
+        """Resolve through Monochrome's tracks API: one search, exact ISRC match."""
         leg = "Monochrome tracks API"
         if not title_hint:
             _note(leg, False, "no title to search by, so this route was not tried")
@@ -1208,34 +874,10 @@ def _resolve_monochrome_stream_url(source_url: str, artist_hint: str = "",
             isrc = rescue_isrc
             cdn_url = _resolve_via_tracks_api()
 
-    # Final leg: the track may live on Tidal but not in the tracks API, in which
-    # case the hifi-api can stream it directly (this is how the Monochrome web
-    # player serves such tracks). Only for tidal-sourced results, where the
-    # netloc really is a Tidal ID; hi-res is DRM-locked there, so LOSSLESS is
-    # the honest ceiling.
-    if not cdn_url and src_leg == "tidal" and tidal_id.isdigit():
-        tidal_candidates = ["LOSSLESS"] if lossless_only else [
-            tier for tier in candidates if tier in ("LOSSLESS", "HIGH")
-        ]
-        tidal_errors = []
-        for tier in tidal_candidates:
-            try:
-                cdn_url = _tidal_stream_url(tidal_id, tier)
-                print(f"Monochrome: tracks API exhausted, streaming tidal/{tidal_id} at {tier} via hifi-api")
-                _note("Tidal stream via hifi-api", True, f"tidal/{tidal_id} at {tier}")
-                break
-            except Exception as exc:
-                last_error = exc
-                tidal_errors.append(f"{tier}: {exc}")
-        if not cdn_url:
-            _note("Tidal stream via hifi-api", False, "; ".join(tidal_errors) or "no stream")
-
     if not cdn_url:
         raise RuntimeError(
-            f"Monochrome: no stream available for ISRC {isrc} at an allowed quality "
-            f"on any leg (tracks API, "
-            f"Deezer rescue, Tidal stream) "
-            f"(last error: {last_error})"
+            f"Monochrome: no stream available for ISRC {isrc} "
+            f"(tracks API, then Deezer ISRC rescue)"
         )
     return cdn_url
 
@@ -1243,8 +885,7 @@ def _resolve_monochrome_stream_url(source_url: str, artist_hint: str = "",
 def download_monochrome_track(source_url: str, output_path: Path,
                               artist_hint: str = "", title_hint: str = "") -> None:
     """Resolve a monochrome:// source URL and stream the audio to output_path."""
-    parsed = urlparse(source_url)
-    tidal_id = parsed.netloc
+    track_ref = urlparse(source_url).netloc
     cdn_url = _resolve_monochrome_stream_url(
         source_url,
         artist_hint=artist_hint,
@@ -1269,18 +910,18 @@ def download_monochrome_track(source_url: str, output_path: Path,
     actual_size = output_path.stat().st_size
     if actual_size == 0:
         output_path.unlink(missing_ok=True)
-        raise RuntimeError(f"Monochrome: download of tidal/{tidal_id} produced an empty file")
+        raise RuntimeError(f"Monochrome: download of track {track_ref} produced an empty file")
     if expected_size > 0 and actual_size < expected_size:
         output_path.unlink(missing_ok=True)
         raise RuntimeError(
-            f"Monochrome: download truncated for tidal/{tidal_id}: "
+            f"Monochrome: download truncated for track {track_ref}: "
             f"got {actual_size} of {expected_size} bytes"
         )
 
 
 def get_monochrome_preview_url(source_url: str, artist_hint: str = "",
                                title_hint: str = "") -> str:
-    """Return a lossless CDN URL through the same legs used by downloads."""
+    """Return a playable FLAC URL through the same ladder used by downloads."""
     # Keep the old direct-ISRC call shape working for internal callers and
     # upgrades created before previews started passing complete result URLs.
     if "://" not in (source_url or ""):
@@ -1289,7 +930,6 @@ def get_monochrome_preview_url(source_url: str, artist_hint: str = "",
         source_url,
         artist_hint=(artist_hint or "").strip()[:300],
         title_hint=(title_hint or "").strip()[:300],
-        lossless_only=True,
     )
 
 
@@ -1331,8 +971,8 @@ def _diagnostic_hint(failure_text: str) -> str:
 def run_download_diagnostic(query: str = "") -> dict:
     """Prove (or disprove) that Monochrome can put a real FLAC on disk.
 
-    Walks the whole path an ordinary download takes: tracks API and hifi-api
-    reachability, search, the full stream-resolution ladder, a genuine download to a temp
+    Walks the whole path an ordinary download takes: tracks API reachability,
+    search, the full stream-resolution ladder, a genuine download to a temp
     file, and an ffprobe of the bytes that arrived. The file is deleted
     afterwards, so this costs bandwidth and a minute of patience, nothing else.
 
@@ -1381,39 +1021,13 @@ def run_download_diagnostic(query: str = "") -> dict:
         else:
             add("Monochrome source", "ok", "Enabled in Search Sources")
 
-        # ---- 2. Can we reach the APIs at all -------------------------------
+        # ---- 2. Can we reach the tracks API at all --------------------------
         from monochrome_tracks import health as tracks_health
         probe_started = time.monotonic()
         tracks_ok, tracks_detail = tracks_health()
         add("Tracks API reachable", "ok" if tracks_ok else "fail",
             f"{tracks_detail} ({int((time.monotonic() - probe_started) * 1000)}ms)"
             if tracks_ok else tracks_detail)
-
-        endpoints = _hifi_api_urls()
-        reachable, endpoint_errors = "", []
-        for base in endpoints:
-            probe_started = time.monotonic()
-            try:
-                resp = httpx.get(
-                    f"{base}/search",
-                    params={"s": query, "limit": 1},
-                    headers=_HEADERS,
-                    timeout=TIMEOUT_MONOCHROME_SEARCH,
-                    follow_redirects=True,
-                )
-                resp.raise_for_status()
-                reachable = f"{base} ({int((time.monotonic() - probe_started) * 1000)}ms)"
-                _remember_hifi_api_url(base)
-                break
-            except Exception as exc:
-                endpoint_errors.append(f"{base}: {exc}")
-        if reachable:
-            add("hifi-api reachable", "ok", reachable)
-        elif not endpoints:
-            add("hifi-api reachable", "skip", "None configured; only needed for a self-hosted hifi-api")
-        else:
-            # Not fatal on its own: Deezer is the primary search leg these days.
-            add("hifi-api reachable", "warn", "; ".join(endpoint_errors))
 
         # ---- 3. Find the test track ---------------------------------------
         try:
