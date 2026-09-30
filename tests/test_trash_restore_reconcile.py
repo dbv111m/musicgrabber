@@ -144,7 +144,7 @@ def test_v17_migration_cleans_existing_dangling_job_links(fresh_db):
             "SELECT value FROM settings WHERE key = 'db_version'"
         ).fetchone()[0]
     assert row == (None,)
-    assert version == "18"
+    assert version == "19"
 
 
 def test_replace_uses_stable_track_identity_after_job_is_cleared(

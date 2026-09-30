@@ -36,7 +36,6 @@ def happy_monochrome(monkeypatch, tmp_path):
     monkeypatch.setattr(
         "monochrome_tracks.health", lambda: (True, "Monochrome tracks API answering at https://tracks.example")
     )
-    monkeypatch.setattr("qbdlx.qbdlx_enabled", lambda: True)
     monkeypatch.setattr(monochrome, "_hifi_api_urls", lambda: ["https://hifi.example"])
 
     class FakeResponse:
@@ -102,7 +101,6 @@ def test_diagnostic_reports_the_leg_that_failed(happy_monochrome, monkeypatch):
                 "ok": False,
                 "detail": "no track with ISRC GBAYE9200070 in the catalogue",
             })
-            trace.append({"leg": "qbdlx direct Qobuz", "ok": False, "detail": "401 Unauthorized"})
         raise RuntimeError("Monochrome: no stream available for ISRC GBAYE9200070")
 
     monkeypatch.setattr(happy_monochrome, "_resolve_monochrome_stream_url", resolve_with_dead_legs)
@@ -111,7 +109,6 @@ def test_diagnostic_reports_the_leg_that_failed(happy_monochrome, monkeypatch):
     assert report["success"] is False
     statuses = _statuses(report)
     assert statuses["Monochrome tracks API"] == "fail"
-    assert statuses["qbdlx direct Qobuz"] == "fail"
     assert statuses["Stream URL"] == "fail"
     # No point downloading anything once no leg produced a URL.
     assert "Audio downloaded" not in statuses
@@ -126,7 +123,6 @@ def test_diagnostic_points_at_the_address_override_when_tracks_api_is_down(happy
     def resolve_nothing(url, artist_hint="", title_hint="", trace=None, **kw):
         if trace is not None:
             trace.append({"leg": "Monochrome tracks API", "ok": False, "detail": "HTTPStatusError: 503"})
-            trace.append({"leg": "qbdlx direct Qobuz", "ok": False, "detail": "no Qobuz stream"})
         return ""
 
     monkeypatch.setattr(happy_monochrome, "_resolve_monochrome_stream_url", resolve_nothing)
@@ -141,7 +137,7 @@ def test_a_network_timeout_is_blamed_on_the_network(happy_monochrome, monkeypatc
     def resolve_no_network(url, artist_hint="", title_hint="", trace=None, **kw):
         if trace is not None:
             trace.append({
-                "leg": "qbdlx direct Qobuz",
+                "leg": "Monochrome tracks API",
                 "ok": False,
                 "detail": "ConnectError: [Errno -2] Name or service not known (timed out)",
             })
@@ -174,34 +170,6 @@ def test_diagnostic_warns_when_monochrome_is_switched_off(happy_monochrome, monk
     report = happy_monochrome.run_download_diagnostic()
     assert report["success"] is True  # the download path still works, it's just hidden from search
     assert _statuses(report)["Monochrome source"] == "warn"
-
-
-def test_tracks_api_is_always_listed_as_a_route(happy_monochrome, monkeypatch):
-    """It has no switch of its own, so turning qbdlx off still leaves one route."""
-    monkeypatch.setattr("qbdlx.qbdlx_enabled", lambda: False)
-    report = happy_monochrome.run_download_diagnostic()
-    routes = next(step for step in report["steps"] if step["name"] == "Download routes")
-    assert routes["status"] == "ok"
-    assert "Monochrome tracks API" in routes["detail"]
-    assert "qbdlx" not in routes["detail"]
-
-
-def test_disabled_legs_are_skipped_not_blamed(happy_monochrome, monkeypatch):
-    """A route the user turned off should not be reported as a broken route."""
-    monkeypatch.setattr("qbdlx.qbdlx_enabled", lambda: False)
-
-    def resolve_nothing(url, artist_hint="", title_hint="", trace=None, **kw):
-        if trace is not None:
-            trace.append({"leg": "Monochrome tracks API", "ok": False, "detail": "no track with that ISRC"})
-            trace.append({"leg": "qbdlx direct Qobuz", "ok": False, "detail": "no Qobuz stream"})
-        return ""
-
-    monkeypatch.setattr(happy_monochrome, "_resolve_monochrome_stream_url", resolve_nothing)
-    report = happy_monochrome.run_download_diagnostic()
-
-    statuses = _statuses(report)
-    assert statuses["Monochrome tracks API"] == "fail"
-    assert statuses["qbdlx direct Qobuz"] == "skip"
 
 
 def test_unconfigured_hifi_api_is_skipped_not_warned(happy_monochrome, monkeypatch):
@@ -242,7 +210,8 @@ def test_resolver_records_each_leg_it_tries(monkeypatch):
         "monochrome_tracks.resolve_stream_url",
         lambda *a: (_ for _ in ()).throw(RuntimeError("tracks API not reachable")),
     )
-    monkeypatch.setattr("qbdlx.resolve_qobuz_stream_url", lambda isrc, fmt: "https://cdn.example/x.flac")
+    monkeypatch.setattr(monochrome, "_deezer_isrc_rescue", lambda *a: "")
+    monkeypatch.setattr(monochrome, "_tidal_stream_url", lambda tidal_id, tier: "https://cdn.example/x.flac")
 
     trace = []
     url = monochrome._resolve_monochrome_stream_url(
@@ -251,7 +220,7 @@ def test_resolver_records_each_leg_it_tries(monkeypatch):
     assert url == "https://cdn.example/x.flac"
     legs = {entry["leg"]: entry["ok"] for entry in trace}
     assert legs["Monochrome tracks API"] is False
-    assert legs["qbdlx direct Qobuz"] is True
+    assert legs["Tidal stream via hifi-api"] is True
 
 
 def test_resolver_trace_is_optional():

@@ -31,7 +31,6 @@ EXPECTED_KEYS = [
     "source_health_check_interval_minutes",
     "source_health_cooldown_minutes",
     "search_concurrency",
-    "monochrome_qbdlx_fallback_enabled",
     "notify_on",
 ]
 
@@ -225,7 +224,7 @@ def test_migration_removes_obsolete_qobuz_proxy_setting(tmp_path, monkeypatch):
                 "SELECT value FROM settings WHERE key = 'db_version'"
             ).fetchone()[0]
         assert row is None
-        assert version == "18"  # migrations run to the latest version in one boot
+        assert version == "19"  # migrations run to the latest version in one boot
     finally:
         _drain(migration_pool)
 
@@ -254,7 +253,7 @@ def test_migration_removes_retired_monochrome_browser_setting(tmp_path, monkeypa
             [
                 ("db_version", "17"),
                 ("monochrome_browser_fallback_enabled", "false"),
-                ("monochrome_qbdlx_fallback_enabled", "false"),
+                ("source_monochrome_enabled", "false"),
             ],
         )
         conn.execute(
@@ -271,15 +270,46 @@ def test_migration_removes_retired_monochrome_browser_setting(tmp_path, monkeypa
             ).fetchone()[0] + conn.execute(
                 "SELECT COUNT(*) FROM user_settings WHERE key = 'monochrome_browser_fallback_enabled'"
             ).fetchone()[0]
-            qbdlx = conn.execute(
-                "SELECT value FROM settings WHERE key = 'monochrome_qbdlx_fallback_enabled'"
+            neighbour = conn.execute(
+                "SELECT value FROM settings WHERE key = 'source_monochrome_enabled'"
             ).fetchone()
             version = conn.execute(
                 "SELECT value FROM settings WHERE key = 'db_version'"
             ).fetchone()[0]
         assert leftovers == 0
-        assert qbdlx == ("false",)  # its neighbour is somebody's deliberate choice; leave it be
-        assert version == "18"
+        assert neighbour == ("false",)  # somebody's deliberate choice; leave it be
+        assert version == "19"
+    finally:
+        _drain(migration_pool)
+
+
+def test_migration_removes_retired_qbdlx_setting(tmp_path, monkeypatch):
+    old_db = tmp_path / "pre-qbdlx-removal.db"
+    with sqlite3.connect(old_db) as conn:
+        conn.execute("""
+            CREATE TABLE settings (
+                key TEXT PRIMARY KEY,
+                value TEXT,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        conn.executemany(
+            "INSERT INTO settings (key, value) VALUES (?, ?)",
+            [("db_version", "18"), ("monochrome_qbdlx_fallback_enabled", "true")],
+        )
+
+    migration_pool = _migrate_old_db(old_db, monkeypatch)
+    try:
+        db.init_db()
+        with db.db_conn() as conn:
+            row = conn.execute(
+                "SELECT value FROM settings WHERE key = 'monochrome_qbdlx_fallback_enabled'"
+            ).fetchone()
+            version = conn.execute(
+                "SELECT value FROM settings WHERE key = 'db_version'"
+            ).fetchone()[0]
+        assert row is None
+        assert version == "19"
     finally:
         _drain(migration_pool)
 
@@ -312,7 +342,7 @@ def test_migration_clears_dead_default_hifi_api_url_but_not_a_self_hosted_one(tm
                 "SELECT value FROM settings WHERE key = 'db_version'"
             ).fetchone()[0]
         assert row is None
-        assert version == "18"
+        assert version == "19"
     finally:
         _drain(migration_pool)
 

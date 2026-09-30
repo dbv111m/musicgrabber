@@ -15,56 +15,24 @@ import pytest
 # download_leg_healthy
 # ---------------------------------------------------------------------------
 
-def test_download_leg_healthy_prefers_tracks_api(monkeypatch):
-    import monochrome
-    monkeypatch.setattr(
-        "monochrome_tracks.health",
-        lambda: (True, "Monochrome tracks API answering at https://tracks.test"),
-    )
-    monkeypatch.setattr(
-        "qbdlx.download_leg_healthy",
-        lambda: (_ for _ in ()).throw(AssertionError("qbdlx probe should not run")),
-    )
-    ok, reason = monochrome.download_leg_healthy()
-    assert ok is True
-    assert "tracks API" in reason
-
-
-def test_download_leg_healthy_uses_qbdlx_when_tracks_api_down(monkeypatch):
+def test_download_leg_health_is_the_tracks_api(monkeypatch):
     import monochrome
     monkeypatch.setattr("monochrome_tracks.health", lambda: (False, "tracks API unreachable"))
-    monkeypatch.setattr("qbdlx.qbdlx_enabled", lambda: True)
-    monkeypatch.setattr("qbdlx.download_leg_healthy", lambda: (True, "3/28 shared tokens usable this cycle"))
-    ok, reason = monochrome.download_leg_healthy()
-    assert ok is True
-    assert "shared tokens" in reason
-
-
-def test_download_leg_healthy_reports_both_failures(monkeypatch):
-    import monochrome
-    monkeypatch.setattr("monochrome_tracks.health", lambda: (False, "tracks API unreachable"))
-    monkeypatch.setattr("qbdlx.qbdlx_enabled", lambda: True)
-    monkeypatch.setattr("qbdlx.download_leg_healthy", lambda: (False, "0/28 shared tokens usable this cycle"))
-    ok, reason = monochrome.download_leg_healthy()
-    assert ok is False
-    assert "tracks API unreachable" in reason
-    assert "0/28 shared tokens" in reason
+    assert monochrome.download_leg_healthy() == (False, "tracks API unreachable")
+    monkeypatch.setattr("monochrome_tracks.health", lambda: (True, "answering"))
+    assert monochrome.download_leg_healthy() == (True, "answering")
 
 
 # ---------------------------------------------------------------------------
-# Tracks-API-first stream fallback chain
+# Stream fallback chain: tracks API, Deezer ISRC rescue, Tidal stream
 # ---------------------------------------------------------------------------
 
-def test_preview_uses_tracks_api_before_qbdlx(monkeypatch):
+def test_preview_uses_the_tracks_api(monkeypatch):
     import monochrome
     calls = []
     monkeypatch.setattr(
         "monochrome_tracks.resolve_stream_url",
         lambda isrc, artist, title: calls.append((isrc, artist, title)) or "https://tracks.test/track/1",
-    )
-    monkeypatch.setattr(
-        "qbdlx.resolve_qobuz_stream_url",
-        lambda *a, **k: (_ for _ in ()).throw(AssertionError("qbdlx should not run")),
     )
     url = monochrome.get_monochrome_preview_url(
         "monochrome://123?isrc=GBAYE9200070&quality=LOSSLESS&src=deezer",
@@ -74,34 +42,16 @@ def test_preview_uses_tracks_api_before_qbdlx(monkeypatch):
     assert calls == [("GBAYE9200070", "Radiohead", "Creep")]
 
 
-def test_bare_isrc_preview_skips_tracks_api_and_uses_qbdlx(monkeypatch):
+def test_bare_isrc_preview_has_nothing_to_search_by(monkeypatch):
     """The tracks API can only search by name, so an ISRC with no title cannot use it."""
     import monochrome
     monkeypatch.setattr(
         "monochrome_tracks.resolve_stream_url",
         lambda *a: (_ for _ in ()).throw(AssertionError("tracks API needs a title")),
     )
-    calls = []
-    monkeypatch.setattr(
-        "qbdlx.resolve_qobuz_stream_url",
-        lambda isrc, quality_fmt: calls.append((isrc, quality_fmt)) or "https://qobuz.test/preview.flac",
-    )
-    assert monochrome.get_monochrome_preview_url("GBAYE9200070") == "https://qobuz.test/preview.flac"
-    assert calls == [("GBAYE9200070", 7)]
-
-
-def test_preview_never_falls_back_to_lossy_qbdlx_format(monkeypatch):
-    import monochrome
-    calls = []
-    monkeypatch.setattr("monochrome_tracks.resolve_stream_url", lambda *a: None)
-    monkeypatch.setattr(
-        "qbdlx.resolve_qobuz_stream_url",
-        lambda isrc, quality_fmt: calls.append((isrc, quality_fmt)),
-    )
     monkeypatch.setattr(monochrome, "_deezer_isrc_rescue", lambda *a: "")
     with pytest.raises(RuntimeError, match="no stream available"):
         monochrome.get_monochrome_preview_url("GBAYE9200070")
-    assert calls == [("GBAYE9200070", 7)]
 
 
 def test_preview_rescues_isrc_with_artist_and_title(monkeypatch):
@@ -111,7 +61,6 @@ def test_preview_rescues_isrc_with_artist_and_title(monkeypatch):
         tracks_calls.append(isrc)
         return "https://tracks.test/track/2" if isrc == "GBNEW2500001" else None
     monkeypatch.setattr("monochrome_tracks.resolve_stream_url", fake_tracks)
-    monkeypatch.setattr("qbdlx.resolve_qobuz_stream_url", lambda *a: None)
     monkeypatch.setattr(monochrome, "_deezer_isrc_rescue", lambda *a: "GBNEW2500001")
     url = monochrome.get_monochrome_preview_url(
         "monochrome://123?isrc=GBOLD2500001&quality=LOSSLESS&src=deezer",
@@ -124,7 +73,6 @@ def test_preview_rescues_isrc_with_artist_and_title(monkeypatch):
 def test_preview_uses_tidal_lossless_as_final_leg(monkeypatch):
     import monochrome
     monkeypatch.setattr("monochrome_tracks.resolve_stream_url", lambda *a: None)
-    monkeypatch.setattr("qbdlx.resolve_qobuz_stream_url", lambda *a: None)
     monkeypatch.setattr(monochrome, "_deezer_isrc_rescue", lambda *a: "")
     tidal_calls = []
     monkeypatch.setattr(
@@ -138,10 +86,9 @@ def test_preview_uses_tidal_lossless_as_final_leg(monkeypatch):
     assert tidal_calls == [("18420572", "LOSSLESS")]
 
 
-def test_download_fails_cleanly_when_tracks_api_and_qbdlx_have_nothing(monkeypatch, tmp_path):
+def test_download_fails_cleanly_when_the_tracks_api_has_nothing(monkeypatch, tmp_path):
     import monochrome
     monkeypatch.setattr("monochrome_tracks.resolve_stream_url", lambda *a: None)
-    monkeypatch.setattr("qbdlx.resolve_qobuz_stream_url", lambda *a: None)
     monkeypatch.setattr(monochrome, "_deezer_isrc_rescue", lambda *a: "")
     output = tmp_path / "track.flac"
     with pytest.raises(RuntimeError, match="no stream available"):
@@ -152,18 +99,23 @@ def test_download_fails_cleanly_when_tracks_api_and_qbdlx_have_nothing(monkeypat
     assert not output.exists()
 
 
-def test_tracks_api_error_falls_through_to_qbdlx(monkeypatch):
-    """A tracks API outage is a reason to try the next leg, not to give up."""
+def test_tracks_api_outage_is_reported_not_raised_mid_ladder(monkeypatch):
+    """An outage is recorded in the trace and the ladder carries on to its end."""
     import monochrome
     monkeypatch.setattr(
         "monochrome_tracks.resolve_stream_url",
         lambda *a: (_ for _ in ()).throw(httpx.ConnectError("tracks API down")),
     )
-    monkeypatch.setattr("qbdlx.resolve_qobuz_stream_url", lambda *a: "https://qobuz.test/fast.flac")
-    assert monochrome._resolve_monochrome_stream_url(
-        "monochrome://123?isrc=GBAYE9200070&quality=HI_RES_LOSSLESS",
-        artist_hint="Radiohead", title_hint="Creep",
-    ) == "https://qobuz.test/fast.flac"
+    monkeypatch.setattr(monochrome, "_deezer_isrc_rescue", lambda *a: "")
+    trace = []
+    with pytest.raises(RuntimeError, match="no stream available"):
+        monochrome._resolve_monochrome_stream_url(
+            "monochrome://123?isrc=GBAYE9200070&quality=LOSSLESS",
+            artist_hint="Radiohead", title_hint="Creep", trace=trace,
+        )
+    assert trace[0]["leg"] == "Monochrome tracks API"
+    assert trace[0]["ok"] is False
+    assert "tracks API down" in trace[0]["detail"]
 
 
 # ---------------------------------------------------------------------------
@@ -403,87 +355,92 @@ def test_hifi_search_leg_stops_at_its_wall_clock_budget(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
-# qbdlx direct-Qobuz search fallback (when the hifi-api search leg is down)
+# Tracks API search fallback (when Deezer and the hifi-api are both empty)
 # ---------------------------------------------------------------------------
 
-def _make_qobuz_catalog_item(track_id=8767428, isrc="USQX91300809", title="Get Lucky",
-                             artist="Daft Punk", album="Random Access Memories",
-                             streamable=True, version=""):
-    """A minimal Qobuz catalog/search track item, shaped like the real API."""
+def _make_tracks_item(track_id="155142501534011392", isrc="USQX91300108",
+                      title="Get Lucky (feat. Pharrell Williams and Nile Rodgers)",
+                      artists=("Daft Punk", "Pharrell Williams", "Nile Rodgers"),
+                      playable=True):
+    """A minimal tracks API /search/tracks item, shaped like the real API."""
     return {
         "id": track_id,
+        "trackId": track_id,
         "isrc": isrc,
         "title": title,
-        "performer": {"name": artist},
-        "album": {"title": album, "image": {"large": "https://img.test/large.jpg"}},
-        "duration": 247,
-        "version": version,
-        "streamable": streamable,
+        "artistNames": list(artists),
+        "artwork": "https://tracks.test/proxy/mi/cover.jpg",
+        "duration": 369000,
+        "playable": playable,
     }
 
 
-def test_qbdlx_search_fallback_maps_items(monkeypatch):
+def test_tracks_search_fallback_maps_items(monkeypatch):
     import monochrome
-    monkeypatch.setattr("qbdlx.search_qobuz_catalog",
-                        lambda q, limit: [_make_qobuz_catalog_item()])
+    monkeypatch.setattr("monochrome_tracks.search_tracks", lambda q, limit: [_make_tracks_item()])
 
-    results = monochrome._qbdlx_search_fallback("daft punk get lucky", 5)
+    results = monochrome._tracks_search_fallback("daft punk get lucky", 5)
 
     assert len(results) == 1
     r = results[0]
     assert r["source"] == "monochrome"
-    assert r["quality"] == "LOSSLESS"          # free tokens cap here, labelled honestly
-    assert r["channel"] == "Daft Punk"
-    assert r["title"] == "Get Lucky"
-    assert r["thumbnail"] == "https://img.test/large.jpg"
-    assert r["source_url"].startswith("monochrome://8767428?")
-    assert "isrc=USQX91300809" in r["source_url"]
-    assert "quality=LOSSLESS" in r["source_url"]
-    assert any("qbdlx-direct" in b for b in r["score_breakdown"])
+    assert r["quality"] == "LOSSLESS"          # all the tracks API ever serves
+    assert r["channel"] == "Daft Punk"         # the lead artist; features are in the title
+    assert r["title"].startswith("Get Lucky")
+    assert r["duration"] == "6:09"
+    assert r["thumbnail"] == "https://tracks.test/proxy/mi/cover.jpg"
+    assert r["source_url"].startswith("monochrome://155142501534011392?")
+    assert "isrc=USQX91300108" in r["source_url"]
+    assert "src=tracks" in r["source_url"]
+    assert any("tracks-api" in b for b in r["score_breakdown"])
 
 
-def test_qbdlx_search_fallback_skips_no_isrc_and_unstreamable(monkeypatch):
+def test_tracks_search_fallback_skips_junk_and_unplayable(monkeypatch):
     import monochrome
     items = [
-        _make_qobuz_catalog_item(track_id=1, isrc="", title="No ISRC"),
-        _make_qobuz_catalog_item(track_id=2, streamable=False, title="Not streamable"),
-        _make_qobuz_catalog_item(track_id=3, isrc="GBABC1234567", title="Good"),
+        _make_tracks_item(track_id="1", isrc="", title="No ISRC"),
+        _make_tracks_item(track_id="2", playable=False, title="Not playable"),
+        _make_tracks_item(track_id="", isrc="GBABC1234560", title="No id"),
+        _make_tracks_item(track_id="3", isrc="GBABC1234567", title="Good"),
     ]
-    monkeypatch.setattr("qbdlx.search_qobuz_catalog", lambda q, limit: items)
+    monkeypatch.setattr("monochrome_tracks.search_tracks", lambda q, limit: items)
 
-    results = monochrome._qbdlx_search_fallback("x", 5)
+    results = monochrome._tracks_search_fallback("x", 5)
 
     assert [r["title"] for r in results] == ["Good"]
 
 
-def test_qbdlx_search_fallback_dedupes_by_isrc(monkeypatch):
+def test_tracks_search_fallback_dedupes_by_isrc(monkeypatch):
     import monochrome
     items = [
-        _make_qobuz_catalog_item(track_id=10, isrc="USQX91300809", title="Get Lucky"),
-        _make_qobuz_catalog_item(track_id=11, isrc="USQX91300809", title="Get Lucky (dupe)"),
+        _make_tracks_item(track_id="10", title="Get Lucky"),
+        _make_tracks_item(track_id="11", title="Get Lucky (another release)"),
     ]
-    monkeypatch.setattr("qbdlx.search_qobuz_catalog", lambda q, limit: items)
+    monkeypatch.setattr("monochrome_tracks.search_tracks", lambda q, limit: items)
 
-    results = monochrome._qbdlx_search_fallback("x", 5)
-
-    assert len(results) == 1
+    assert len(monochrome._tracks_search_fallback("x", 5)) == 1
 
 
-def test_search_monochrome_falls_back_to_qbdlx_when_hifi_api_down(monkeypatch):
+def test_tracks_search_fallback_shrugs_off_an_outage(monkeypatch):
     import monochrome
-    monkeypatch.setattr(monochrome, "_hifi_api_urls", lambda: ["https://dead.example.test"])
+    monkeypatch.setattr(
+        "monochrome_tracks.search_tracks",
+        lambda *a: (_ for _ in ()).throw(httpx.ConnectError("down")),
+    )
+    assert monochrome._tracks_search_fallback("x", 5) == []
 
-    def boom(*a, **k):
-        raise RuntimeError("hifi-api dead")
-    monkeypatch.setattr(monochrome.httpx, "get", boom)
-    monkeypatch.setattr("qbdlx.search_qobuz_catalog",
-                        lambda q, limit: [_make_qobuz_catalog_item()])
+
+def test_search_monochrome_falls_back_to_tracks_api_when_deezer_and_hifi_are_empty(monkeypatch):
+    import monochrome
+    monkeypatch.setattr(monochrome, "_deezer_search_leg", lambda q, limit: [])
+    monkeypatch.setattr(monochrome, "_hifi_search_leg", lambda q, limit: [])
+    monkeypatch.setattr("monochrome_tracks.search_tracks", lambda q, limit: [_make_tracks_item()])
 
     results = monochrome.search_monochrome("daft punk get lucky", 5)
 
     assert results
-    assert results[0]["title"] == "Get Lucky"
-    assert any("qbdlx-direct" in b for b in results[0]["score_breakdown"])
+    assert results[0]["title"].startswith("Get Lucky")
+    assert any("tracks-api" in b for b in results[0]["score_breakdown"])
 
 
 # ---------------------------------------------------------------------------
@@ -538,44 +495,46 @@ def test_parse_tidal_track_payload_shapes():
     assert monochrome._parse_tidal_track_payload({"detail": "Upstream API error"}) == ""
 
 
-def test_deezer_search_leg_verifies_against_qobuz(monkeypatch):
+def test_deezer_search_leg_verifies_against_the_tracks_api(monkeypatch):
     import monochrome
     monkeypatch.setattr(monochrome, "_deezer_search_tracks",
                         lambda q, limit: [
                             _make_deezer_item(),
-                            _make_deezer_item(track_id=2, isrc="GB28K1100170", title="Titanium (hi-res edition)"),
-                            _make_deezer_item(track_id=3, isrc="GB28K1100999", title="Titanium (not on Qobuz)"),
+                            _make_deezer_item(track_id=2, isrc="GB28K1100170", title="Titanium (Radio Edit)"),
+                            _make_deezer_item(track_id=3, isrc="GB28K1100999", title="Titanium (not stocked)"),
                         ])
+    asked = []
 
-    def fake_lookup(isrc):
-        if isrc == "GB28K1100036":
-            return [{"id": 1, "isrc": isrc, "hires": False}], False
-        if isrc == "GB28K1100170":
-            return [{"id": 2, "isrc": isrc, "hires": True}], False
-        return [], False  # clean miss: Qobuz has never heard of it
-    monkeypatch.setattr(monochrome, "_qobuz_isrc_lookup", fake_lookup)
+    def fake_lookup(isrc, artist, title):
+        asked.append((isrc, artist, title))
+        if isrc in ("GB28K1100036", "GB28K1100170"):
+            return {"trackId": "1", "isrc": isrc}, False
+        return None, False  # clean miss: the tracks API does not stock it
+    monkeypatch.setattr(monochrome, "_tracks_isrc_lookup", fake_lookup)
 
     results = monochrome._deezer_search_leg("david guetta titanium", 5)
 
     assert len(results) == 2  # the clean miss was dropped
-    qualities = {r["quality"] for r in results}
-    assert qualities == {"LOSSLESS", "HI_RES_LOSSLESS"}
+    assert {r["quality"] for r in results} == {"LOSSLESS"}
     assert all("src=deezer" in r["source_url"] for r in results)
     assert all(r["source"] == "monochrome" for r in results)
     assert all(any("via=deezer-isrc" in b for b in r["score_breakdown"]) for r in results)
+    assert not any("unverified" in b for r in results for b in r["score_breakdown"])
+    # Asked by Deezer's own artist and title, since the tracks API only searches by name.
+    assert ("GB28K1100036", "David Guetta", "Titanium (feat. Sia)") in asked
 
 
-def test_deezer_search_leg_keeps_unverified_when_direct_lookup_is_down(monkeypatch):
+def test_deezer_search_leg_keeps_unverified_when_the_tracks_api_is_down(monkeypatch):
     import monochrome
     monkeypatch.setattr(monochrome, "_deezer_search_tracks",
                         lambda q, limit: [_make_deezer_item()])
-    monkeypatch.setattr(monochrome, "_qobuz_isrc_lookup", lambda isrc: ([], True))
+    monkeypatch.setattr(monochrome, "_tracks_isrc_lookup", lambda isrc, artist, title: (None, True))
 
     results = monochrome._deezer_search_leg("david guetta titanium", 5)
 
     assert len(results) == 1
     assert results[0]["quality"] == "LOSSLESS"
-    assert any("qobuz_unverified" in b for b in results[0]["score_breakdown"])
+    assert any("unverified" in b for b in results[0]["score_breakdown"])
 
 
 def test_deezer_search_leg_skips_junk_isrcs(monkeypatch):
@@ -585,8 +544,8 @@ def test_deezer_search_leg_skips_junk_isrcs(monkeypatch):
                             _make_deezer_item(isrc="QT&JC2622262", title="Junk ISRC"),
                             _make_deezer_item(isrc=""),
                         ])
-    monkeypatch.setattr(monochrome, "_qobuz_isrc_lookup",
-                        lambda isrc: ([{"id": 1, "isrc": isrc, "hires": False}], False))
+    monkeypatch.setattr(monochrome, "_tracks_isrc_lookup",
+                        lambda isrc, artist, title: ({"trackId": "1", "isrc": isrc}, False))
 
     assert monochrome._deezer_search_leg("whatever", 5) == []
 
@@ -703,7 +662,6 @@ def test_download_rescues_malformed_isrc_via_deezer(monkeypatch, tmp_path):
 def test_download_falls_back_to_tidal_stream_for_tidal_results(monkeypatch, tmp_path):
     import monochrome
     monkeypatch.setattr("monochrome_tracks.resolve_stream_url", lambda *a: None)
-    monkeypatch.setattr("qbdlx.resolve_qobuz_stream_url", lambda *a: None)
     monkeypatch.setattr(monochrome, "_deezer_isrc_rescue", lambda *a: "")
     tidal_calls = []
     monkeypatch.setattr(
@@ -721,7 +679,6 @@ def test_download_falls_back_to_tidal_stream_for_tidal_results(monkeypatch, tmp_
 def test_download_never_uses_tidal_stream_for_non_tidal_results(monkeypatch, tmp_path):
     import monochrome
     monkeypatch.setattr("monochrome_tracks.resolve_stream_url", lambda *a: None)
-    monkeypatch.setattr("qbdlx.resolve_qobuz_stream_url", lambda *a: None)
     monkeypatch.setattr(monochrome, "_deezer_isrc_rescue", lambda *a: "")
     monkeypatch.setattr(
         monochrome, "_tidal_stream_url",
@@ -730,7 +687,7 @@ def test_download_never_uses_tidal_stream_for_non_tidal_results(monkeypatch, tmp
     output = tmp_path / "track.flac"
     with pytest.raises(RuntimeError, match="no stream available"):
         monochrome.download_monochrome_track(
-            "monochrome://8767428?isrc=GBZZZ9900001&quality=LOSSLESS&src=qbdlx", output,
+            "monochrome://8767428?isrc=GBZZZ9900001&quality=LOSSLESS&src=tracks", output,
         )
     assert not output.exists()
 

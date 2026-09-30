@@ -507,11 +507,9 @@ def test_manual_completeness_gate_requires_search_token_and_single_job(monkeypat
 
 # ---------------------------------------------------------------------------
 # _maybe_mark_monochrome_unhealthy: a single track missing from every leg
-# (browser playback, qbdlx, Deezer rescue, Tidal stream) raises the exact same
-# exception as the whole leg being down. These confirm we re-check the leg
-# itself before parking Monochrome for everyone over one unlucky search
-# result -- see docs/requests and bugs.md, "the shared qbdlx token pool
-# remains fragile".
+# (tracks API, Deezer rescue, Tidal stream) raises the exact same exception as
+# the whole leg being down. These confirm we re-check the leg itself before
+# parking Monochrome for everyone over one unlucky search result.
 # ---------------------------------------------------------------------------
 
 def test_maybe_mark_monochrome_unhealthy_skips_healthy_leg(monkeypatch):
@@ -520,7 +518,7 @@ def test_maybe_mark_monochrome_unhealthy_skips_healthy_leg(monkeypatch):
     import servicecheck
 
     monkeypatch.setattr(monochrome, "download_leg_healthy",
-                         lambda: (True, "3/28 shared tokens usable this cycle"))
+                         lambda: (True, "Monochrome tracks API answering at https://tracks.test"))
     calls = []
     monkeypatch.setattr(servicecheck, "mark_unhealthy", lambda *a, **k: calls.append((a, k)))
 
@@ -536,7 +534,7 @@ def test_maybe_mark_monochrome_unhealthy_parks_source_when_leg_is_down(monkeypat
     import monochrome
     import servicecheck
 
-    reason = "browser playback unavailable; qbdlx fallback unavailable (0/28 shared tokens usable this cycle)"
+    reason = "Monochrome tracks API unreachable: HTTPStatusError: 503 Service Unavailable"
     monkeypatch.setattr(monochrome, "download_leg_healthy", lambda: (False, reason))
     calls = []
     monkeypatch.setattr(servicecheck, "mark_unhealthy", lambda *a, **k: calls.append((a, k)))

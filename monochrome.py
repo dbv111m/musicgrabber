@@ -3,21 +3,20 @@ MusicGrabber - Monochrome Source
 
 The resolution ladder, in order of preference:
 
-  Search:   Deezer (clean ISRCs, typo-tolerant, machine-readable version labels)
+  Search:   Deezer (clean ISRCs, typo-tolerant, machine-readable version labels),
+            each result checked against the tracks API
             -> Tidal hifi-api top-up (catalogue gaps, Deezer outage)
-            -> qbdlx direct Qobuz (everything else face-down)
-  Download: Monochrome tracks API -> qbdlx direct Qobuz
-            -> Deezer ISRC rescue -> Tidal stream via hifi-api
-            -> fail honestly
+            -> tracks API search (everything else face-down)
+  Download: Monochrome tracks API -> Deezer ISRC rescue
+            -> Tidal stream via hifi-api -> fail honestly
 
 Search endpoint:  GET {DEEZER}/search?q=query (ISRC arrives inline, free of charge)
 Tidal search:     GET {HIFI_API}/search?s=query
 Tidal stream:     GET {HIFI_API}/track/?id=ID&quality=LOSSLESS (last-ditch leg)
 Tracks API:       see monochrome_tracks.py (search by artist/title, match the ISRC)
-CDN audio:        https://streaming-qobuz-std.akamaized.net/... (direct FLAC, no auth)
 
 source_url format: monochrome://track_id?isrc=ISRC&quality=HI_RES_LOSSLESS&src=tidal
-The `src` param records which leg found the track (tidal/deezer/qbdlx); only
+The `src` param records which leg found the track (tidal/deezer/tracks); only
 tidal-sourced results may use the Tidal stream fallback, because for the other
 legs the netloc is not a Tidal ID and resolving it as one could fetch a
 completely different song. Nobody wants surprise polka.
@@ -65,7 +64,6 @@ _QUALITY_MAP = {
     "LOSSLESS":       ("LOSSLESS",         7),
     "HIGH":           ("HIGH",             6),
 }
-_SOURCE_QUALITY_TO_QOBUZ_FORMAT = {source_quality: qobuz_fmt for source_quality, qobuz_fmt in _QUALITY_MAP.values()}
 
 # Score bonuses per quality tier. Kept near Soulseek's stack so Monochrome can
 # compete on overall ranking, but the HIRES-over-LOSSLESS delta is deliberately
@@ -141,36 +139,11 @@ def _remember_hifi_api_url(base: str) -> None:
 def download_leg_healthy() -> tuple[bool, str]:
     """Health check for the source layer: can Monochrome actually stream a FLAC?
 
-    The tracks API gets one small live search; if that is down, qbdlx gets a
-    live stream probe instead.
+    One small live search against the tracks API, the route that serves
+    Monochrome downloads (the Tidal stream needs a self-hosted hifi-api).
     """
-    reasons = []
-    try:
-        from monochrome_tracks import health as tracks_health
-        tracks_ok, tracks_reason = tracks_health()
-        if tracks_ok:
-            return True, tracks_reason
-        if tracks_reason:
-            reasons.append(tracks_reason)
-    except Exception as exc:
-        reasons.append(str(exc))
-        print(f"Monochrome: tracks API health check errored: {exc}")
-
-    try:
-        from qbdlx import qbdlx_enabled, download_leg_healthy as qbdlx_healthy
-        if qbdlx_enabled():
-            ok, qbdlx_reason = qbdlx_healthy()
-            if ok:
-                return True, qbdlx_reason
-            if qbdlx_reason:
-                reasons.append(qbdlx_reason)
-        else:
-            reasons.append("qbdlx fallback disabled")
-    except Exception as exc:
-        reasons.append(str(exc))
-        print(f"Monochrome: qbdlx health probe errored: {exc}")
-
-    return False, "; ".join(reasons) or "tracks API and qbdlx unavailable"
+    from monochrome_tracks import health as tracks_health
+    return tracks_health()
 
 
 def _cover_url(cover_uuid: str) -> str:
@@ -367,19 +340,33 @@ def _deezer_search_candidates(query: str, limit: int) -> list[dict]:
     return raw_items
 
 
-def _qobuz_isrc_lookup(isrc: str) -> tuple[list[dict], bool]:
-    """Ask Qobuz directly through qbdlx whether an ISRC exists.
+def _tracks_isrc_lookup(isrc: str, artist: str, title: str) -> tuple[dict | None, bool]:
+    """Ask Monochrome's tracks API whether it stocks this exact recording.
 
-    Returns (matching_items, transport_failure). A clean "Qobuz has never heard
-    of it" is ([], False); ([], True) means the shared token route could not
-    answer, so absence proves nothing.
+    Returns (track, transport_failure). A clean "not stocked" is (None, False);
+    (None, True) means the API could not be asked, so absence proves nothing.
     """
     try:
-        from qbdlx import lookup_qobuz_isrc
-        return lookup_qobuz_isrc(isrc)
+        from monochrome_tracks import find_track
+        return find_track(isrc, artist, title), False
     except Exception as exc:
-        print(f"Monochrome: direct Qobuz ISRC lookup failed for {isrc}: {exc}")
-        return [], True
+        print(f"Monochrome: tracks API ISRC lookup failed for {isrc}: {exc}")
+        return None, True
+
+
+def _tracks_result_fields(track: dict) -> dict:
+    """Title, primary artist, cover and duration (seconds) from a tracks API entry.
+
+    The first listed artist is the primary one; features already sit in the
+    title, the same way Deezer's primary artist does.
+    """
+    names = track.get("artistNames") or []
+    return {
+        "title": (track.get("title") or "").strip(),
+        "artist": (names[0] if names else "").strip(),
+        "cover": track.get("artwork") or "",
+        "duration": round((track.get("duration") or 0) / 1000),
+    }
 
 
 def _deezer_rank_bonus(rank: int | None) -> tuple[int, str | None]:
@@ -429,11 +416,12 @@ def resolve_by_isrc(isrc: str, artist: str = "", title: str = "") -> dict | None
 
     The precise first attempt for a track whose studio recording we have already
     identified (e.g. from a MusicBrainz album fetch). Returns a normalised result
-    dict on a hit, or None when Qobuz cleanly has nothing for this ISRC, which is
-    the caller's signal to fall back to a free-text search.
+    dict on a hit, or None when the tracks API cleanly has nothing for this ISRC,
+    which is the caller's signal to fall back to a free-text search. The API can
+    only be searched by name, so a missing title is also a None.
 
-    Deliberately conservative when the direct catalogue route is unavailable:
-    we return None rather than gambling on a maybe-dead ISRC. The fallback search
+    Deliberately conservative when the tracks API is unavailable: we return
+    None rather than gambling on a maybe-dead ISRC. The fallback search
     is safer than blindly queueing a recording we could not confirm exists. This
     differs on purpose from _deezer_search_leg's optimistic "label it and hope"
     behaviour; here we have a clean fallback waiting, so we use it.
@@ -442,21 +430,16 @@ def resolve_by_isrc(isrc: str, artist: str = "", title: str = "") -> dict | None
     if not _isrc_valid(isrc):
         return None
 
-    matches, transport_failure = _qobuz_isrc_lookup(isrc)
-    if not matches:
-        # Clean miss or catalogue route unavailable; let the caller fall back.
+    track, _transport_failure = _tracks_isrc_lookup(isrc, artist, title)
+    if not track:
+        # Clean miss or tracks API unavailable; let the caller fall back.
         return None
 
-    quality = "HI_RES_LOSSLESS" if any(t.get("hires") for t in matches) else "LOSSLESS"
-
+    # The tracks API serves 16/44.1 FLAC, full stop.
+    quality = "LOSSLESS"
     # Prefer the catalogue's own metadata; fall back to the caller's hints when a
     # field is missing (the download keys off the ISRC, so this is cosmetic).
-    item = matches[0]
-    item_artist = ((item.get("performer") or {}).get("name") or "").strip()
-    item_title = (item.get("title") or "").strip()
-    cover = (((item.get("album") or {}).get("image") or {}).get("large", "") or
-             ((item.get("album") or {}).get("image") or {}).get("thumbnail", "")) or ""
-    duration = item.get("duration") or 0
+    fields = _tracks_result_fields(track)
 
     bonus = _QUALITY_BONUS[quality]
     # Flat high score: this is a direct, identity-pinned pick, not a contender in
@@ -464,15 +447,16 @@ def resolve_by_isrc(isrc: str, artist: str = "", title: str = "") -> dict | None
     relevance_score = 1000 + bonus
     score_breakdown = ["via=isrc-direct", f"source_quality=+{bonus}"]
 
+    from monochrome_tracks import track_id
     return _build_monochrome_result(
-        track_id=item.get("id", ""),
+        track_id=track_id(track),
         isrc=isrc,
         quality=quality,
-        src="deezer",
-        title=item_title or title,
-        artist=item_artist or artist,
-        duration=duration,
-        cover=cover,
+        src="tracks",
+        title=fields["title"] or title,
+        artist=fields["artist"] or artist,
+        duration=fields["duration"],
+        cover=fields["cover"],
         relevance_score=relevance_score,
         score_breakdown=score_breakdown,
     )
@@ -625,23 +609,29 @@ def resolve_album_tracks(artist: str, album_title: str, titles: list[str]) -> di
         details = list(pool.map(lambda pair: _detail(pair[1]), pairs))
 
     isrcs = [((d or {}).get("isrc") or "").strip().upper() for d in details]
+
+    def _stocked(row) -> tuple[dict | None, bool]:
+        (idx, dz), detail_body, code = row
+        if not _isrc_valid(code):
+            return None, False
+        track_artist = ((detail_body or {}).get("artist") or {}).get("name") or artist
+        return _tracks_isrc_lookup(code, track_artist, dz.get("title") or titles[idx])
+
     with ThreadPoolExecutor(max_workers=min(4, len(pairs))) as pool:
-        lookups = list(pool.map(lambda code: _qobuz_isrc_lookup(code) if _isrc_valid(code) else ([], False), isrcs))
+        lookups = list(pool.map(_stocked, zip(pairs, details, isrcs)))
 
     resolved: dict[int, dict] = {}
-    for (idx, dz), detail_body, isrc, (qobuz_items, transport_failure) in zip(pairs, details, isrcs, lookups):
+    for (idx, dz), detail_body, isrc, (track, transport_failure) in zip(pairs, details, isrcs, lookups):
         if not _isrc_valid(isrc):
             continue
+        if not track and not transport_failure:
+            continue  # The tracks API answered and does not stock it; let the per-track search try.
         breakdown = [f"via=deezer-album:{album.get('id')}"]
-        if qobuz_items:
-            quality = "HI_RES_LOSSLESS" if any(t.get("hires") for t in qobuz_items) else "LOSSLESS"
-        elif transport_failure:
+        quality = "LOSSLESS"
+        if not track:
             # Same bargain the search leg strikes: unverifiable is not the same
-            # as absent, and qbdlx may well deliver it at download time.
-            quality = "LOSSLESS"
-            breakdown.append("qobuz_unverified (direct lookup unavailable)")
-        else:
-            continue  # Qobuz answered and has nothing; let the per-track search try.
+            # as absent, and the tracks API may be back by download time.
+            breakdown.append("unverified (tracks API unavailable)")
 
         bonus = _QUALITY_BONUS[quality]
         breakdown.append(f"source_quality=+{bonus}")
@@ -670,13 +660,13 @@ def resolve_album_tracks(artist: str, album_title: str, titles: list[str]) -> di
 
 
 def _deezer_search_leg(query: str, limit: int) -> list[dict]:
-    """Primary Monochrome search leg: Deezer finds the track, Qobuz confirms it.
+    """Primary Monochrome search leg: Deezer finds the track, the tracks API confirms it.
 
     Deezer's catalogue search is far more forgiving of typos than the hifi-api,
     every result carries a clean ISRC, and `title_version` flags live/karaoke
     versions explicitly instead of making us guess from punctuation. Each
-    candidate ISRC is then verified against Qobuz so we only show tracks we can
-    actually download, labelled with the quality Qobuz really has.
+    candidate ISRC is then checked against Monochrome's tracks API so we only
+    show tracks we can actually download.
     """
     try:
         raw_items = _deezer_search_candidates(query, limit * 3)
@@ -735,26 +725,27 @@ def _deezer_search_leg(query: str, limit: int) -> list[dict]:
     if not candidates:
         return []
 
-    # Only Qobuz-verify the contenders; no point spending shared-token calls on
-    # the page-two also-rans.
+    # Only verify the contenders; no point asking the tracks API about the
+    # page-two also-rans.
     candidates.sort(key=lambda c: c["relevance_score"], reverse=True)
     candidates = candidates[:limit]
 
     with ThreadPoolExecutor(max_workers=min(4, len(candidates))) as pool:
-        lookups = list(pool.map(lambda c: _qobuz_isrc_lookup(c["isrc"]), candidates))
+        lookups = list(pool.map(
+            lambda c: _tracks_isrc_lookup(c["isrc"], c["artist"], c["title"]), candidates
+        ))
 
     results = []
-    for cand, (qobuz_items, transport_failure) in zip(candidates, lookups):
-        if qobuz_items:
-            quality_str = "HI_RES_LOSSLESS" if any(t.get("hires") for t in qobuz_items) else "LOSSLESS"
-        elif transport_failure:
-            # The direct lookup route cannot verify this one, but the tracks
-            # API may still deliver it. Label conservatively rather than dropping.
-            quality_str = "LOSSLESS"
-            cand["score_breakdown"].append("qobuz_unverified (direct lookup unavailable)")
-        else:
-            # Qobuz answered and has nothing for this ISRC: not downloadable.
+    for cand, (track, transport_failure) in zip(candidates, lookups):
+        if not track and not transport_failure:
+            # The tracks API answered and does not stock this ISRC: not downloadable.
             continue
+        # The tracks API serves 16/44.1 FLAC whatever the master, so that is the label.
+        quality_str = "LOSSLESS"
+        if not track:
+            # Could not ask, which is not the same as absent. Label it honestly
+            # rather than dropping it; the download will find out.
+            cand["score_breakdown"].append("unverified (tracks API unavailable)")
 
         bonus = _QUALITY_BONUS[quality_str]
         relevance_score = cand["relevance_score"] + bonus
@@ -781,7 +772,7 @@ def _deezer_isrc_rescue(artist: str, title: str, bad_isrc: str) -> str:
     """Find the canonical studio ISRC for artist/title via Deezer.
 
     Used when the ISRC we were handed (usually by Tidal's metadata) is either
-    malformed or unknown to Qobuz. Returns "" rather than guessing: a confident
+    malformed or unknown to the tracks API. Returns "" rather than guessing: a confident
     miss beats a wrong track.
     """
     artist = (artist or "").strip()
@@ -819,86 +810,61 @@ def _deezer_isrc_rescue(artist: str, title: str, bad_isrc: str) -> str:
     return ""
 
 
-def _qbdlx_search_fallback(query: str, limit: int) -> list[dict]:
-    """Search Qobuz directly via qbdlx when the hifi-api search leg is dead.
+def _tracks_search_fallback(query: str, limit: int) -> list[dict]:
+    """Search Monochrome's tracks API directly when Deezer and hifi-api are empty.
 
-    The hifi-api (Tidal gateway) is the flaky single point of failure for
-    Monochrome search. qbdlx already talks to the real Qobuz API for downloads,
-    so we reuse its token pool to search the catalogue too. Results carry an
-    ISRC, so the existing monochrome:// download path works unchanged; quality
-    is honestly LOSSLESS (16/44.1) since the free shared tokens cap there, even
-    when Qobuz reports a hi-res master exists.
+    Deezer is the usual front door; this keeps Monochrome searchable when Deezer
+    has a bad day. Anything it returns is by definition something the tracks API
+    can serve, so there is nothing to verify, and the quality is honestly
+    LOSSLESS (16/44.1), which is all it ever serves.
     """
     try:
-        from qbdlx import search_qobuz_catalog
-        raw_items = search_qobuz_catalog(query, limit * 2)
+        from monochrome_tracks import search_tracks, track_id
+        raw_items = search_tracks(query, limit * 2)
     except Exception as exc:
-        print(f"Monochrome: qbdlx search fallback errored: {exc}")
-        return []
-    if not raw_items:
+        print(f"Monochrome: tracks API search fallback errored: {exc}")
         return []
 
     results = []
     seen_isrcs = set()
     for item in raw_items:
-        if not item.get("streamable", True):
+        if item.get("playable") is False:
             continue
-        isrc = (item.get("isrc") or "").strip()
-        title = (item.get("title") or "").strip()
-        artist = ((item.get("performer") or {}).get("name") or "").strip()
-        # No ISRC means the download leg can't resolve it on Qobuz; skip it,
-        # same rule the hifi-api path applies.
-        if not (isrc and title and artist):
+        isrc = (item.get("isrc") or "").strip().upper()
+        fields = _tracks_result_fields(item)
+        tid = track_id(item)
+        if not (_isrc_valid(isrc) and fields["title"] and fields["artist"] and tid):
             continue
         if isrc in seen_isrcs:
             continue
         seen_isrcs.add(isrc)
 
-        album = ((item.get("album") or {}).get("title") or "")
-        cover = ((item.get("album") or {}).get("image") or {}).get("large", "") or \
-                ((item.get("album") or {}).get("image") or {}).get("thumbnail", "")
-        duration = item.get("duration") or 0
-        version = item.get("version") or ""
-
-        combined = f"{artist} - {title}"
         relevance_score, score_breakdown = score_search_result_with_breakdown(
-            combined, artist, query,
-            duration_seconds=duration or None,
+            f"{fields['artist']} - {fields['title']}", fields["artist"], query,
+            duration_seconds=fields["duration"] or None,
             view_count=None,
-            album=album,
         )
         bonus = _QUALITY_BONUS["LOSSLESS"]
         relevance_score += bonus
         score_breakdown.append(f"source_quality=+{bonus}")
-        score_breakdown.append("via=qbdlx-direct (hifi-api down)")
+        score_breakdown.append("via=tracks-api (Deezer empty)")
 
-        for delta, reason in (
-            _version_penalty(version, query),
-            _album_edition_penalty(album, query),
-        ):
-            if delta:
-                relevance_score += delta
-                score_breakdown.append(reason)
-
-        # The item id slot carries the Qobuz track id here; the download path keys
-        # off the ISRC, so the netloc is purely informational. The src marker
-        # stops the Tidal stream fallback treating a Qobuz id as a Tidal one.
         results.append(_build_monochrome_result(
-            track_id=item.get("id", ""),
+            track_id=tid,
             isrc=isrc,
             quality="LOSSLESS",
-            src="qbdlx",
-            title=title,
-            artist=artist,
-            duration=duration,
-            cover=cover,
+            src="tracks",
+            title=fields["title"],
+            artist=fields["artist"],
+            duration=fields["duration"],
+            cover=fields["cover"],
             relevance_score=relevance_score,
             score_breakdown=score_breakdown,
         ))
 
     results.sort(key=lambda x: x["relevance_score"], reverse=True)
     if results:
-        print(f"Monochrome: hifi-api search empty, served {len(results)} result(s) via qbdlx direct Qobuz")
+        print(f"Monochrome: Deezer and hifi-api empty, served {len(results)} result(s) via the tracks API")
     return results[:limit]
 
 
@@ -940,10 +906,10 @@ def _has_confident_match(results: list[dict], query: str) -> bool:
 def search_monochrome(query: str, limit: int) -> list[dict]:
     """Search the Monochrome ladder and return normalised result dicts.
 
-    Deezer is the primary leg (clean ISRCs, Qobuz-verified, typo-tolerant).
-    The Tidal hifi-api tops up when Deezer comes back light (catalogue gaps,
-    or Deezer itself having a moment), and qbdlx direct Qobuz is the final
-    safety net when both metadata legs are face-down.
+    Deezer is the primary leg (clean ISRCs, typo-tolerant, each result checked
+    against the tracks API). The Tidal hifi-api tops up when Deezer comes back
+    light (catalogue gaps, or Deezer itself having a moment), and a direct
+    tracks API search is the final safety net when both are face-down.
     """
     deezer_results = _deezer_search_leg(query, limit)
     # A full page of Deezer hits is only worth trusting if one of them actually
@@ -962,7 +928,7 @@ def search_monochrome(query: str, limit: int) -> list[dict]:
         return merged[:limit]
     if deezer_results:
         return deezer_results[:limit]
-    return _qbdlx_search_fallback(query, limit)
+    return _tracks_search_fallback(query, limit)
 
 
 def _hifi_search_leg(query: str, limit: int) -> list[dict]:
@@ -1030,7 +996,7 @@ def _hifi_search_leg(query: str, limit: int) -> list[dict]:
 
             if not (title and artist):
                 continue
-            # No ISRC means Qobuz can't find it, which means we can't download or even
+            # No ISRC means the tracks API can't match it, which means we can't download or even
             # preview it. Pretending otherwise just leads to broken results and angry users.
             if not isrc:
                 continue
@@ -1123,7 +1089,7 @@ def _parse_tidal_track_payload(body) -> str:
 def _tidal_stream_url(tidal_id: str, quality: str) -> str:
     """Resolve a direct stream URL from the Tidal hifi-api /track endpoint.
 
-    Last-ditch leg for tracks Qobuz simply doesn't stock (or whose ISRC is
+    Last-ditch leg for tracks the tracks API simply doesn't stock (or whose ISRC is
     beyond rescue) but which Tidal happily streams; this is exactly how the
     Monochrome web player serves them. Caps at LOSSLESS (16/44.1 FLAC), since
     Tidal's hi-res is Widevine-wrapped and we are not in that business.
@@ -1156,8 +1122,8 @@ def _resolve_monochrome_stream_url(source_url: str, artist_hint: str = "",
                                    trace: list | None = None) -> str:
     """Resolve a Monochrome result through the shared stream fallback ladder.
 
-    Monochrome's own tracks API is primary; direct qbdlx and Tidal streams are
-    fallbacks. Previews use ``lossless_only=True`` so they never
+    Monochrome's own tracks API is primary; a Deezer ISRC rescue and the Tidal
+    stream are fallbacks. Previews use ``lossless_only=True`` so they never
     quietly step down to a lossy tier.
 
     Pass ``trace`` (a list) to collect a per-leg record of what was tried and
@@ -1181,7 +1147,7 @@ def _resolve_monochrome_stream_url(source_url: str, artist_hint: str = "",
         raise RuntimeError(f"Monochrome: no ISRC in source_url {source_url!r}")
 
     # Tidal occasionally ships ISRCs that fail the most basic format check
-    # (ampersands, really?). Neither Monochrome nor Qobuz will resolve those, so
+    # (ampersands, really?). Monochrome will not resolve those, so
     # ask Deezer for the real one before trying the playback ladder.
     rescued = False
     if not _isrc_valid(isrc):
@@ -1192,8 +1158,8 @@ def _resolve_monochrome_stream_url(source_url: str, artist_hint: str = "",
             isrc = rescue_isrc
             rescued = True
 
-    # Previewing a few seconds should not pull hi-res audio or quietly fall back
-    # to the lossy HIGH tier. Format 7 is 16-bit FLAC, our strict preview floor.
+    # Previewing a few seconds should not quietly fall back to the lossy HIGH
+    # tier. Only the Tidal stream has tiers to choose between these days.
     tier_order = ["HI_RES_LOSSLESS", "LOSSLESS", "HIGH"]
     if lossless_only:
         candidates = ["LOSSLESS"]
@@ -1204,25 +1170,6 @@ def _resolve_monochrome_stream_url(source_url: str, artist_hint: str = "",
         candidates = tier_order
 
     last_error: Exception | None = None
-
-    def _resolve_via_qbdlx() -> str:
-        from qbdlx import resolve_qobuz_stream_url
-        errors = []
-        for tier in candidates:
-            fmt = _SOURCE_QUALITY_TO_QOBUZ_FORMAT.get(tier, 7)
-            try:
-                fallback_url = resolve_qobuz_stream_url(isrc, fmt)
-            except Exception as exc:
-                print(f"Monochrome: qbdlx fallback errored for ISRC {isrc}: {exc}")
-                errors.append(f"{tier}: {exc}")
-                fallback_url = None
-            if fallback_url:
-                print(f"Monochrome: served ISRC {isrc} via qbdlx direct Qobuz")
-                _note("qbdlx direct Qobuz", True, f"stream URL for ISRC {isrc} at {tier}")
-                return fallback_url
-        _note("qbdlx direct Qobuz", False,
-              "; ".join(errors) or f"no Qobuz stream for ISRC {isrc} at any allowed tier")
-        return ""
 
     def _resolve_via_tracks_api() -> str:
         """Resolve through Monochrome's tracks API: one search, exact ISRC match.
@@ -1250,23 +1197,18 @@ def _resolve_monochrome_stream_url(source_url: str, artist_hint: str = "",
 
     cdn_url = _resolve_via_tracks_api()
 
-    if not cdn_url:
-        cdn_url = _resolve_via_qbdlx()
-
-    # Qobuz genuinely has nothing under this ISRC. Before giving up on Qobuz,
+    # The tracks API genuinely has nothing under this ISRC. Before giving up,
     # ask Deezer whether the ISRC we were handed is simply wrong for the
     # recording (Tidal metadata strikes again) and retry with the real one.
     if not cdn_url and not rescued:
         rescue_isrc = _deezer_isrc_rescue(artist_hint, title_hint, isrc)
         if rescue_isrc and rescue_isrc != isrc.upper():
-            print(f"Monochrome: Qobuz had nothing for ISRC {isrc}; retrying with Deezer's {rescue_isrc}")
+            print(f"Monochrome: tracks API had nothing for ISRC {isrc}; retrying with Deezer's {rescue_isrc}")
             _note("Deezer ISRC rescue", True, f"swapped ISRC {isrc} -> {rescue_isrc}, retrying")
             isrc = rescue_isrc
             cdn_url = _resolve_via_tracks_api()
-            if not cdn_url:
-                cdn_url = _resolve_via_qbdlx()
 
-    # Final leg: the track may live on Tidal but not Qobuz at all, in which
+    # Final leg: the track may live on Tidal but not in the tracks API, in which
     # case the hifi-api can stream it directly (this is how the Monochrome web
     # player serves such tracks). Only for tidal-sourced results, where the
     # netloc really is a Tidal ID; hi-res is DRM-locked there, so LOSSLESS is
@@ -1279,7 +1221,7 @@ def _resolve_monochrome_stream_url(source_url: str, artist_hint: str = "",
         for tier in tidal_candidates:
             try:
                 cdn_url = _tidal_stream_url(tidal_id, tier)
-                print(f"Monochrome: tracks API and Qobuz routes exhausted, streaming tidal/{tidal_id} at {tier} via hifi-api")
+                print(f"Monochrome: tracks API exhausted, streaming tidal/{tidal_id} at {tier} via hifi-api")
                 _note("Tidal stream via hifi-api", True, f"tidal/{tidal_id} at {tier}")
                 break
             except Exception as exc:
@@ -1291,7 +1233,7 @@ def _resolve_monochrome_stream_url(source_url: str, artist_hint: str = "",
     if not cdn_url:
         raise RuntimeError(
             f"Monochrome: no stream available for ISRC {isrc} at an allowed quality "
-            f"on any leg (tracks API, qbdlx, "
+            f"on any leg (tracks API, "
             f"Deezer rescue, Tidal stream) "
             f"(last error: {last_error})"
         )
@@ -1371,13 +1313,10 @@ _DIAGNOSTIC_HINTS = [
     (("tracks api reachable",),
      "Monochrome's tracks API is not answering. Monochrome has moved house before; MusicGrabber "
      "follows a move within a few hours on its own, or you can pin the new address with "
-     "MONOCHROME_TRACKS_API_URL. Until then, only qbdlx can serve downloads."),
-    (("0 usable", "no usable", "401", "403", "token"),
-     "The shared qbdlx Qobuz token pool is dry or refusing us, and the tracks API did not cover "
-     "for it. This one is out of your hands."),
+     "MONOCHROME_TRACKS_API_URL. Until then, Monochrome downloads will fail."),
     (("timed out", "timeout"),
      "Something ran out of patience. Check the container's network; if that is fine, Monochrome "
-     "or Qobuz is having a slow day."),
+     "is having a slow day."),
 ]
 
 
@@ -1434,24 +1373,13 @@ def run_download_diagnostic(query: str = "") -> dict:
 
     temp_dir = None
     try:
-        # ---- 1. What is even switched on ----------------------------------
-        try:
-            from qbdlx import qbdlx_enabled
-            qbdlx_on = qbdlx_enabled()
-        except Exception as exc:
-            qbdlx_on = False
-            print(f"Monochrome diagnostic: qbdlx check errored: {exc}")
-
-        # The tracks API has no switch of its own; it is Monochrome.
-        enabled_legs = ["Monochrome tracks API"] + (["qbdlx direct Qobuz"] if qbdlx_on else [])
+        # ---- 1. Is it even switched on ------------------------------------
         if not monochrome_enabled():
             add("Monochrome source", "warn",
                 "Disabled in Search Sources, so results never appear in a search. Testing the "
                 "download path anyway.")
         else:
             add("Monochrome source", "ok", "Enabled in Search Sources")
-
-        add("Download routes", "ok", "Enabled: " + ", ".join(enabled_legs))
 
         # ---- 2. Can we reach the APIs at all -------------------------------
         from monochrome_tracks import health as tracks_health
@@ -1517,14 +1445,8 @@ def run_download_diagnostic(query: str = "") -> dict:
         except Exception as exc:
             resolve_error = f"{type(exc).__name__}: {exc}"
 
-        # A leg the user switched off did not "fail", it simply never ran. Saying
-        # otherwise sends people hunting for a bug they created on purpose.
-        switched_off = {"qbdlx direct Qobuz": not qbdlx_on}
         for entry in trace:
-            if not entry["ok"] and switched_off.get(entry["leg"]):
-                add(entry["leg"], "skip", "Switched off in settings, so this route was not tried")
-            else:
-                add(entry["leg"], "ok" if entry["ok"] else "fail", entry["detail"])
+            add(entry["leg"], "ok" if entry["ok"] else "fail", entry["detail"])
         if not cdn_url:
             add("Stream URL", "fail", resolve_error or "No leg produced a playable stream")
             return finish(False, "No Monochrome download route could resolve a stream.")

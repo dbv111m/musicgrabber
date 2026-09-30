@@ -15,6 +15,7 @@ const RELEASE_NOTES = {
                 items: [
                     "Monochrome moved house and changed the locks, which broke every Monochrome download. It now uses the same simple route Monochrome's own player does, so downloads work again and resolve in a couple of seconds instead of half a minute. No more browser firing up behind the scenes either.",
                     "Previews play the real track straight away.",
+                    "Monochrome search now only shows songs it can actually download, so no more tapping a result just to watch it fail. As a bonus, most of the karaoke and cover versions quietly disappear. If Deezer, where Monochrome's search starts, is having a bad day, Monochrome now searches its own catalogue instead of giving up.",
                     "One catch: the new route tops out at CD quality (16-bit FLAC), so Monochrome no longer offers 24-bit hi-res. Still proper lossless, just not the audiophile's extra helping.",
                 ]
             },

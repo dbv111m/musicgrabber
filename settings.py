@@ -15,7 +15,6 @@ from constants import (
     TIMEOUT_SPOTIFY_BROWSER, SPOTIFY_BROWSER_STALL_SECONDS,
     MUSIC_DIR, DB_PATH,
     MONOCHROME_HIFI_API_URL,
-    QBDLX_FALLBACK_ENABLED,
 )
 from db import db_conn
 
@@ -293,7 +292,6 @@ SETTINGS_SCHEMA = {
     "source_health_cooldown_minutes": {"type": "int", "default": 10, "env": "SOURCE_HEALTH_COOLDOWN_MINUTES"},
     "search_concurrency": {"type": "int", "default": 1, "env": "SEARCH_CONCURRENCY"},
     "monochrome_hifi_api_url": {"type": "str", "default": MONOCHROME_HIFI_API_URL, "env": "MONOCHROME_HIFI_API_URL"},
-    "monochrome_qbdlx_fallback_enabled": {"type": "bool", "default": QBDLX_FALLBACK_ENABLED, "env": "QBDLX_FALLBACK_ENABLED"},
     # YouTube
     "youtube_cookies": {"type": "str", "default": "", "env": "YOUTUBE_COOKIES", "sensitive": True},
     "youtube_bot_backoff_min": {"type": "int", "default": BOT_BACKOFF_MIN_SECONDS, "env": "YOUTUBE_BOT_BACKOFF_MIN"},

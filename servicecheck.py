@@ -9,9 +9,9 @@ This module checks whether each search source can actually deliver, hides the
 ones that can't, and parks a failing source for a cooldown before re-checking.
 
 Design notes:
-- Each source gets the *cheapest* check that proves it works. Monochrome checks
-  remembered browser health first, then probes direct qbdlx if needed. The
-  search leg being up is worthless if neither route can stream. Direct-MP3 sites just need a live root. The
+- Each source gets the *cheapest* check that proves it works. Monochrome runs
+  one small search against its tracks API, the route that actually streams;
+  the Deezer search leg being up is worthless if that cannot deliver. Direct-MP3 sites just need a live root. The
   big platforms need host reachability. Soulseek needs to be configured and
   slskd reachable.
 - Last-known state is persisted in SQLite. Startup honours a still-live cooldown
@@ -84,7 +84,7 @@ def _http_ok(url: str, method: str = "GET") -> tuple[bool, str]:
 # ---------------------------------------------------------------------------
 
 def _check_monochrome() -> tuple[bool, str]:
-    """Gate on the browser/qbdlx download legs that actually serve audio."""
+    """Gate on the tracks API, the download route that actually serves audio."""
     from monochrome import download_leg_healthy
     return download_leg_healthy()
 

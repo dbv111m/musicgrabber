@@ -11082,7 +11082,6 @@
             'source_health_cooldown_minutes': 'settingSourceHealthCooldown',
             'search_concurrency': 'settingSearchConcurrency',
             'monochrome_hifi_api_url': 'settingMonochromeHifiUrl',
-            'monochrome_qbdlx_fallback_enabled': 'settingMonochromeQbdlxFallback',
             'slskd_url': 'settingSlskdUrl',
             'slskd_user': 'settingSlskdUser',
             'slskd_pass': 'settingSlskdPass',

@@ -10,6 +10,8 @@ a plain HTTP catalogue with no auth, no token and no browser.
 
 There is no ISRC lookup, and an ISRC used as the query returns unrelated
 nonsense, so we search by artist and title and keep only the exact ISRC match.
+The same lookup doubles as Monochrome's "can we actually download this?"
+check for search results, now that Qobuz is no longer there to ask.
 Quality is fixed: the endpoint ignores any quality parameter, and so does
 Monochrome's own player.
 
@@ -152,12 +154,20 @@ def _query_variants(artist: str, title: str) -> list[str]:
     return variants
 
 
-def resolve_stream_url(isrc: str, artist: str, title: str) -> str | None:
-    """Return the FLAC URL for this exact recording, or None if it is not stocked.
+def track_id(track: dict) -> str:
+    """The id /track/{id} wants: `trackId` in release listings, `id` in searches."""
+    value = str(track.get("trackId") or track.get("id") or "").strip()
+    return value if value.isdigit() else ""
+
+
+def find_track(isrc: str, artist: str, title: str) -> dict | None:
+    """Return the catalogue entry for this exact recording, or None if not stocked.
 
     Only an exact ISRC match counts. A close title from a different pressing is
     how you end up with the live version, and the rest of the ladder (the
     Deezer ISRC rescue in particular) exists to cope with a genuine miss.
+    Raises on transport trouble, so "not stocked" and "could not ask" stay
+    distinguishable.
     """
     isrc = (isrc or "").strip().upper()
     if not (isrc and title):
@@ -166,12 +176,16 @@ def resolve_stream_url(isrc: str, artist: str, title: str) -> str | None:
         for track in search_tracks(query):
             if (track.get("isrc") or "").strip().upper() != isrc:
                 continue
-            if track.get("playable") is False:
+            if track.get("playable") is False or not track_id(track):
                 continue
-            track_id = str(track.get("trackId") or track.get("id") or "").strip()
-            if track_id.isdigit():
-                return f"{api_base()}/track/{track_id}"
+            return track
     return None
+
+
+def resolve_stream_url(isrc: str, artist: str, title: str) -> str | None:
+    """Return the FLAC URL for this exact recording, or None if it is not stocked."""
+    track = find_track(isrc, artist, title)
+    return f"{api_base()}/track/{track_id(track)}" if track else None
 
 
 def health() -> tuple[bool, str]:

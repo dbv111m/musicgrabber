@@ -1,10 +1,10 @@
 """
 Unit tests for monochrome.resolve_by_isrc.
 
-Fast, no-network tests: _qobuz_isrc_lookup is mocked so nothing hits the
-direct Qobuz catalogue route. We verify the happy path (hires vs lossless), the caller-hint
-field fallback, the validation short-circuit on a malformed ISRC, a clean
-miss, and the deliberately-conservative transport-failure behaviour.
+Fast, no-network tests: _tracks_isrc_lookup is mocked so nothing hits
+Monochrome's tracks API. We verify the happy path, the caller-hint field
+fallback, the validation short-circuit on a malformed ISRC, a clean miss, and
+the deliberately-conservative transport-failure behaviour.
 """
 
 import os
@@ -24,78 +24,71 @@ def _import_monochrome_or_skip():
     return monochrome
 
 
-# A well-formed ISRC: Radiohead - Creep, reliably indexed on Qobuz.
+# A well-formed ISRC: Radiohead - Creep, reliably in the catalogue.
 _VALID_ISRC = "GBAYE9200070"
 
 
-def _qobuz_item(hires=False, title="Creep", artist="Radiohead",
-                track_id=33933680):
-    """A minimal Qobuz catalogue item shaped like _qobuz_isrc_lookup output."""
-    item = {
+def _tracks_item(title="Creep", artists=("Radiohead",), track_id="154049681742106624"):
+    """A minimal tracks API entry shaped like find_track output."""
+    return {
         "id": track_id,
+        "trackId": track_id,
         "isrc": _VALID_ISRC,
-        "hires": hires,
-        "duration": 238,
-        "album": {"image": {"large": "https://cover.test/large.jpg"}},
+        "title": title,
+        "artistNames": list(artists),
+        "duration": 238640,
+        "artwork": "https://tracks.test/proxy/mi/cover.jpg",
+        "playable": True,
     }
-    if title is not None:
-        item["title"] = title
-    if artist is not None:
-        item["performer"] = {"name": artist}
-    return item
 
 
 # ---------------------------------------------------------------------------
-# 1. Valid ISRC, hires match -> HI_RES_LOSSLESS result dict
+# 1. Valid ISRC, stocked -> an identity-pinned LOSSLESS result
 # ---------------------------------------------------------------------------
 
-def test_hires_match_returns_hires_result():
+def test_stocked_isrc_returns_pinned_lossless_result():
     monochrome = _import_monochrome_or_skip()
-    matches = [_qobuz_item(hires=True)]
 
-    with patch.object(monochrome, "_qobuz_isrc_lookup",
-                      return_value=(matches, False)) as mock_lookup:
+    with patch.object(monochrome, "_tracks_isrc_lookup",
+                      return_value=(_tracks_item(), False)) as mock_lookup:
         result = monochrome.resolve_by_isrc(_VALID_ISRC, "Radiohead", "Creep")
 
     assert result is not None
-    assert result["quality"] == "HI_RES_LOSSLESS"
-    assert result["source"] == "monochrome"
-    assert result["source_url"].startswith("monochrome://")
-    assert _VALID_ISRC in result["source_url"]
-    assert "via=isrc-direct" in result["score_breakdown"]
-    # Direct identity-pinned pick: flat 1000 plus the hires bonus.
-    assert result["relevance_score"] == 1000 + monochrome._QUALITY_BONUS["HI_RES_LOSSLESS"]
-    mock_lookup.assert_called_once()
-
-
-# ---------------------------------------------------------------------------
-# 2. Valid ISRC, no hires flag -> LOSSLESS
-# ---------------------------------------------------------------------------
-
-def test_non_hires_match_returns_lossless():
-    monochrome = _import_monochrome_or_skip()
-    matches = [_qobuz_item(hires=False)]
-
-    with patch.object(monochrome, "_qobuz_isrc_lookup",
-                      return_value=(matches, False)):
-        result = monochrome.resolve_by_isrc(_VALID_ISRC, "Radiohead", "Creep")
-
-    assert result is not None
+    # The tracks API serves 16/44.1 and nothing else, so that is the only label.
     assert result["quality"] == "LOSSLESS"
+    assert result["source"] == "monochrome"
+    assert result["source_url"].startswith("monochrome://154049681742106624?")
+    assert _VALID_ISRC in result["source_url"]
+    assert "src=tracks" in result["source_url"]
+    assert "via=isrc-direct" in result["score_breakdown"]
+    assert result["duration"] == "3:59"
+    assert result["thumbnail"] == "https://tracks.test/proxy/mi/cover.jpg"
+    # Direct identity-pinned pick: flat 1000 plus the lossless bonus.
     assert result["relevance_score"] == 1000 + monochrome._QUALITY_BONUS["LOSSLESS"]
+    mock_lookup.assert_called_once_with(_VALID_ISRC, "Radiohead", "Creep")
+
+
+def test_primary_artist_is_the_first_listed():
+    """Features already sit in the title; the channel is the lead artist."""
+    monochrome = _import_monochrome_or_skip()
+    item = _tracks_item(title="Get Lucky (feat. Pharrell Williams)",
+                        artists=("Daft Punk", "Pharrell Williams"))
+
+    with patch.object(monochrome, "_tracks_isrc_lookup", return_value=(item, False)):
+        result = monochrome.resolve_by_isrc(_VALID_ISRC, "Daft Punk", "Get Lucky")
+
+    assert result["channel"] == "Daft Punk"
 
 
 # ---------------------------------------------------------------------------
-# 3. Field fallback: missing title/artist -> use the caller's hints
+# 2. Field fallback: missing title/artist -> use the caller's hints
 # ---------------------------------------------------------------------------
 
 def test_missing_catalogue_fields_fall_back_to_caller_hints():
     monochrome = _import_monochrome_or_skip()
-    # Item carries neither a title nor a performer name.
-    matches = [_qobuz_item(hires=True, title=None, artist=None)]
+    item = _tracks_item(title="", artists=())
 
-    with patch.object(monochrome, "_qobuz_isrc_lookup",
-                      return_value=(matches, False)):
+    with patch.object(monochrome, "_tracks_isrc_lookup", return_value=(item, False)):
         result = monochrome.resolve_by_isrc(
             _VALID_ISRC, artist="Caller Artist", title="Caller Title")
 
@@ -106,14 +99,14 @@ def test_missing_catalogue_fields_fall_back_to_caller_hints():
 
 
 # ---------------------------------------------------------------------------
-# 4. Malformed ISRC -> None, and the lookup is never attempted
+# 3. Malformed ISRC -> None, and the lookup is never attempted
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize("bad_isrc", ["NOPE", "QT&JC2622262"])
 def test_malformed_isrc_short_circuits_before_lookup(bad_isrc):
     monochrome = _import_monochrome_or_skip()
 
-    with patch.object(monochrome, "_qobuz_isrc_lookup") as mock_lookup:
+    with patch.object(monochrome, "_tracks_isrc_lookup") as mock_lookup:
         result = monochrome.resolve_by_isrc(bad_isrc, "Some Artist", "Some Title")
 
     assert result is None
@@ -122,28 +115,49 @@ def test_malformed_isrc_short_circuits_before_lookup(bad_isrc):
 
 
 # ---------------------------------------------------------------------------
-# 5. Clean miss: Qobuz answered, has nothing -> None
+# 4. Clean miss: the tracks API answered, has nothing -> None
 # ---------------------------------------------------------------------------
 
 def test_clean_miss_returns_none():
     monochrome = _import_monochrome_or_skip()
 
-    with patch.object(monochrome, "_qobuz_isrc_lookup",
-                      return_value=([], False)):
+    with patch.object(monochrome, "_tracks_isrc_lookup", return_value=(None, False)):
         result = monochrome.resolve_by_isrc(_VALID_ISRC, "Radiohead", "Creep")
 
     assert result is None
 
 
 # ---------------------------------------------------------------------------
-# 6. Direct catalogue transport failure -> None (conservative)
+# 5. Tracks API transport failure -> None (conservative)
 # ---------------------------------------------------------------------------
 
 def test_transport_failure_returns_none():
     monochrome = _import_monochrome_or_skip()
 
-    with patch.object(monochrome, "_qobuz_isrc_lookup",
-                      return_value=([], True)):
+    with patch.object(monochrome, "_tracks_isrc_lookup", return_value=(None, True)):
         result = monochrome.resolve_by_isrc(_VALID_ISRC, "Radiohead", "Creep")
 
     assert result is None
+
+
+# ---------------------------------------------------------------------------
+# 6. The real lookup: a missing title means nothing to search by
+# ---------------------------------------------------------------------------
+
+def test_no_title_is_a_clean_miss_without_a_search(monkeypatch):
+    monochrome = _import_monochrome_or_skip()
+    monkeypatch.setattr(
+        "monochrome_tracks.search_tracks",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("nothing to search by")),
+    )
+    assert monochrome._tracks_isrc_lookup(_VALID_ISRC, "Radiohead", "") == (None, False)
+
+
+def test_lookup_turns_an_outage_into_transport_failure(monkeypatch):
+    import httpx
+    monochrome = _import_monochrome_or_skip()
+    monkeypatch.setattr(
+        "monochrome_tracks.search_tracks",
+        lambda *a, **k: (_ for _ in ()).throw(httpx.ConnectError("down")),
+    )
+    assert monochrome._tracks_isrc_lookup(_VALID_ISRC, "Radiohead", "Creep") == (None, True)

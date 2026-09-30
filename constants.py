@@ -149,10 +149,10 @@ TIMEOUT_ZVU4NO_SEARCH = 15       # zvu4no HTML search
 TIMEOUT_ZVU4NO_DOWNLOAD = int(os.getenv("TIMEOUT_ZVU4NO_DOWNLOAD", "120"))  # zvu4no direct MP3 stream
 TIMEOUT_FREEMP3CLOUD_SEARCH = 20    # FreeMp3Cloud landing + form POST (two round-trips)
 TIMEOUT_FREEMP3CLOUD_DOWNLOAD = int(os.getenv("TIMEOUT_FREEMP3CLOUD_DOWNLOAD", "120"))  # FreeMp3Cloud direct MP3 stream
-TIMEOUT_MONOCHROME_SEARCH = 15   # Monochrome and direct-Qobuz catalogue lookups
+TIMEOUT_MONOCHROME_SEARCH = 15   # Monochrome tracks API and hifi-api catalogue lookups
 # Whole Tidal metadata leg, across every endpoint and query variant
 MONOCHROME_HIFI_SEARCH_BUDGET = float(os.getenv("MONOCHROME_HIFI_SEARCH_BUDGET", "15"))
-TIMEOUT_MONOCHROME_DOWNLOAD = int(os.getenv("TIMEOUT_MONOCHROME_DOWNLOAD", "300"))  # Qobuz FLAC CDN download (FLACs are big)
+TIMEOUT_MONOCHROME_DOWNLOAD = int(os.getenv("TIMEOUT_MONOCHROME_DOWNLOAD", "300"))  # Monochrome FLAC download (FLACs are big)
 
 # Preview snippets: audio a browser cannot fetch for itself (MP3Phoenix sits
 # behind Cloudflare) is parked locally under a short-lived token.
@@ -466,7 +466,7 @@ MONOCHROME_TRACKS_API_URL = os.getenv("MONOCHROME_TRACKS_API_URL", "")
 MONOCHROME_TRACKS_API_FALLBACK = "https://tracks.monochrome.st"
 MONOCHROME_TRACKS_DISCOVERY_TTL = 6 * 3600
 # The Settings "Test Monochrome" diagnostic downloads this for real, then throws
-# it away. Radiohead's Creep is already the qbdlx probe track: old, everywhere,
+# it away. Radiohead's Creep is also the health-check probe track: old, everywhere,
 # and staying everywhere. Keep it to something no catalogue is likely to lose.
 MONOCHROME_TEST_QUERY = os.getenv("MONOCHROME_TEST_QUERY", "Radiohead - Creep")
 
@@ -482,23 +482,6 @@ TIMEOUT_DEEZER = int(os.getenv("TIMEOUT_DEEZER", "10"))
 # the same track. The floor keeps us from routing a track into the wrong album.
 DEEZER_METADATA_MATCH_FLOOR = float(os.getenv("DEEZER_METADATA_MATCH_FLOOR", "0.65"))
 DEEZER_METADATA_SEARCH_LIMIT = int(os.getenv("DEEZER_METADATA_SEARCH_LIMIT", "5"))
-
-# qbdlx fallback: if Monochrome's tracks API comes up empty,
-# sign the official Qobuz API using a shared free-account token (the same pool
-# the qbdlx web UI uses).
-# Heads up: the free shared tokens deliver 16/44.1 lossless FLAC, not 24-bit
-# hi-res, so this is a "a real FLAC beats a failed download" safety net.
-QBDLX_FALLBACK_ENABLED = os.getenv("QBDLX_FALLBACK_ENABLED", "true").lower() == "true"
-QBDLX_SHARED_TOKENS_URL = os.getenv(
-    "QBDLX_SHARED_TOKENS_URL",
-    "https://citegptapi.f5.si/webhook/qbdlx/shared",
-)
-QBDLX_QOBUZ_API_BASE = os.getenv("QBDLX_QOBUZ_API_BASE", "https://www.qobuz.com/api.json/0.2/")
-QBDLX_TOKEN_CACHE_TTL = int(os.getenv("QBDLX_TOKEN_CACHE_TTL", "600"))  # re-fetch the pool every N seconds
-# After the token host fails to answer, stop asking for this long. Without it every
-# caller paid the full timeout in turn, so a dead host held an album import at
-# "Queuing..." for minutes instead of letting it fall through to other sources.
-QBDLX_TOKEN_FAILURE_COOLDOWN = int(os.getenv("QBDLX_TOKEN_FAILURE_COOLDOWN", "120"))
 
 # Source health checks: living the pirate lifestyle means free services come and
 # go, so we check whether each source can actually deliver before showing its

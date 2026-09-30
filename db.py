@@ -1672,6 +1672,16 @@ def init_db():
             )
             print("DB migrated to version 18: retired Monochrome browser playback setting removed")
 
+        # v19: qbdlx's shared Qobuz token host went dark for good, and the route
+        # went with it. Same tidy-up as v18, for the same reason.
+        if db_version < 19:
+            conn.execute("DELETE FROM settings WHERE key = 'monochrome_qbdlx_fallback_enabled'")
+            conn.execute("DELETE FROM user_settings WHERE key = 'monochrome_qbdlx_fallback_enabled'")
+            conn.execute(
+                "INSERT OR REPLACE INTO settings (key, value) VALUES ('db_version', '19')"
+            )
+            print("DB migrated to version 19: retired qbdlx fallback setting removed")
+
         # Defensive backstop: early dev builds of v1 silently dropped custom_subdir
         # when recreating watched_playlists. Re-add it for any DB that already
         # passed through that mangled migration. Harmless if the column is present.

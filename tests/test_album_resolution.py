@@ -1,7 +1,7 @@
 """
 Unit tests for monochrome.resolve_album_tracks.
 
-Fast, no-network tests: the Deezer calls and the Qobuz ISRC lookup are mocked,
+Fast, no-network tests: the Deezer calls and the tracks API ISRC lookup are mocked,
 so nothing leaves the building.
 
 The bug that prompted all this: RAYE released two albums four years apart, both
@@ -91,17 +91,17 @@ def _blues_and_hope():
     return _fake_deezer(albums, detail_map, track_map)
 
 
-def _patched(monochrome, deezer_get, qobuz=([], True)):
-    """Patch the network edges. Default Qobuz answer is 'lookup unavailable'."""
+def _patched(monochrome, deezer_get, lookup=(None, True)):
+    """Patch the network edges. Default tracks API answer is 'lookup unavailable'."""
     return (
         patch.object(monochrome, "_deezer_get", side_effect=deezer_get),
-        patch.object(monochrome, "_qobuz_isrc_lookup", return_value=qobuz),
+        patch.object(monochrome, "_tracks_isrc_lookup", return_value=lookup),
         patch.object(monochrome, "monochrome_enabled", return_value=True),
     )
 
 
-def _run(monochrome, artist, album, titles, deezer_get, qobuz=([], True)):
-    p1, p2, p3 = _patched(monochrome, deezer_get, qobuz)
+def _run(monochrome, artist, album, titles, deezer_get, lookup=(None, True)):
+    p1, p2, p3 = _patched(monochrome, deezer_get, lookup)
     with p1, p2, p3:
         return monochrome.resolve_album_tracks(artist, album, titles)
 
@@ -216,38 +216,49 @@ def test_track_count_only_breaks_ties_between_real_title_matches():
 
 
 # ---------------------------------------------------------------------------
-# Qobuz verification
+# Tracks API verification
 # ---------------------------------------------------------------------------
 
-def test_a_clean_qobuz_miss_drops_the_track():
-    """Qobuz answered and has nothing: not downloadable, so let the search try."""
+def test_a_clean_tracks_api_miss_drops_the_track():
+    """The tracks API answered and does not stock it, so let the search try."""
     monochrome = _import_monochrome_or_skip()
 
     resolved = _run(monochrome, "RAYE", "My 21st Century Blues", ["Fin."],
-                    _blues_and_hope(), qobuz=([], False))
+                    _blues_and_hope(), lookup=(None, False))
 
     assert resolved == {}
 
 
-def test_catalogue_transport_failure_does_not_lose_the_track():
-    """Unverifiable is not the same as absent; qbdlx may still deliver it."""
+def test_tracks_api_transport_failure_does_not_lose_the_track():
+    """Unverifiable is not the same as absent; the API may be back by download time."""
     monochrome = _import_monochrome_or_skip()
 
     resolved = _run(monochrome, "RAYE", "My 21st Century Blues", ["Fin."],
-                    _blues_and_hope(), qobuz=([], True))
+                    _blues_and_hope(), lookup=(None, True))
 
     assert len(resolved) == 1
     assert resolved[0]["quality"] == "LOSSLESS"
-    assert any("qobuz_unverified" in note for note in resolved[0]["score_breakdown"])
+    assert any("unverified" in note for note in resolved[0]["score_breakdown"])
 
 
-def test_hires_is_reported_when_qobuz_confirms_it():
+def test_a_confirmed_track_is_lossless_and_not_marked_unverified():
     monochrome = _import_monochrome_or_skip()
 
     resolved = _run(monochrome, "RAYE", "My 21st Century Blues", ["Fin."],
-                    _blues_and_hope(), qobuz=([{"hires": True}], False))
+                    _blues_and_hope(), lookup=({"trackId": "1", "isrc": "QMDA62229989"}, False))
 
-    assert resolved[0]["quality"] == "HI_RES_LOSSLESS"
+    assert resolved[0]["quality"] == "LOSSLESS"
+    assert not any("unverified" in note for note in resolved[0]["score_breakdown"])
+
+
+def test_lookup_asks_by_the_albums_own_spelling():
+    """The tracks API can only be searched by name, so the name had better be right."""
+    monochrome = _import_monochrome_or_skip()
+    p1, p2, p3 = _patched(monochrome, _blues_and_hope())
+    with p1, p2 as lookup, p3:
+        monochrome.resolve_album_tracks("RAYE", "My 21st Century Blues", ["fin"])
+
+    lookup.assert_called_once_with("QMDA62229989", "RAYE", "Fin.")
 
 
 def test_album_picks_outrank_anything_a_free_text_search_can_score():

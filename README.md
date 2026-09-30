@@ -1,7 +1,7 @@
 # Music Grabber
 **v4.2.3 (2026-09-23)**
 
-A self-hosted music acquisition service. Search YouTube, SoundCloud, zvu4no, FreeMp3Cloud, Monochrome/Qobuz, optional MP3Phoenix, and optional Soulseek, tap a result and it downloads the best quality audio straight into your music library. You'll have a choice to convert to a common format, or store as is.
+A self-hosted music acquisition service. Search YouTube, SoundCloud, zvu4no, FreeMp3Cloud, Monochrome, optional MP3Phoenix, and optional Soulseek, tap a result and it downloads the best quality audio straight into your music library. You'll have a choice to convert to a common format, or store as is.
 
 If you find it useful, consider buying me a coffee: https://ko-fi.com/geekphreek
 
@@ -9,7 +9,7 @@ If you find it useful, consider buying me a coffee: https://ko-fi.com/geekphreek
 
 It started as the "I want one song, not a commitment" tool: Lidarr's great for albums, but grabbing a single track you heard on the radio shouldn't require navigating menus or pulling an artist's entire discography. Search, tap, done; that's still the heart of it.
 
-It has since grown well past that brief. Watched Playlists and Watched Artists keep your library current on their own, checking six playlist platforms plus MusicBrainz for new singles so you don't have to remember to. Multi-source search now reaches proper lossless Qobuz and Soulseek alongside YouTube and SoundCloud; Album mode handles the odd full release; track upgrades, provenance auditing, and multi-user support round out the rest. It's not trying to become Lidarr (see below); it just turns out "grab one song" was the thin end of a much bigger wedge.
+It has since grown well past that brief. Watched Playlists and Watched Artists keep your library current on their own, checking six playlist platforms plus MusicBrainz for new singles so you don't have to remember to. Multi-source search now reaches proper lossless Monochrome and Soulseek alongside YouTube and SoundCloud; Album mode handles the odd full release; track upgrades, provenance auditing, and multi-user support round out the rest. It's not trying to become Lidarr (see below); it just turns out "grab one song" was the thin end of a much bigger wedge.
 
 ## What this project is not
 
@@ -23,9 +23,9 @@ MusicGrabber is intentionally narrow. It is **not**:
 
 ## Features
 
-- **Multi-source search:** the Tracks tab searches YouTube, SoundCloud, zvu4no, FreeMp3Cloud, Monochrome/Qobuz, optional MP3Phoenix, and optional Soulseek in parallel; relevance-ranked results include source badges and score explanations, plus a separate audio-quality tier where the provider declares one. MP3Phoenix is an off-by-default source that briefly launches Selenium to obtain Cloudflare clearance, then searches, previews and downloads through a reusable Chrome-impersonating HTTP session. Soulseek results also show the peer's current queue depth and use it as a bounded ranking penalty, so an idle peer wins an otherwise equal contest without a busy peer disappearing altogether. The single-song search collapses when you leave Tracks, keeping the other workspaces focused on their own jobs
+- **Multi-source search:** the Tracks tab searches YouTube, SoundCloud, zvu4no, FreeMp3Cloud, Monochrome, optional MP3Phoenix, and optional Soulseek in parallel; relevance-ranked results include source badges and score explanations, plus a separate audio-quality tier where the provider declares one. MP3Phoenix is an off-by-default source that briefly launches Selenium to obtain Cloudflare clearance, then searches, previews and downloads through a reusable Chrome-impersonating HTTP session. Soulseek results also show the peer's current queue depth and use it as a bounded ranking penalty, so an idle peer wins an otherwise equal contest without a busy peer disappearing altogether. The single-song search collapses when you leave Tracks, keeping the other workspaces focused on their own jobs
 - **Live search progress:** results stream in as each source answers, with live status for completed, slow, parked, or unavailable sources; repeated timeouts automatically bench an unhealthy source until a background probe clears it. yt-dlp searches and metadata lookups share a bounded retry policy for throttling, timeouts, gateway failures, and reduced format manifests, while genuinely private/deleted media fails immediately
-- **Monochrome/Qobuz source:** searches Tidal and Deezer metadata and resolves matching Qobuz FLAC streams by ISRC. Monochrome's own tracks API is tried first, then the direct qbdlx Qobuz route, then a Deezer ISRC rescue, then a lossless Tidal stream as a last resort. Monochrome downloads are 16-bit/44.1kHz FLAC. No account or API key is required. Enabled by default and configurable in Search Sources
+- **Monochrome source:** searches Deezer metadata, keeps only results Monochrome's own tracks API actually stocks (matched by ISRC), and downloads the FLAC from it, with a Deezer ISRC rescue and a self-hosted Tidal stream as fallbacks. If Deezer is down, the tracks API is searched directly. Monochrome downloads are 16-bit/44.1kHz FLAC. No account or API key is required. Enabled by default and configurable in Search Sources
 - **Watched playlists:** monitor Spotify, YouTube (including Mixes), Amazon Music, Apple Music, SoundCloud, Tidal, Beatport, Monochrome, and ListenBrainz playlists; auto-downloads new tracks and grabs the best match available. Per-playlist sync mode: Append (M3U grows as tracks arrive) or Mirror (M3U stays in sync with the upstream; removed tracks drop out). Each card shows live refresh state and stage. "Missing" button shows tracks that never made it; Retry and Search buttons to fix them. M3U updates immediately as each track finishes
 - **Artists tab:** follow an artist on MusicBrainz and new singles are downloaded automatically as they appear. Search by name, pick from up to five candidates, set a from-date (defaults to today so your back-catalogue stays put). Singles come first: remixes, live cuts, soundtracks, and compilations are filtered out at the MusicBrainz level. Albums sit underneath for browsing and picking off individually, with an optional "automatically add new albums" toggle that marks everything already released as seen, so ticking it never starts a back-catalogue download. A transient failure while handing a new album to the queue is recorded and retried once on the next artist check rather than making the release permanently “known but abandoned”. Tracks already on disk are recognised immediately, and followed-album labels are derived from the current import and actual audio count rather than preserving “Queued” until the sun burns out. Per-artist check interval, Keep source/Convert to control, pause/resume, missing and track list panels. You can also browse any artist's albums without following them at all
 - **Playlist routing:** pick any watched playlist or existing `.m3u` file from the selector below the search bar; downloads land there instead of Singles
@@ -446,7 +446,7 @@ The easiest way to configure MusicGrabber is via the **Settings tab** in the UI.
 - **Library layout**: Singles, Playlists, and Albums subfolders, track-number filenames, auto-album routing, playlist album/comment tagging, automatic Music import, singles-only mode, and file permissions
 - **Search sources**: enable/disable YouTube, SoundCloud, zvu4no, FreeMp3Cloud, MP3Phoenix, Soulseek, and Monochrome; configure cross-source fallback, automatic health checks, and a per-provider search limit from 1–5 (default 1). MP3Phoenix and Soulseek are disabled by default. An off-by-default YouTube playlist option can use the exact upstream video only after every confident alternative fails. Download concurrency remains deliberately internal and conservative
 - **Track upgrades**: scan the library for files below the configured quality tier and control the scan interval
-- **Monochrome**: hifi-api URL and direct-qbdlx fallback
+- **Monochrome**: optional self-hosted hifi-api URL, and a Test Downloads button
 - **Soulseek (slskd)**: enable toggle, URL, credentials, downloads path
 - **Navidrome**: URL and credentials for library refresh
 - **Jellyfin**: URL and API key for library refresh
@@ -529,15 +529,13 @@ Settings are stored in the database and persist across container restarts.
 | `SOURCE_ZVU4NO_ENABLED` | `true` | Enable zvu4no search results |
 | `SOURCE_FREEMP3CLOUD_ENABLED` | `true` | Enable FreeMp3Cloud search results |
 | `SOURCE_SOULSEEK_ENABLED` | `false` | Enable Soulseek/slskd search results. Credentials alone do not enable Soulseek |
-| `SOURCE_MONOCHROME_ENABLED` | `true` | Enable Monochrome/Qobuz search results |
+| `SOURCE_MONOCHROME_ENABLED` | `true` | Enable Monochrome search results |
 | `SOURCE_OFFLINE_FALLBACK` | `true` | Try another enabled source after a download source fails; watched-playlist and bulk-import source allow-lists are still enforced |
 | `SOURCE_HEALTH_CHECKS_ENABLED` | `true` | Hide unhealthy sources until a background probe confirms recovery |
 | `SOURCE_HEALTH_CHECK_INTERVAL_MINUTES` | `10` | Minutes between scheduled source health probes |
 | `SOURCE_HEALTH_COOLDOWN_MINUTES` | `10` | Minimum time a failed source remains parked before it can be probed again |
 | `SEARCH_CONCURRENCY` | `1` | Maximum simultaneous searches admitted per provider, from 1 to 5. This does not increase download concurrency |
 | `MONOCHROME_HIFI_API_URL` | *(blank)* | Optional self-hosted hifi-api compatible endpoint(s) for Tidal metadata top-up. Comma or newline separated lists are tried in order. The public instances that used to ship as the default have been dead since Tidal revoked their OAuth client, so there is no honest public default any more; Monochrome works fine without this set |
-| `QBDLX_FALLBACK_ENABLED` | `true` | Try qbdlx's direct Qobuz API when Monochrome's tracks API has no stream |
-| `QBDLX_TOKEN_FAILURE_COOLDOWN` | `120` | Seconds to stop asking qbdlx's token host after it fails to answer, so downloads fall through to other sources instead of waiting on it |
 | `MONOCHROME_WEB_URL` | `https://monochrome.st` | Monochrome web client, read to discover where its tracks API currently lives. A retired domain's redirect is followed automatically |
 | `MONOCHROME_TRACKS_API_URL` | *(blank)* | Pin the Monochrome tracks API address and skip discovery. Only needed if Monochrome moves and discovery cannot follow; blank uses what the web client says, falling back to `https://tracks.monochrome.st` |
 | `SLSKD_URL` | - | slskd API URL (e.g., `http://slskd:5030`) |
@@ -587,7 +585,7 @@ Settings are stored in the database and persist across container restarts.
 | `MP3PHOENIX_BLOCK_COOLDOWN` | `21600` | Seconds to park MP3Phoenix after Cloudflare serves its hard "you have been blocked" page, which no browser can get past |
 | `TIMEOUT_ZVU4NO_DOWNLOAD` | `120` | Timeout in seconds for zvu4no direct MP3 downloads |
 | `TIMEOUT_FREEMP3CLOUD_DOWNLOAD` | `120` | Timeout in seconds for FreeMp3Cloud direct MP3 downloads |
-| `TIMEOUT_MONOCHROME_DOWNLOAD` | `300` | Timeout in seconds for Monochrome/Qobuz FLAC downloads |
+| `TIMEOUT_MONOCHROME_DOWNLOAD` | `300` | Timeout in seconds for Monochrome FLAC downloads |
 
 ### Navidrome Integration
 
@@ -652,11 +650,11 @@ environment:
 
 This is a refresh nudge, not a promise that Lidarr will suddenly become reasonable about singles. We can hope, though.
 
-### Monochrome/Qobuz Source (Optional)
+### Monochrome Source (Optional)
 
-Monochrome is enabled by default. MusicGrabber searches Deezer (and a self-hosted Tidal hifi-api, if you have one) and uses the ISRC to pin down the exact recording. Downloads go through Monochrome's own tracks API first, the same one its web player uses: a plain HTTP catalogue with no account, token or browser involved. MusicGrabber searches it by artist and title, keeps only the result carrying exactly the right ISRC, and downloads the FLAC directly. If it has no match, MusicGrabber tries the direct qbdlx Qobuz route, an ISRC rescue through Deezer, and finally a lossless Tidal stream where the result carries a genuine Tidal track ID.
+Monochrome is enabled by default. MusicGrabber searches Deezer (and a self-hosted Tidal hifi-api, if you have one) and uses the ISRC to pin down the exact recording. Downloads go through Monochrome's own tracks API, the same one its web player uses: a plain HTTP catalogue with no account, token or browser involved. MusicGrabber searches it by artist and title, keeps only the result carrying exactly the right ISRC, and downloads the FLAC directly. The same check runs at search time, so Monochrome only offers what it can actually deliver; if the tracks API cannot be reached, results are still shown but marked unverified. If Deezer comes back empty, the tracks API is searched directly instead. At download time, a miss gets an ISRC rescue through Deezer, and finally a lossless Tidal stream where the result carries a genuine Tidal track ID and you run your own hifi-api.
 
-Monochrome downloads are 16-bit/44.1kHz FLAC. The tracks API ignores requests for anything higher, and the qbdlx route is capped at the same tier, so 24-bit hi-res is not on offer from this source.
+Monochrome downloads are 16-bit/44.1kHz FLAC. The tracks API ignores requests for anything higher, so 24-bit hi-res is not on offer from this source.
 
 Monochrome has changed domain and playback route several times. MusicGrabber reads the tracks API's address from Monochrome's web client (following the redirect a retired domain leaves behind) and re-checks every six hours, so a move should be picked up on its own. If it is not, the Settings test says so, and `MONOCHROME_TRACKS_API_URL` pins the new address by hand.
 
@@ -1262,7 +1260,7 @@ music.yourdomain.com {
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET` | `/api/sources` | List available search sources (for source selector UI) |
-| `GET` | `/api/sources/health` | Get current source health, including whether Monochrome's tracks API or qbdlx can serve a download |
+| `GET` | `/api/sources/health` | Get current source health, including whether Monochrome's tracks API can serve a download |
 | `POST` | `/api/sources/health/recheck` | Start an admin-only background re-check of every source |
 | `POST` | `/api/search` | Search sources (`{"query": "...", "limit": 15, "source": "all/youtube/soundcloud/mp3phoenix/zvu4no/freemp3cloud/monochrome/soulseek"}`); results expose `relevance_score` for ordering and `quality_tier` for declared audio quality |
 | `POST` | `/api/search/stream` | Stream per-source status and ranked results as NDJSON, using the same `relevance_score`/`quality_tier` result contract |
