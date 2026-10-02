@@ -3561,6 +3561,65 @@ h1 {
     color: var(--text-secondary);
 }
 
+/* Update available: sits above the search box until dismissed for that version */
+.update-banner {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--space-2) var(--space-3);
+    margin-bottom: var(--space-4);
+    padding: var(--space-3) var(--space-4);
+    background: var(--bg-secondary);
+    border: 1px solid var(--accent-dim);
+    border-left: 3px solid var(--accent);
+    border-radius: var(--radius-md);
+    font-size: 13px;
+    color: var(--text-secondary);
+    animation: update-banner-in 0.3s ease-out;
+}
+
+.update-banner strong {
+    color: var(--text-primary);
+}
+
+.update-banner-icon {
+    color: var(--accent);
+}
+
+.update-banner-text {
+    flex: 1 1 260px;
+}
+
+.update-banner-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin-left: auto;
+}
+
+.update-banner-btn {
+    font-size: 13px;
+}
+
+/* The settings bar's coffee button, shrunk to banner size */
+.donation-link.update-banner-coffee {
+    flex: none;
+    padding: var(--space-2) var(--space-3);
+    font-size: 13px;
+    border-radius: var(--radius-md);
+}
+
+@keyframes update-banner-in {
+    from { opacity: 0; transform: translateY(-6px); }
+    to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .update-banner {
+        animation: none;
+    }
+}
+
 /* Current-user display and sign-out button share the same text style */
 .header-user-text {
     font-size: 13px;
@@ -3616,6 +3675,13 @@ h1 {
 @media (max-width: 430px) {
     header {
         flex-wrap: wrap;
+    }
+
+    /* The header has wrapped, so there is room for the version again, and on a
+       phone that is the only place to find out which one you are running */
+    .version-label {
+        display: inline !important;
+        font-size: 11px;
     }
 
     .header-controls {

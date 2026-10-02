@@ -147,6 +147,7 @@ from albums import (
 from utils import authoritative_audio_file, hash_track, is_valid_youtube_id, iter_library_audio_files, sanitize_filename, sanitize_playlist_name, set_file_permissions, spawn_daemon_thread, subsonic_auth_params
 from coverart import fetch_cover_art_url
 from notifications import send_test_email
+from updates import get_update_status
 from longform_split import (
     detect_longform_candidate, validate_segments, create_longform_split, cancel_longform_split,
 )
@@ -348,6 +349,12 @@ def get_config(request: Request):
         "volume_mounted": _is_volume_mounted(),
         "singles_only_mode": get_setting_bool("singles_only_mode", False),
     }
+
+
+@app.get("/api/update-check")
+def update_check():
+    """Is there a newer release than the one running? Cached; see updates.py."""
+    return get_update_status()
 
 
 # =============================================================================

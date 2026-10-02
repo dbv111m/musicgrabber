@@ -462,3 +462,11 @@ SERVICECHECK_TIMEOUT = int(os.getenv("SERVICECHECK_TIMEOUT", "8"))              
 # Library scans: serve cached listings and bound duplicate lookup waits.
 LIBRARY_SCAN_TTL_SECONDS = 300
 LIBRARY_SCAN_RETRY_SECONDS = 30
+
+# Update check: asks GitLab's public tags API for the newest vX.Y.Z release so the
+# UI can say so before a download trips over a source that moved house last week.
+UPDATE_CHECK_TAGS_URL = "https://gitlab.com/api/v4/projects/g33kphr33k%2Fmusicgrabber/repository/tags"
+UPDATE_CHECK_CHANGELOG_URL = "https://gitlab.com/g33kphr33k/musicgrabber/-/blob/main/CHANGELOG.md"
+UPDATE_CHECK_INTERVAL = 12 * 3600   # how long a successful answer is trusted (seconds)
+UPDATE_CHECK_RETRY = 3600           # how long to sulk after GitLab fails to answer (seconds)
+TIMEOUT_UPDATE_CHECK = 5

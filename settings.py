@@ -182,6 +182,9 @@ SETTINGS_SCHEMA = {
     "enable_musicbrainz": {"type": "bool", "default": True, "env": "ENABLE_MUSICBRAINZ"},
     "enable_deezer_metadata": {"type": "bool", "default": True, "env": "ENABLE_DEEZER_METADATA"},
     "enable_lyrics": {"type": "bool", "default": True, "env": "ENABLE_LYRICS"},
+    # Ask GitLab, at most twice a day, whether a newer release exists, and say so
+    # above the search box. On by default; off means MusicGrabber never asks.
+    "update_check_enabled": {"type": "bool", "default": True, "env": "UPDATE_CHECK_ENABLED"},
     "default_convert_audio": {"type": "bool", "default": False, "env": "DEFAULT_CONVERT_AUDIO"},
     "audio_format": {"type": "str", "default": "opus", "env": "AUDIO_FORMAT"},
     "mp3_bitrate": {"type": "str", "default": "v2", "env": "MP3_BITRATE"},

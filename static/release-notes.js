@@ -11,6 +11,15 @@ const RELEASE_NOTES = {
         title: "What's New in v4.3.0: Death of the Phoenix",
         sections: [
             {
+                heading: "Know when you're behind",
+                items: [
+                    "When a newer version of MusicGrabber is out, a banner above the search box tells you, with a link to what's changed. No more finding out the hard way when a download falls over.",
+                    "Dismiss it and it stays quiet until the next release. Don't want it at all? Switch off Check for Updates in Settings.",
+                    "The banner also has a Buy me a coffee button. Entirely optional, much appreciated.",
+                    "On a phone you can see which version you're running again, top right.",
+                ]
+            },
+            {
                 heading: "Goodbye, MP3Phoenix",
                 items: [
                     "MP3Phoenix has been blocking everyone, everywhere, for weeks, so it has been retired. Again. Your existing downloads and history are all still there; you just can't get anything new from it.",

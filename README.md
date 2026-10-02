@@ -65,6 +65,7 @@ MusicGrabber is intentionally narrow. It is **not**:
 - **Job queue:** track progress, retry failures, re-download or delete files, see metadata provenance, and sort finished history by outcome while live work stays at the top. A search box narrows the queue by artist, title, album or playlist name, and searches the whole job history rather than only the page on screen, so fixing one wrong track out of a 900-track import does not mean paging through the other 899
 - **Statistics dashboard:** download counts, success rate, daily chart, top artists, search analytics
 - **Release notes modal:** shows once after each update; also accessible from the Settings tab
+- **Update notice:** when a newer release is out, a banner above the search box says so, with a link to the changelog. It checks GitLab's public list of release tags at most twice a day and sends nothing about you or your library. Dismiss it and it stays away until the next release; switch it off entirely with Check for Updates in Settings or `UPDATE_CHECK_ENABLED=false`. Builds from `:dev` are always ahead of the latest release, so they never see it
 - **Preview:** hover a result for 2 seconds on desktop, or tap Preview on mobile
 - **Dark/light theme:** toggle in the header; preference saved per browser
 - **Mobile-friendly UI:** designed for quick searches from your phone
@@ -435,6 +436,16 @@ Both scripts are copied to `%APPDATA%\MusicGrabber` during setup. You can also p
 
 **Configuration:** music is saved to the folder you chose during setup. The database and config live in `%APPDATA%\MusicGrabber`. To change settings after install, edit `%APPDATA%\MusicGrabber\docker-compose.yml` or use the Settings tab in the web UI.
 
+### Option E: Nix (community package)
+
+[rrvsh](https://github.com/rrvsh) maintains a standalone Nix flake at [github.com/rrvsh/musicgrabber-nix](https://github.com/rrvsh/musicgrabber-nix), for `x86_64-linux`, `aarch64-linux`, and `aarch64-darwin`:
+
+```console
+nix run github:rrvsh/musicgrabber-nix
+```
+
+It is unofficial, so issues with the packaging belong over there, and it is pinned to a specific release, which may lag behind the Docker images. It currently leaves SeleniumBase out, so Amazon Music album naming is unavailable. It listens on `127.0.0.1:8080` by default; see its README for the state and music paths.
+
 ## Configuration
 
 ### Settings Tab (Recommended)
@@ -478,6 +489,7 @@ Settings are stored in the database and persist across container restarts.
 | `ENABLE_MUSICBRAINZ` | `true` | Enable MusicBrainz metadata lookups |
 | `ENABLE_DEEZER_METADATA` | `true` | Fill album details from Deezer when MusicBrainz has no suitable release metadata |
 | `ENABLE_LYRICS` | `true` | Enable automatic lyrics fetching from LRClib |
+| `UPDATE_CHECK_ENABLED` | `true` | Check GitLab's public release tags (at most twice a day) and show a banner when a newer release is out. `false` means MusicGrabber never asks |
 | `ACOUSTID_API_KEY` | *(shared built-in)* | AcoustID API key for audio fingerprinting. A shared key is built in but **may hit rate limits**. Register a free key at [acoustid.org](https://acoustid.org/login) and set it here (or via Settings tab) to avoid sharing quota |
 | `DEFAULT_CONVERT_AUDIO` | `false` | Keep the provider's source format by default. Set to `true` to enable conversion to `AUDIO_FORMAT`. Renamed in v4.0.0; the old `DEFAULT_CONVERT_TO_FLAC` still works and never forced FLAC, which is exactly why it was renamed |
 | `AUDIO_FORMAT` | `opus` | Output format when conversion is enabled: `flac`, `alac`, `opus`, or `mp3` |
@@ -1162,6 +1174,7 @@ music.yourdomain.com {
 | `GET` | `/` | Web UI |
 | `GET` | `/favicon.ico` | Favicon |
 | `GET` | `/api/config` | Get server config (version, defaults, auth_required) |
+| `GET` | `/api/update-check` | Running version, latest release on GitLab, and whether an update is available. Cached for 12 hours; never contacts GitLab when the update check is off |
 | `GET` | `/api/music-dirs` | List subdirectories of `MUSIC_DIR` (for download path picker; `?recursive=true` for nested) |
 | `GET` | `/api/playlists` | List watched playlists and `.m3u` files (for playlist routing selector) |
 

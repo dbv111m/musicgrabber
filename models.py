@@ -174,6 +174,7 @@ class SettingsUpdate(BaseModel):
     enable_musicbrainz: Optional[bool] = None
     enable_deezer_metadata: Optional[bool] = None
     enable_lyrics: Optional[bool] = None
+    update_check_enabled: Optional[bool] = None
     default_convert_audio: Optional[bool] = _convert_audio_field(None, prefix="default_")
     audio_format: Optional[str] = None  # "flac", "alac", "opus", or "mp3"
     mp3_bitrate: Optional[str] = None    # "v0", "v2", or "320k"/"256k"/"192k"/"128k"

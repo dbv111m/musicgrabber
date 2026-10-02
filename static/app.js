@@ -1105,6 +1105,7 @@
             applyUserRoleToUI();
             populateSourceChips();
             startSourceHealthPolling();
+            if (config) checkForUpdate();
             if (config) loadPlaylists();
             reattachBulkImportIfActive();
           } finally {
@@ -5238,6 +5239,33 @@
         function dismissVolumeWarning(banner) {
             localStorage.setItem('dismissedVolumeWarning', 'true');
             banner.remove();
+        }
+
+        // Newer release on GitLab? The server caches the answer, so this is cheap.
+        // Dismissing hides it until the next release rather than forever.
+        async function checkForUpdate() {
+            try {
+                const resp = await apiFetch('/api/update-check');
+                if (!resp.ok) return;
+                const status = await resp.json();
+                if (!status.update_available) return;
+                if (localStorage.getItem('dismissed_update_version') === status.latest) return;
+
+                document.getElementById('updateBannerLatest').textContent = `v${status.latest}`;
+                document.getElementById('updateBannerCurrent').textContent = `v${status.current}`;
+                if (status.changelog_url) {
+                    document.getElementById('updateBannerChangelog').href = status.changelog_url;
+                }
+                const banner = document.getElementById('updateBanner');
+                banner.dataset.version = status.latest;
+                banner.style.display = 'flex';
+            } catch {}
+        }
+
+        function dismissUpdateBanner() {
+            const banner = document.getElementById('updateBanner');
+            localStorage.setItem('dismissed_update_version', banner.dataset.version || '');
+            banner.style.display = 'none';
         }
 
         async function bulkImport() {
@@ -11040,6 +11068,7 @@
             'enable_musicbrainz': 'settingEnableMusicbrainz',
             'enable_deezer_metadata': 'settingEnableDeezerMetadata',
             'enable_lyrics': 'settingEnableLyrics',
+            'update_check_enabled': 'settingUpdateCheckEnabled',
             'acoustid_api_key': 'settingAcoustidKey',
             'default_convert_audio': 'settingDefaultConvertAudio',
             'audio_format': 'settingAudioFormat',
