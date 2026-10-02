@@ -14,7 +14,7 @@ const RELEASE_NOTES = {
                 heading: "New source: JioSaavn",
                 items: [
                     "JioSaavn, India's biggest music service, is now searched alongside everything else. Most tracks are 320kbps, and results tell you the quality before you download.",
-                    "It's brilliant for Bollywood, Punjabi and other Indian music. Outside India its Western catalogue has gaps, but your other sources have those covered.",
+                    "It's brilliant for Bollywood, Punjabi and other Indian music, and it has a healthy helping of Western music too.",
                     "It's on already. Don't want it? Switch it off in Settings under Search Sources.",
                 ]
             },

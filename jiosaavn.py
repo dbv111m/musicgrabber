@@ -7,11 +7,13 @@ own web player uses. No account, no token, no Cloudflare. Most tracks come as
 
 Two things worth knowing before you go looking for bugs that are not bugs:
 
-- Search results depend on where you are. JioSaavn filters search by the
-  caller's IP, so outside India the Indian catalogue is complete but the Western
-  one has holes: from the UK, "blitzkrieg bop ramones" finds two chiptune covers
-  and no Ramones, although the real track is there and downloads fine by ID. The
-  other sources cover that ground; this one is here for what they do not.
+- JioSaavn filters search by country, and outside India the Western catalogue
+  is mostly missing: from the UK, "Nirvana Lithium" finds two karaoke covers
+  and no Nirvana. It takes the country from X-Forwarded-For, so search calls
+  claim an Indian address and get the whole catalogue. Downloads come off the
+  CDN, which never asked. If JioSaavn stops trusting the header, the health
+  probe searches for a Western track precisely so it goes red rather than
+  quietly serving karaoke.
 - Stream links arrive DES-encrypted with a key that has been public for years.
   Decrypting gives a 96 kbps CDN link; swapping the suffix gives the 320 or 160
   kbps rendition of the same file. The links are unsigned and do not expire.
@@ -37,6 +39,9 @@ _API_URL = "https://www.jiosaavn.com/api.php"
 _HEADERS = {
     "User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/140.0 Safari/537.36",
 }
+# A Reliance Jio address, which is about as Indian as an IP gets. Only the API
+# sees it; the CDN serves anyone.
+_INDIAN_IP = "49.36.0.1"
 _DES_KEY = b"38346591"
 _SEARCH_FETCH = 20
 
@@ -61,7 +66,7 @@ def _api(call: str, timeout: float = TIMEOUT_JIOSAAVN_SEARCH, **params) -> dict:
             "ctx": "web6dot0",
             **params,
         },
-        headers=_HEADERS,
+        headers={**_HEADERS, "X-Forwarded-For": _INDIAN_IP},
         timeout=timeout,
     )
     resp.raise_for_status()
@@ -167,14 +172,21 @@ def search_jiosaavn(query: str, limit: int) -> list[dict]:
 
 
 def check_health() -> tuple[bool, str]:
-    """A real search for a song JioSaavn will stock for as long as it exists."""
+    """A real search for a Western track, which only turns up from India.
+
+    Karaoke covers alone mean the Indian-address header has stopped working and
+    we are back to the local catalogue, which is a failure worth seeing.
+    """
     try:
-        data = _api("search.getResults", q="kesariya arijit singh", p=1, n=3)
+        data = _api("search.getResults", q="nirvana lithium", p=1, n=5)
     except Exception as e:
         return False, f"unreachable ({e})"
-    for song in data.get("results") or []:
-        if _stream_url(song.get("more_info") or {}):
+    songs = data.get("results") or []
+    for song in songs:
+        if "nirvana" in _artist_of(song).lower() and _stream_url(song.get("more_info") or {}):
             return True, ""
+    if songs:
+        return False, "search is geo-filtered again (only covers came back)"
     return False, "search answered without a playable stream"
 
 

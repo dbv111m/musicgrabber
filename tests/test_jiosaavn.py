@@ -110,3 +110,38 @@ def test_declared_quality_maps_to_the_shared_tiers():
     assert quality_tier_of_result({"quality": "AAC 320kbps"}) == TIER_LOSSY_320
     assert _estimate_result_tier({"source": "jiosaavn", "quality": "AAC 320kbps"}) == (TIER_LOSSY_320, False)
     assert _estimate_result_tier({"source": "jiosaavn", "quality": "AAC 160kbps"}) == (_kbps_to_tier(160), False)
+
+
+def test_api_claims_an_indian_address(monkeypatch):
+    seen = {}
+
+    class Resp:
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {}
+
+    def fake_get(url, params=None, headers=None, timeout=None):
+        seen.update(headers)
+        return Resp()
+
+    monkeypatch.setattr(jiosaavn.httpx, "get", fake_get)
+    jiosaavn._api("search.getResults", q="anything")
+    assert seen["X-Forwarded-For"] == jiosaavn._INDIAN_IP
+
+
+def test_health_passes_on_the_real_track(monkeypatch):
+    payload = {"results": [_song(title="Lithium", artists=("Nirvana",))]}
+    monkeypatch.setattr(jiosaavn, "_api", lambda call, **params: payload)
+    assert jiosaavn.check_health() == (True, "")
+
+
+def test_health_fails_when_only_karaoke_comes_back(monkeypatch):
+    # What the UK sees when the header stops working.
+    payload = {"results": [_song(title="Lithium (Originally Perfomed By Nirvana) (Karaoke Version)",
+                                 artists=("ZZang KARAOKE",))]}
+    monkeypatch.setattr(jiosaavn, "_api", lambda call, **params: payload)
+    ok, detail = jiosaavn.check_health()
+    assert not ok
+    assert "geo-filtered" in detail
