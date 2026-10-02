@@ -135,6 +135,10 @@ def search_jiosaavn(query: str, limit: int) -> list[dict]:
                 duration_seconds=duration_secs or None,
                 view_count=None,
             )
+            # Every JioSaavn track is the label's own release, which YouTube has
+            # to earn with "Official Audio" in the title and a big view count.
+            relevance_score += 40
+            score_breakdown.append("label_release=+40")
             # Same nudges as FreeMp3Cloud's HQ and non-HQ tiers: a declared 320
             # is worth something, the 160 fallback only just.
             if kbps == 320:

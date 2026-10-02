@@ -502,6 +502,24 @@ def _apply_mb_duration_scores(results: list[dict], expected_duration_secs: float
             r.setdefault("score_breakdown", []).append("mb_search_duration=-60")
 
 
+def _rescore_event(results: list[dict], expected_duration_secs: float) -> dict | None:
+    """Apply the MB duration score to results already shown, and say what moved.
+
+    Fast sources answer before MusicBrainz does, so their batches go out without
+    the duration bonus or penalty. Once MB lands, this scores them in place
+    (search_all's merged list holds the same dicts) and returns a 'rescore' event
+    so the browser can move the cards it already drew. None if nothing changed.
+    """
+    before = [r["relevance_score"] for r in results]
+    _apply_mb_duration_scores(results, expected_duration_secs)
+    changed = [
+        {"source": r["source"], "video_id": r["video_id"], "relevance_score": r["relevance_score"]}
+        for r, old in zip(results, before)
+        if r["relevance_score"] != old
+    ]
+    return {"type": "rescore", "results": changed} if changed else None
+
+
 def log_ranked_results(context: str, query: str, results: list[dict], top_n: int = 3) -> None:
     """Print the top scored candidates with their main score reasons."""
     if not results:
@@ -604,12 +622,15 @@ def _search_all_events(
       {"type": "source", "source": name, "status": "timeout"}
       {"type": "source", "source": name, "status": "busy"}
       {"type": "source", "source": name, "status": "error"}
+      {"type": "rescore", "results": [{source, video_id, relevance_score}]}
       {"type": "album_suggestion", <album fields>}
       {"type": "done"}
 
-    Per-source results are already blacklist-filtered, capped and scored (with the
-    MB duration bonus applied once the MB lookup has resolved, which in practice
-    beats the slower source searches), so a consumer only needs to sort the union.
+    Per-source results are already blacklist-filtered, capped and scored. The MB
+    duration score is applied to each batch if MusicBrainz has answered by then;
+    sources quicker than MusicBrainz (JioSaavn answers in under half a second, MB
+    takes one to five) are scored when it lands, announced by a 'rescore' event
+    carrying the new scores. A consumer sorts the union, and re-sorts on rescore.
 
     *enforce_availability* gates the servicecheck parking: True for the normal
     multi-source search, False when the caller explicitly asked for a specific
@@ -655,6 +676,9 @@ def _search_all_events(
     futures = {}
     pool = ThreadPoolExecutor(max_workers=len(active) + 2)
     expected_dur = None
+    mb_settled = False
+    unscored: list[dict] = []  # results that went out before MusicBrainz answered
+    started = time.monotonic()
     album_suggestion = None
     try:
         retry_empty_soulseek = len(active) == 1
@@ -679,12 +703,19 @@ def _search_all_events(
             for future in as_completed(futures, timeout=SEARCH_ALL_DEADLINE):
                 source_name = futures[future]
                 # Grab the MB duration the instant it's ready so this and every
-                # later batch gets the duration bonus.
-                if expected_dur is None and mb_future.done():
+                # later batch gets the duration score, and catch up the batches
+                # that beat it here.
+                if not mb_settled and mb_future.done():
+                    mb_settled = True
                     try:
                         expected_dur = mb_future.result()
                     except Exception:
                         expected_dur = None
+                    if expected_dur and unscored:
+                        rescore = _rescore_event(unscored, expected_dur)
+                        if rescore:
+                            yield rescore
+                    unscored = []
                 try:
                     source_results = future.result()
                 except SourceSearchBusy as e:
@@ -705,6 +736,8 @@ def _search_all_events(
                 _stamp_quality_tiers(batch)
                 if expected_dur:
                     _apply_mb_duration_scores(batch, expected_dur)
+                elif not mb_settled:
+                    unscored.extend(batch)
                 batch.sort(key=lambda x: x["relevance_score"], reverse=True)
                 servicecheck.record_search_success(source_name)
                 yield {
@@ -728,6 +761,21 @@ def _search_all_events(
                     servicecheck.record_search_timeout(name)
                     yield {"type": "source", "source": name, "status": "timeout"}
             print(f"search_all: {SEARCH_ALL_DEADLINE}s deadline hit")
+
+        # Every source answered before MusicBrainz did. The cards are already on
+        # screen, so only the progress panel notices the wait, and automatic
+        # downloads picking the top result very much want the right order. Give
+        # MB what is left of the deadline, then catch up what went out unscored.
+        if not mb_settled and unscored:
+            remaining = max(0.0, SEARCH_ALL_DEADLINE - (time.monotonic() - started))
+            try:
+                expected_dur = mb_future.result(timeout=remaining)
+            except Exception:
+                expected_dur = None
+            if expected_dur:
+                rescore = _rescore_event(unscored, expected_dur)
+                if rescore:
+                    yield rescore
 
         # MB album suggestion is best-effort; if it hasn't landed by now, skip it.
         try:

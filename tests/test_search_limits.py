@@ -3,6 +3,7 @@
 import os
 import sys
 import threading
+import time
 
 import pytest
 
@@ -213,3 +214,41 @@ def test_automated_search_cache_does_not_remember_empty_failures(monkeypatch):
     search.search_all_cached("Artist - Missing", 10)
 
     assert len(calls) == 2
+
+
+def _race_setup(monkeypatch, mb_delay):
+    """One quick source and a MusicBrainz lookup that takes its time."""
+    def quick(_query, limit):
+        return [
+            {"video_id": "wrong-length", "source": "jiosaavn", "duration": "3:38", "relevance_score": 200},
+            {"video_id": "right-length", "source": "jiosaavn", "duration": "5:55", "relevance_score": 190},
+        ]
+
+    def slow_mb(_query):
+        time.sleep(mb_delay)
+        return 355.0
+
+    monkeypatch.setattr(search, "_enabled_sources", lambda include_soulseek=False: {"jiosaavn": {"search_fn": quick}})
+    monkeypatch.setattr(search, "_apply_blacklist_filter", lambda items, source=None: items)
+    monkeypatch.setattr(search, "_mb_duration_lookup", slow_mb)
+    monkeypatch.setattr(search, "_mb_album_lookup", lambda query: None)
+    monkeypatch.setattr(search.servicecheck, "record_search_success", lambda source: None)
+
+
+def test_sources_quicker_than_musicbrainz_still_get_the_duration_score(monkeypatch):
+    _race_setup(monkeypatch, mb_delay=0.3)
+
+    events = list(search._search_all_events("Queen - Bohemian Rhapsody", 10, enforce_availability=False))
+    kinds = [e["type"] for e in events]
+    assert kinds.index("source") < kinds.index("rescore") < kinds.index("done")
+
+    rescored = {r["video_id"]: r["relevance_score"] for r in next(e for e in events if e["type"] == "rescore")["results"]}
+    assert rescored == {"wrong-length": 200 - 60, "right-length": 190 + 40}
+
+
+def test_blocking_search_ranks_by_the_late_duration_score(monkeypatch):
+    _race_setup(monkeypatch, mb_delay=0.3)
+    monkeypatch.setattr(search.servicecheck, "refresh_sources_async", lambda names: None)
+    monkeypatch.setattr(search.servicecheck, "is_source_available", lambda name: True)
+    results, _ = search.search_all("Queen - Bohemian Rhapsody", 10)
+    assert [r["video_id"] for r in results] == ["right-length", "wrong-length"]

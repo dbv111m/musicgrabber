@@ -1853,6 +1853,24 @@
                             }
                         }
                         break;
+                    case 'rescore': {
+                        // MusicBrainz answered after the quick sources had landed;
+                        // move their cards to where the duration check puts them.
+                        const scores = new Map((ev.results || []).map(r => [`${r.source}:${r.video_id}`, r.relevance_score]));
+                        let moved = false;
+                        for (const r of accumulator) {
+                            const score = scores.get(`${r.source}:${r.video_id}`);
+                            if (score !== undefined) { r.relevance_score = score; moved = true; }
+                        }
+                        if (moved) {
+                            accumulator.sort((a, b) => (b.relevance_score || 0) - (a.relevance_score || 0));
+                            renderResults(accumulator);
+                            if (currentArtworkUrl && currentArtworkArtist && currentArtworkTitle) {
+                                applyArtworkToResults(currentArtworkArtist, currentArtworkTitle, currentArtworkUrl);
+                            }
+                        }
+                        break;
+                    }
                     case 'album_suggestion':
                         albumSuggestion = ev;
                         break;

@@ -87,6 +87,7 @@ def test_search_shapes_results(monkeypatch):
     assert top["duration"] == "4:28"
     assert top["source_url"].endswith("_320.mp4")
     assert top["thumbnail"].endswith("500x500.jpg")
+    assert "label_release=+40" in top["score_breakdown"]
     dance = next(r for r in results if r["video_id"] == "js_def456")
     assert dance["quality"] == "AAC 160kbps"
 

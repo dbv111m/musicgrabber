@@ -430,3 +430,70 @@ def test_streaming_no_query_neutral():
     )
     assert conf == 0.5
     assert "no_query_info" in breakdown
+
+
+def test_right_title_wrong_artist_is_gated():
+    # A lossless cover is still a cover: Redi Hasa and the Vitamin String
+    # Quartet both outranked JioSaavn's real Nirvana on Monochrome's bonus.
+    for artist in ("Redi Hasa", "Vitamin String Quartet"):
+        conf, breakdown = compute_match_confidence("Nirvana", "Lithium", "Lithium", artist)
+        assert conf < 0.40, (artist, conf)
+        assert any(b.startswith("artist_gate") for b in breakdown)
+
+
+def test_namesake_act_is_not_the_artist():
+    # Deezer's "Nirvana (UK)" is the 1960s British band.
+    conf, breakdown = compute_match_confidence("Nirvana", "Lithium", "Lithium", "Nirvana (UK)")
+    assert conf < 0.25
+    assert "artist_namesake" in breakdown
+
+
+def test_bracketed_branding_is_not_a_namesake():
+    conf, _ = compute_match_confidence("Raye", "Where Is My Husband!", "WHERE IS MY HUSBAND!", "RAYE (Official)")
+    assert conf >= 0.85
+
+
+def test_named_mix_is_a_wrong_version():
+    conf, breakdown = compute_match_confidence("Nirvana", "Lithium", "Lithium (Devonshire Mix)", "Nirvana")
+    assert conf < 0.40
+    assert any(b.startswith("wrong_version") for b in breakdown)
+
+
+def test_original_mix_is_the_release():
+    conf, _ = compute_match_confidence("Daft Punk", "One More Time", "One More Time (Original Mix)", "Daft Punk")
+    assert conf >= 0.85
+
+
+def test_asking_for_the_mix_gets_the_mix():
+    conf, _ = compute_match_confidence("Nirvana", "Lithium (Devonshire Mix)", "Lithium (Devonshire Mix)", "Nirvana")
+    assert conf >= 0.85
+
+
+def test_unknown_artist_is_not_gated():
+    conf, breakdown = compute_match_confidence("Nirvana", "Lithium", "Lithium", None)
+    assert not any(b.startswith("artist_gate") for b in breakdown)
+    assert conf >= 0.55
+
+
+def test_bracketless_named_mix_is_a_wrong_version():
+    conf, _ = compute_match_confidence("Arijit Singh", "Tum Hi Ho", "Tum Hi Ho Bollywood Dance Mix", "Arijit Singh")
+    assert conf < 0.40
+
+
+def test_joined_titles_and_medleys_are_wrong_versions():
+    conf, _ = compute_match_confidence("Daft Punk", "One More Time", "One More Time / Aerodynamic", "Daft Punk")
+    assert conf < 0.40
+    conf, _ = compute_match_confidence("Daft Punk", "One More Time", "Daft Punk Medley: One More Time", "Daft Punk")
+    assert conf < 0.40
+
+
+def test_mentioning_the_artist_is_not_being_the_artist():
+    conf, _ = compute_match_confidence(
+        "Daft Punk", "One More Time", "Sample a Song (Parody of Daft Punk One More Time)", "DJ Timbo")
+    assert conf < 0.40
+
+
+def test_title_credits_still_count_for_uploaders():
+    for title in ("RAYE - Where Is My Husband!", "Where Is My Husband! by RAYE", "Various - RAYE - Where Is My Husband!"):
+        conf, _ = compute_match_confidence("Raye", "Where Is My Husband!", title, "SomeUploader")
+        assert conf >= 0.85, title

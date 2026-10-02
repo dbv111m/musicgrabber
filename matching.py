@@ -48,7 +48,7 @@ _HEAVY_VERSION_KEYWORDS = (
     "acoustic", "unplugged", "stripped",
     "slowed", "reverb", "sped up", "speed up",
     "instrumental", "karaoke",
-    "demo", "rough cut",
+    "demo", "rough cut", "medley",
     "radio edit", "radio version", "single edit",
     "8d audio", "bass boosted", "nightcore",
 )
@@ -286,6 +286,27 @@ _W_ALBUM = 0.05
 CORE_TITLE_FAST_PATH = 0.90
 WRONG_VERSION_PENALTY = 0.4
 TITLE_GATE_THRESHOLD = 0.4  # Title sim below this scales whole confidence down
+ARTIST_GATE_THRESHOLD = 0.5  # Artist sim below this does the same: right song, wrong act
+
+# A bracketed qualifier on an artist name marks a different act sharing it:
+# Deezer's "Nirvana (UK)" is the 1960s British band, not the one from Aberdeen,
+# Washington. Branding in brackets ("(Official)", "(VEVO)") is not a new act.
+_ARTIST_QUALIFIER_RE = re.compile(r"^(.+?)\s*[(\[]([^)\]]+)[)\]]\s*$")
+_ARTIST_BRANDING_RE = re.compile(r"\b(official|vevo|topic|feat|ft|featuring|band|music)\b", re.I)
+
+# Named mixes and edits: "(Devonshire Mix)", "[Butch Vig Edit]", or Deezer's
+# bracketless "Tum Hi Ho Bollywood Dance Mix". The heavy keyword list only knows
+# the common ones ("club mix", "radio edit"). "Original Mix" and "Album Mix"
+# are the release itself, so they pass.
+_NAMED_MIX_RE = re.compile(r"\b(mix|edit|dub)\s*([)\]]|$)", re.I)
+_CANONICAL_MIX_RE = re.compile(r"\b(original|album|main)\s+(mix|edit)\b", re.I)
+
+# Two songs joined into one track: "One More Time / Aerodynamic".
+_JOINED_TITLES_RE = re.compile(r"\S\s+/\s+\S")
+
+# Where a title says who the song is by: a leading "Artist - " segment (or
+# "Various - Artist - "), or "... by Artist".
+_TITLE_SEPARATOR_RE = re.compile(r"\s+[-\u2013|:]\s+")
 
 
 def score_track_against_filename(
@@ -394,6 +415,18 @@ def score_track_against_filename(
     return confidence, breakdown
 
 
+def _title_credits_artist(candidate_title: str, expected_artist_norm: str) -> bool:
+    """Does the title say the song is by this artist, rather than just name them?"""
+    if not expected_artist_norm:
+        return False
+    segments = _TITLE_SEPARATOR_RE.split(candidate_title)
+    for segment in segments[:-1]:
+        if expected_artist_norm in clean_artist(segment):
+            return True
+    by = re.search(r"\bby\s+(.+)$", candidate_title, re.I)
+    return bool(by and clean_artist(by.group(1)).startswith(expected_artist_norm))
+
+
 def compute_match_confidence(
     expected_artist: str | None,
     expected_title: str | None,
@@ -476,12 +509,21 @@ def compute_match_confidence(
         expected_squashed = expected_artist_norm.replace(" ", "")
         candidate_squashed = candidate_artist_norm.replace(" ", "")
 
+        qualified = _ARTIST_QUALIFIER_RE.match((candidate_artist or "").strip())
+
         if not candidate_artist_norm:
             artist_score = 0.0
         elif candidate_artist_norm == expected_artist_norm:
             artist_score = 1.0
         elif expected_squashed and expected_squashed == candidate_squashed:
             artist_score = 1.0
+        elif (qualified
+                and clean_artist(qualified.group(1)) == expected_artist_norm
+                and not _ARTIST_BRANDING_RE.search(qualified.group(2))):
+            # Same name, different act. Treated as no match at all, because
+            # "nearly the right band" is still the wrong band.
+            artist_score = 0.0
+            breakdown.append("artist_namesake")
         elif (expected_artist_norm in candidate_artist_norm
                 or candidate_artist_norm in expected_artist_norm
                 or expected_squashed in candidate_squashed
@@ -489,11 +531,19 @@ def compute_match_confidence(
             artist_score = 0.95
         else:
             sim = similarity(expected_artist_norm, candidate_artist_norm)
-            # Artist named in the candidate title also counts; YouTube
+            # Artist credited in the candidate title also counts; YouTube
             # uploaders often park the artist in the title rather than the
-            # channel ("Various - Artist - Title").
-            if expected_artist_norm in candidate_title_clean:
+            # channel ("Various - Artist - Title"). Credited, not merely
+            # mentioned: "Sample a Song (Parody of Daft Punk One More Time)"
+            # names Daft Punk without being by them.
+            if _title_credits_artist(candidate_title or "", expected_artist_norm):
                 artist_score = max(sim, 0.95)
+            elif " - " in (candidate_title or ""):
+                # "Artist - Title" posted by somebody else: compare the
+                # artist half of the title too, so a typo there ("Kraftwork")
+                # still gets credit the uploader's name never could.
+                title_artist = clean_artist(candidate_title.split(" - ", 1)[0])
+                artist_score = max(sim, similarity(expected_artist_norm, title_artist))
             else:
                 artist_score = sim
         breakdown.append(f"artist={artist_score:.2f}")
@@ -515,6 +565,14 @@ def compute_match_confidence(
         confidence *= (title_score / TITLE_GATE_THRESHOLD) if TITLE_GATE_THRESHOLD else 0.0
         breakdown.append(f"title_gate×{title_score / TITLE_GATE_THRESHOLD:.2f}")
 
+    # Artist hard gate, the same idea: the right title by the wrong artist is a
+    # cover or a namesake, and a lossless cover is still not the song. Only
+    # when we know who the candidate is; an unknown artist is not a wrong one.
+    candidate_artist_known = bool(expected_artist_norm and clean_artist(candidate_artist or ""))
+    if candidate_artist_known and artist_score < ARTIST_GATE_THRESHOLD:
+        confidence *= artist_score / ARTIST_GATE_THRESHOLD
+        breakdown.append(f"artist_gate×{artist_score / ARTIST_GATE_THRESHOLD:.2f}")
+
     # Wrong-version demotion: only when query is plain and similarity()
     # didn't already catch the version suffix structurally.
     plain_query = not query_requests_variant(query or expected_title or "")
@@ -523,8 +581,14 @@ def compute_match_confidence(
         # catches cases where the version word sits in a position
         # similarity() did not detect (e.g. infix, or the candidate title
         # starts with the artist).
-        if any(kw in candidate_title_clean for kw in _HEAVY_VERSION_KEYWORDS):
-            if not any(kw in expected_title_clean for kw in _HEAVY_VERSION_KEYWORDS):
+        heavy = any(kw in candidate_title_clean for kw in _HEAVY_VERSION_KEYWORDS)
+        named_mix = bool(_NAMED_MIX_RE.search(candidate_title or "")
+                         and not _CANONICAL_MIX_RE.search(candidate_title or ""))
+        joined = bool(_JOINED_TITLES_RE.search(candidate_title or ""))
+        if heavy or named_mix or joined:
+            if (not any(kw in expected_title_clean for kw in _HEAVY_VERSION_KEYWORDS)
+                    and not _NAMED_MIX_RE.search(expected_title or "")
+                    and not _JOINED_TITLES_RE.search(expected_title or "")):
                 confidence *= WRONG_VERSION_PENALTY
                 breakdown.append(f"wrong_version×{WRONG_VERSION_PENALTY}")
 
