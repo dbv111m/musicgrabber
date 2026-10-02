@@ -11,6 +11,14 @@ const RELEASE_NOTES = {
         title: "What's New in v4.3.0: Death of the Phoenix",
         sections: [
             {
+                heading: "New source: JioSaavn",
+                items: [
+                    "JioSaavn, India's biggest music service, is now searched alongside everything else. Most tracks are 320kbps, and results tell you the quality before you download.",
+                    "It's brilliant for Bollywood, Punjabi and other Indian music. Outside India its Western catalogue has gaps, but your other sources have those covered.",
+                    "It's on already. Don't want it? Switch it off in Settings under Search Sources.",
+                ]
+            },
+            {
                 heading: "Know when you're behind",
                 items: [
                     "When a newer version of MusicGrabber is out, a banner above the search box tells you, with a link to what's changed. No more finding out the hard way when a download falls over.",

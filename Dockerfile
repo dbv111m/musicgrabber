@@ -39,7 +39,8 @@ RUN pip install --no-cache-dir \
     mutagen~=1.47.0 \
     playwright~=1.58.0 \
     apprise~=1.9.3 \
-    bcrypt~=4.2.0
+    bcrypt~=4.2.0 \
+    pycryptodome~=3.23.0
 
 # SeleniumBase is kept beside Playwright rather than replacing the working
 # Spotify/Amazon playlist scrapers. Its undetected mode is what gets an Amazon

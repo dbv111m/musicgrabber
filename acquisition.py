@@ -324,6 +324,7 @@ _UNKNOWN_SOURCE_RANK = {
     # Unknown bitrate is not promoted to lossless merely because the provider is
     # capable of it. Direct MP3 sites still precede opaque streaming formats.
     "freemp3cloud": 90,
+    "jiosaavn": 85,
     "zvu4no": 80,
     "soulseek": 70,
     "soundcloud": 60,

@@ -1352,7 +1352,7 @@
                     // Build preview URL with source params
                     const previewSource = (result && result.source) || 'youtube';
                     const params = new URLSearchParams({ source: previewSource });
-                    if ((previewSource === 'soundcloud' || previewSource === 'zvu4no' || previewSource === 'freemp3cloud' || previewSource === 'monochrome') && result.source_url) {
+                    if ((previewSource === 'soundcloud' || previewSource === 'zvu4no' || previewSource === 'freemp3cloud' || previewSource === 'jiosaavn' || previewSource === 'monochrome') && result.source_url) {
                         params.set('url', result.source_url);
                     }
                     if (previewSource === 'monochrome' && result) {
@@ -1636,6 +1636,7 @@
             soundcloud: 'SC',
             zvu4no: 'zvu4no',
             freemp3cloud: 'MP3C',
+            jiosaavn: 'Saavn',
             soulseek: 'SLSK',
         };
 
@@ -2933,7 +2934,7 @@
                     source: top.source || 'youtube'
                 };
                 if (top.artist || top.channel) payload.artist = top.artist || top.channel;
-                if ((top.source === 'soundcloud' || top.source === 'zvu4no' || top.source === 'freemp3cloud' || top.source === 'monochrome') && top.source_url) {
+                if ((top.source === 'soundcloud' || top.source === 'zvu4no' || top.source === 'freemp3cloud' || top.source === 'jiosaavn' || top.source === 'monochrome') && top.source_url) {
                     payload.source_url = top.source_url;
                 }
                 if (top.source === 'soulseek') {
@@ -3133,7 +3134,7 @@
         // ---------------------------------------------------------------
         // Minimum-quality filter
         //
-        // Only Soulseek, Monochrome and FreeMp3Cloud declare a quality before
+        // Only Soulseek, Monochrome, FreeMp3Cloud and JioSaavn declare a quality before
         // download; YouTube and SoundCloud say nothing at all, so they arrive as
         // tier 0 ("undeclared"). Asking for "Lossless only" and still being handed
         // a YouTube rip is not what anybody meant, so undeclared results are hidden
@@ -3302,12 +3303,12 @@
         }
 
         function getSourceBadge(source) {
-            const badges = { youtube: 'YT', mp3phoenix: 'PX', soundcloud: 'SC', zvu4no: 'ZV', freemp3cloud: 'FMC', soulseek: 'SLK', monochrome: 'MONO' };
+            const badges = { youtube: 'YT', mp3phoenix: 'PX', soundcloud: 'SC', zvu4no: 'ZV', freemp3cloud: 'FMC', jiosaavn: 'JS', soulseek: 'SLK', monochrome: 'MONO' };
             return badges[source] || source.toUpperCase().slice(0, 3);
         }
 
         function getSourceLabel(source) {
-            const labels = { youtube: 'YouTube', mp3phoenix: 'MP3Phoenix', soundcloud: 'SoundCloud', zvu4no: 'zvu4no', freemp3cloud: 'FreeMp3Cloud', soulseek: 'Soulseek', monochrome: 'Monochrome' };
+            const labels = { youtube: 'YouTube', mp3phoenix: 'MP3Phoenix', soundcloud: 'SoundCloud', zvu4no: 'zvu4no', freemp3cloud: 'FreeMp3Cloud', jiosaavn: 'JioSaavn', soulseek: 'Soulseek', monochrome: 'Monochrome' };
             return labels[source] || source;
         }
 
@@ -3705,7 +3706,7 @@
                 }
 
                 // URL-based sources need the full URL for downloading
-                if ((result.source === 'soundcloud' || result.source === 'zvu4no' || result.source === 'freemp3cloud' || result.source === 'monochrome') && result.source_url) {
+                if ((result.source === 'soundcloud' || result.source === 'zvu4no' || result.source === 'freemp3cloud' || result.source === 'jiosaavn' || result.source === 'monochrome') && result.source_url) {
                     payload.source_url = result.source_url;
                 }
 
@@ -4263,6 +4264,7 @@
                 'mp3phoenix_guessed': 'MP3Phoenix embedded/guessed',
                 'zvu4no_guessed': 'zvu4no embedded/guessed',
                 'freemp3cloud_guessed': 'FreeMp3Cloud embedded/guessed',
+                'jiosaavn_guessed': 'JioSaavn embedded/guessed',
                 'soulseek_guessed': 'Soulseek embedded/guessed',
             };
             return labels[source] || metadataSource;
@@ -9449,7 +9451,7 @@
         let upgradesSearchToken = 0;  // bumped to abort an in-flight lazy-search sweep
         const UPGRADE_SOURCE_BADGES = {
             youtube: 'YT', monochrome: 'MONO', soulseek: 'SLK',
-            soundcloud: 'SC', mp3phoenix: 'PX', zvu4no: 'ZV', freemp3cloud: 'FMC',
+            soundcloud: 'SC', mp3phoenix: 'PX', zvu4no: 'ZV', freemp3cloud: 'FMC', jiosaavn: 'JS',
         };
 
         function upgradeTierLabel(tier) {
@@ -10916,9 +10918,10 @@
             const scCount = data.sources.soundcloud || 0;
             const zvCount = data.sources.zvu4no || 0;
             const fmcCount = data.sources.freemp3cloud || 0;
+            const jsCount = data.sources.jiosaavn || 0;
             const slkCount = data.sources.soulseek || 0;
             const monoCount = data.sources.monochrome || 0;
-            const sourceTotal = ytCount + pxCount + scCount + zvCount + fmcCount + slkCount + monoCount || 1;
+            const sourceTotal = ytCount + pxCount + scCount + zvCount + fmcCount + jsCount + slkCount + monoCount || 1;
 
             let html = `
                 <!-- Summary cards -->
@@ -10976,6 +10979,7 @@
                         ${scCount > 0 ? `<div style="flex: ${scCount}; background: #ff5500; border-radius: 4px;"></div>` : ''}
                         ${zvCount > 0 ? `<div style="flex: ${zvCount}; background: #7a6aee; border-radius: 4px;"></div>` : ''}
                         ${fmcCount > 0 ? `<div style="flex: ${fmcCount}; background: #3a2fd6; border-radius: 4px;"></div>` : ''}
+                        ${jsCount > 0 ? `<div style="flex: ${jsCount}; background: #2bc5b4; border-radius: 4px;"></div>` : ''}
                         ${monoCount > 0 ? `<div style="flex: ${monoCount}; background: #0f766e; border-radius: 4px;"></div>` : ''}
                         ${slkCount > 0 ? `<div style="flex: ${slkCount}; background: #4a9eff; border-radius: 4px;"></div>` : ''}
                     </div>
@@ -10985,6 +10989,7 @@
                         ${scCount > 0 ? `<span style="color: var(--text-secondary);"><span style="display: inline-block; width: 8px; height: 8px; background: #ff5500; border-radius: 2px; margin-right: 4px;"></span>SoundCloud: ${scCount}</span>` : ''}
                         ${zvCount > 0 ? `<span style="color: var(--text-secondary);"><span style="display: inline-block; width: 8px; height: 8px; background: #7a6aee; border-radius: 2px; margin-right: 4px;"></span>zvu4no: ${zvCount}</span>` : ''}
                         ${fmcCount > 0 ? `<span style="color: var(--text-secondary);"><span style="display: inline-block; width: 8px; height: 8px; background: #3a2fd6; border-radius: 2px; margin-right: 4px;"></span>FreeMp3Cloud: ${fmcCount}</span>` : ''}
+                        ${jsCount > 0 ? `<span style="color: var(--text-secondary);"><span style="display: inline-block; width: 8px; height: 8px; background: #2bc5b4; border-radius: 2px; margin-right: 4px;"></span>JioSaavn: ${jsCount}</span>` : ''}
                         ${monoCount > 0 ? `<span style="color: var(--text-secondary);"><span style="display: inline-block; width: 8px; height: 8px; background: #0f766e; border-radius: 2px; margin-right: 4px;"></span>Monochrome: ${monoCount}</span>` : ''}
                         <span style="color: var(--text-secondary);"><span style="display: inline-block; width: 8px; height: 8px; background: #4a9eff; border-radius: 2px; margin-right: 4px;"></span>Soulseek: ${slkCount}</span>
                     </div>
@@ -11099,6 +11104,7 @@
             'source_soundcloud_enabled': 'settingSourceSoundcloud',
             'source_zvu4no_enabled': 'settingSourceZvu4no',
             'source_freemp3cloud_enabled': 'settingSourceFreemp3cloud',
+            'source_jiosaavn_enabled': 'settingSourceJiosaavn',
             'source_soulseek_enabled': 'settingSourceSoulseek',
             'source_monochrome_enabled': 'settingSourceMonochrome',
             'source_offline_fallback': 'settingSourceOfflineFallback',

@@ -107,6 +107,17 @@ const SEARCH_QUIPS = {
             "Reminding the cloud it's free",
         ],
 
+        jiosaavn: [
+            "Asking JioSaavn nicely",
+            "Checking the Bollywood back catalogue",
+            "Waiting for the dance number to finish",
+            "Requesting a 320kbps chai",
+            "Rummaging through JioSaavn's crates",
+            "Hoping the interval is short",
+            "Getting a word in between the songs",
+            "Asking India's biggest record shop",
+        ],
+
         soulseek: [
             "Seeking souls on Soulseek",
             "Bribing the Soulseek peers",

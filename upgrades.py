@@ -555,8 +555,8 @@ def _estimate_result_tier(result: dict) -> tuple[int, bool]:
         return TIER_LOSSY_320, False
     if source in ("youtube", "soundcloud"):
         return TIER_LOSSY_192, False  # lossy, rarely an upgrade; estimate low
-    if source == "freemp3cloud":
-        # HQ-tagged results carry a "320kbps" quality label, the rest are 128.
+    if source in ("freemp3cloud", "jiosaavn"):
+        # Both declare a bitrate up front: FreeMp3Cloud 320 or 128, JioSaavn 320 or 160.
         digits = "".join(ch for ch in quality if ch.isdigit())
         return (_kbps_to_tier(int(digits)) if digits else TIER_LOSSY_320), False
     return TIER_LOSSY_320, False  # zvu4no etc, estimate, unverified

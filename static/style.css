@@ -1240,6 +1240,11 @@ h1 {
     color: white;
 }
 
+.source-badge.jiosaavn {
+    background: #2bc5b4;
+    color: #000;
+}
+
 /* Watched Upgrades rows */
 .upgrade-row {
     cursor: default;

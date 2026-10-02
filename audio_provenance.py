@@ -69,6 +69,7 @@ LOSSY_CODECS = {
 }
 LOSSY_PROVIDERS = {
     "freemp3cloud",
+    "jiosaavn",
     "mp3phoenix",
     "soundcloud",
     "youtube",

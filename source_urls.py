@@ -33,6 +33,8 @@ SOURCE_URL_HOSTS: dict[str, tuple[str, ...]] = {
     "zvu4no": ("zvu4it.org",),
     # Search runs on freemp3cloud.com, the actual MP3s come off meln.top.
     "freemp3cloud": ("freemp3cloud.com", "meln.top"),
+    # Search runs on jiosaavn.com; the AAC files come off aac.saavncdn.com.
+    "jiosaavn": ("saavncdn.com",),
 }
 
 # Monochrome does not use a fetchable URL at all: it uses a private

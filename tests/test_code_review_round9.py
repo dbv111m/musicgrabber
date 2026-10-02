@@ -38,6 +38,8 @@ class TestSourceUrlValidation:
         ("mp3phoenix", "https://mp3phoenix.net/getmp3/123"),
         ("zvu4no", "https://data.zvu4no.org/download-track/x.mp3"),
         ("freemp3cloud", "http://nas.local/admin"),
+        ("jiosaavn", "https://aac.saavncdn.com.evil.tld/x_320.mp4"),
+        ("jiosaavn", "http://192.168.1.1/x_320.mp4"),
         ("monochrome", "http://127.0.0.1/x"),
         ("soundcloud", ""),
         ("soundcloud", None),
@@ -52,6 +54,7 @@ class TestSourceUrlValidation:
         ("soundcloud", "https://m.soundcloud.com/artist/track"),
         ("zvu4no", "https://data.zvu4it.org/download-track/x.mp3"),
         ("freemp3cloud", "https://cdn5.meln.top/x.mp3"),
+        ("jiosaavn", "https://aac.saavncdn.com/568/e467217af13bdec0e05624d656421ade_320.mp4"),
         ("monochrome", "monochrome://12345?isrc=GBAYE9200070"),
     ])
     def test_genuine_urls_still_work(self, source, url):
@@ -76,8 +79,8 @@ class TestSourceUrlValidation:
         body = (Path(__file__).resolve().parent.parent / "downloads.py").read_text(encoding="utf-8")
         guard = body[body.index("if is_url_source and not ("):]
         guard = guard[:guard.index("):")]
-        for flag in ("is_soundcloud", "is_zvu4no",
-                     "is_freemp3cloud", "is_monochrome", "is_youtube_url"):
+        for flag in ("is_soundcloud", "is_zvu4no", "is_freemp3cloud",
+                     "is_jiosaavn", "is_monochrome", "is_youtube_url"):
             assert flag in guard, f"{flag} missing from the refusal guard"
 
     def test_validate_raises_with_a_useful_message(self):

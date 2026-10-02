@@ -152,8 +152,8 @@ from longform_split import (
     detect_longform_candidate, validate_segments, create_longform_split, cancel_longform_split,
 )
 
-URL_BASED_SOURCES = {"soundcloud", "zvu4no", "freemp3cloud", "monochrome"}
-DIRECT_PREVIEW_SOURCES = {"zvu4no", "freemp3cloud"}
+URL_BASED_SOURCES = {"soundcloud", "zvu4no", "freemp3cloud", "jiosaavn", "monochrome"}
+DIRECT_PREVIEW_SOURCES = {"zvu4no", "freemp3cloud", "jiosaavn"}
 MONOCHROME_PREVIEW_SOURCES = {"monochrome"}
 
 

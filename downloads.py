@@ -74,6 +74,7 @@ from monochrome import download_monochrome_track
 from source_urls import is_valid_source_url
 from zvu4no import download_zvu4no_track, is_zvu4no_url
 from freemp3cloud import download_freemp3cloud_track
+from jiosaavn import download_jiosaavn_track, is_jiosaavn_url
 from youtube import (
     _ytdlp_base_args, _is_ytdlp_403, _note_cookie_failure,
     is_personalised_youtube_playlist, resolve_cookie_file,
@@ -103,6 +104,8 @@ def _default_metadata_source(source: str) -> str:
         return "zvu4no_guessed"
     if source_name == "freemp3cloud":
         return "freemp3cloud_guessed"
+    if source_name == "jiosaavn":
+        return "jiosaavn_guessed"
     if source_name == "soulseek":
         return "soulseek_guessed"
     return "youtube_guessed"
@@ -2913,7 +2916,7 @@ def _enforce_target_format(audio_file: Path, convert_audio: bool, user_id: str |
 
 # The sources whose volume is a lottery. Monochrome and Soulseek serve proper
 # masters/rips, so they are deliberately absent; we don't rewrite those.
-_LOUDNORM_SOURCES = {"youtube", "soundcloud", "zvu4no", "freemp3cloud"}
+_LOUDNORM_SOURCES = {"youtube", "soundcloud", "zvu4no", "freemp3cloud", "jiosaavn"}
 
 
 def _carry_over_artwork(src: Path, dest: Path) -> None:
@@ -4936,10 +4939,10 @@ def _process_direct_mp3_download(job_id: str, download_url: str, artist_hint: st
             safe_title = _output_stem(artist, forced_track_title or title, job_id, user_id=user_id)
         artist_dir.mkdir(parents=True, exist_ok=True)
 
-        # Direct sources mostly serve MP3. Monochrome serves FLAC, so keep the
-        # staging suffix honest when the user keeps the source format.
+        # Direct sources mostly serve MP3. Monochrome serves FLAC and JioSaavn AAC,
+        # so keep the staging suffix honest when the user keeps the source format.
         _update_job(job_id, progress_stage="Downloading audio")
-        source_ext = ".flac" if source_label == "monochrome" else ".mp3"
+        source_ext = {"monochrome": ".flac", "jiosaavn": ".m4a"}.get(source_label, ".mp3")
         source_path = artist_dir / f"{safe_title}{source_ext}"
 
         integrity_reason = ""
@@ -5298,7 +5301,7 @@ def process_download(job_id: str, video_id: str, convert_audio: bool = True, sou
 
     source_url overrides the default YouTube URL construction  -  used for
     SoundCloud and any future yt-dlp-supported source.
-    zvu4no/freemp3cloud/Monochrome tracks bypass yt-dlp entirely.
+    zvu4no/freemp3cloud/JioSaavn/Monochrome tracks bypass yt-dlp entirely.
     playlist_name + use_playlists_dir route bulk import tracks into the Playlists folder.
     override_dir, when set, is an absolute path string used as the download directory
     instead of the normal Singles/Artist layout  -  used by album downloads.
@@ -5308,6 +5311,7 @@ def process_download(job_id: str, video_id: str, convert_audio: bool = True, sou
     is_soundcloud  = source_url and "soundcloud.com" in source_url
     is_zvu4no      = is_zvu4no_url(source_url)
     is_freemp3cloud = source_url and "meln.top" in source_url
+    is_jiosaavn    = is_jiosaavn_url(source_url)
     is_monochrome  = source_url and source_url.startswith("monochrome://")
     is_url_source  = bool(source_url)
 
@@ -5322,8 +5326,8 @@ def process_download(job_id: str, video_id: str, convert_audio: bool = True, sou
     # break every download in the application.
     is_youtube_url = is_valid_source_url("youtube", source_url)
     use_youtube_cookies = youtube_cookies_apply(source_url)
-    if is_url_source and not (is_soundcloud or is_zvu4no
-                              or is_freemp3cloud or is_monochrome or is_youtube_url):
+    if is_url_source and not (is_soundcloud or is_zvu4no or is_freemp3cloud
+                              or is_jiosaavn or is_monochrome or is_youtube_url):
         _update_job(
             job_id,
             status="failed",
@@ -5371,7 +5375,7 @@ def process_download(job_id: str, video_id: str, convert_audio: bool = True, sou
 
     # Direct stream sources: bypass yt-dlp entirely.
     # artist/title come from the job row (set at queue time from search results).
-    if is_monochrome or is_zvu4no or is_freemp3cloud:
+    if is_monochrome or is_zvu4no or is_freemp3cloud or is_jiosaavn:
         with db_conn() as conn:
             conn.row_factory = sqlite3.Row
             row = conn.execute(
@@ -5386,6 +5390,8 @@ def process_download(job_id: str, video_id: str, convert_audio: bool = True, sou
                                 artist_hint=artist_hint, title_hint=title_hint)
         elif is_zvu4no:
             direct_label, direct_fn = "zvu4no", download_zvu4no_track
+        elif is_jiosaavn:
+            direct_label, direct_fn = "jiosaavn", download_jiosaavn_track
         else:
             direct_label, direct_fn = "freemp3cloud", download_freemp3cloud_track
         _process_direct_mp3_download(

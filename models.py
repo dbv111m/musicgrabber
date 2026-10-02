@@ -219,6 +219,7 @@ class SettingsUpdate(BaseModel):
     source_soundcloud_enabled: Optional[bool] = None
     source_zvu4no_enabled: Optional[bool] = None
     source_freemp3cloud_enabled: Optional[bool] = None
+    source_jiosaavn_enabled: Optional[bool] = None
     source_soulseek_enabled: Optional[bool] = None
     source_monochrome_enabled: Optional[bool] = None
     source_offline_fallback: Optional[bool] = None

@@ -28,6 +28,7 @@ from constants import (
     SEARCH_MAX_PER_SOURCE_YOUTUBE,
     SEARCH_MAX_PER_SOURCE_SOUNDCLOUD, SEARCH_MAX_PER_SOURCE_ZVU4NO,
     SEARCH_MAX_PER_SOURCE_FREEMP3CLOUD,
+    SEARCH_MAX_PER_SOURCE_JIOSAAVN,
     SEARCH_MAX_PER_SOURCE_SOULSEEK, SEARCH_MAX_PER_SOURCE_MONOCHROME,
     AUTOMATED_SEARCH_CACHE_TTL_SECONDS, AUTOMATED_SEARCH_CACHE_MAX_ENTRIES,
     TIER_UNKNOWN, TIER_LOSSY_320, TIER_LOSSLESS, kbps_to_tier,
@@ -39,6 +40,7 @@ from monochrome import search_monochrome, monochrome_enabled
 from slskd import slskd_enabled, search_slskd
 from zvu4no import search_zvu4no
 from freemp3cloud import search_freemp3cloud
+from jiosaavn import search_jiosaavn
 import servicecheck
 from youtube import (
     search_youtube, score_search_result_with_breakdown, format_score_breakdown, parse_duration,
@@ -208,6 +210,13 @@ SOURCE_REGISTRY = {
         "search_fn": search_freemp3cloud,
         "has_preview": True,
     },
+    "jiosaavn": {
+        "label": "JioSaavn",
+        "badge": "JS",
+        "colour": "#2bc5b4",
+        "search_fn": search_jiosaavn,
+        "has_preview": True,
+    },
     "soulseek": {
         "label": "Soulseek",
         "badge": "SLK",
@@ -231,6 +240,7 @@ SEARCH_MAX_PER_SOURCE_BY_SOURCE = {
     "soundcloud": SEARCH_MAX_PER_SOURCE_SOUNDCLOUD,
     "zvu4no": SEARCH_MAX_PER_SOURCE_ZVU4NO,
     "freemp3cloud": SEARCH_MAX_PER_SOURCE_FREEMP3CLOUD,
+    "jiosaavn": SEARCH_MAX_PER_SOURCE_JIOSAAVN,
     "soulseek": SEARCH_MAX_PER_SOURCE_SOULSEEK,
     "monochrome": SEARCH_MAX_PER_SOURCE_MONOCHROME,
 }
@@ -367,6 +377,7 @@ def _mb_album_lookup(query: str) -> dict | None:
 #
 #   Soulseek     "FLAC", "FLAC 24bit/96kHz", "MP3 320", "AAC 256", "WAV", ...
 #   FreeMp3Cloud "320kbps" or "128kbps"
+#   JioSaavn     "AAC 320kbps" or "AAC 160kbps"
 #   Monochrome   "LOSSLESS"                             (a tier, not kbps)
 #   zvu4no       "MP3"                                  (format only, no bitrate)
 #   YouTube      nothing at all

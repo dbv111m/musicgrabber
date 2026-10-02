@@ -283,6 +283,7 @@ SETTINGS_SCHEMA = {
     "source_soundcloud_enabled": {"type": "bool", "default": True, "env": "SOURCE_SOUNDCLOUD_ENABLED"},
     "source_zvu4no_enabled": {"type": "bool", "default": True, "env": "SOURCE_ZVU4NO_ENABLED"},
     "source_freemp3cloud_enabled": {"type": "bool", "default": True, "env": "SOURCE_FREEMP3CLOUD_ENABLED"},
+    "source_jiosaavn_enabled": {"type": "bool", "default": True, "env": "SOURCE_JIOSAAVN_ENABLED"},
     "source_soulseek_enabled": {"type": "bool", "default": False, "env": "SOURCE_SOULSEEK_ENABLED"},
     "source_monochrome_enabled": {"type": "bool", "default": True, "env": "SOURCE_MONOCHROME_ENABLED"},
     "source_offline_fallback": {"type": "bool", "default": True, "env": "SOURCE_OFFLINE_FALLBACK"},

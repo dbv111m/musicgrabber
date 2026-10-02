@@ -30,7 +30,7 @@ def test_sources_shape(api, base_url):
 def test_expected_sources_present(api, base_url):
     sources = api.get(f"{base_url}/api/sources", timeout=10).json()["sources"]
     ids = {s["id"] for s in sources}
-    for expected in ("youtube", "soundcloud", "zvu4no", "freemp3cloud"):
+    for expected in ("youtube", "soundcloud", "zvu4no", "freemp3cloud", "jiosaavn"):
         assert expected in ids, f"source '{expected}' is missing"
 
 

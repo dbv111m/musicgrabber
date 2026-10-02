@@ -108,6 +108,11 @@ def _check_freemp3cloud() -> tuple[bool, str]:
     return _http_ok(_BASE_URL)
 
 
+def _check_jiosaavn() -> tuple[bool, str]:
+    from jiosaavn import check_health
+    return check_health()
+
+
 def _check_soulseek() -> tuple[bool, str]:
     """Soulseek is opt-in. If it's not enabled it's simply out of play (healthy);
     if it IS enabled, a token round-trip proves slskd is reachable and auth works."""
@@ -130,6 +135,7 @@ _CHECKS = {
     "soundcloud": _check_soundcloud,
     "zvu4no": _check_zvu4no,
     "freemp3cloud": _check_freemp3cloud,
+    "jiosaavn": _check_jiosaavn,
     "soulseek": _check_soulseek,
 }
 _PERSISTENT_SOURCE_IDS = frozenset(_CHECKS)
