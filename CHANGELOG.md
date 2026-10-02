@@ -1,5 +1,7 @@
 # Changelog
 
+## v4.3.1 (DEV)
+
 ## v4.3.0 (2026-10-02)
 
 Death of the Phoenix. A release mostly about taking things away, which is the most satisfying kind.
