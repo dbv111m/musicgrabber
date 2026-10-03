@@ -162,9 +162,11 @@ def test_fetch_amazon_playlist_over_one_hundred_tracks(api, base_url):
 # ListenBrainz
 # ---------------------------------------------------------------------------
 
-# A stable community playlist UUID from the LB docs / well-known editors
-# "Weekly Jams" for user "rob" - a LB staff member's playlist is likely to persist
-_LB_PLAYLIST_UUID = "0709f0b3-f731-4d09-8e6d-09ba4a84ea31"
+# "The 20 best songs of 2021 as per the Guardian", made by hand by user "rob"
+# (MetaBrainz's founder) in November 2021. The previous UUID was one of his
+# Weekly Jams, which rotate by design; a hand-made playlist does not, so this
+# one has sat unchanged for years and should keep the test guarding something.
+_LB_PLAYLIST_UUID = "e4ce494b-5233-4df9-b7dc-4f6d5164385d"
 _LB_PLAYLIST_URL = f"https://listenbrainz.org/playlist/{_LB_PLAYLIST_UUID}/"
 
 

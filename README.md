@@ -1227,7 +1227,7 @@ music.yourdomain.com {
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET` | `/api/sources` | List available search sources (for source selector UI) |
-| `GET` | `/api/sources/health` | Get current source health, including whether Monochrome's tracks API can serve a download |
+| `GET` | `/api/sources/health` | Get current source health, including whether Monochrome's tracks API can serve a download, plus the static `build` token open tabs compare against to notice a redeploy |
 | `POST` | `/api/sources/health/recheck` | Start an admin-only background re-check of every source |
 | `POST` | `/api/search` | Search sources (`{"query": "...", "limit": 15, "source": "all/youtube/soundcloud/zvu4no/freemp3cloud/jiosaavn/monochrome/soulseek"}`); results expose `relevance_score` for ordering and `quality_tier` for declared audio quality |
 | `POST` | `/api/search/stream` | Stream per-source status and ranked results as NDJSON, using the same `relevance_score`/`quality_tier` result contract. A `rescore` event carries updated `relevance_score`s (keyed by `source` and `video_id`) for results sent before the MusicBrainz duration check landed |

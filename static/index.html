@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
     <meta name="musicgrabber-root-path" content="__ROOT_PATH__">
+    <meta name="musicgrabber-build" content="__CACHE_BUST__">
     <title>Music Grabber</title>
     <link rel="icon" type="image/png" href="__ROOT_PATH__/static/favicon.png">
     <link rel="preload" as="font" type="font/woff2" crossorigin href="__ROOT_PATH__/static/fonts/elms-sans-400-latin.woff2">
@@ -137,6 +138,15 @@
                 <a id="updateBannerChangelog" class="btn btn-ghost update-banner-btn" href="https://gitlab.com/g33kphr33k/musicgrabber/-/blob/main/CHANGELOG.md" target="_blank" rel="noopener noreferrer">What's new</a>
                 <a class="donation-link update-banner-coffee" href="https://ko-fi.com/geekphreek" target="_blank" rel="noopener noreferrer" title="Support Music Grabber on Ko-fi"><i class="fa-solid fa-mug-hot"></i> Buy me a coffee</a>
                 <button type="button" class="modal-close-btn update-banner-close" onclick="dismissUpdateBanner()" title="Hide until the next release" aria-label="Dismiss update notice">&#x2715;</button>
+            </div>
+        </div>
+
+        <div id="reloadBanner" class="update-banner" style="display:none;" role="status">
+            <i class="fa-solid fa-rotate update-banner-icon" aria-hidden="true"></i>
+            <span class="update-banner-text">MusicGrabber was updated while this tab was open. Reload to swap yesterday's code for today's.</span>
+            <div class="update-banner-actions">
+                <button type="button" class="btn btn-primary update-banner-btn" onclick="location.reload()">Reload</button>
+                <button type="button" class="modal-close-btn update-banner-close" onclick="dismissReloadBanner()" title="Hide until the next update" aria-label="Dismiss reload notice">&#x2715;</button>
             </div>
         </div>
 

@@ -1602,6 +1602,9 @@
         let lastSourceHealthToastAt = 0;
         let sourceHealthState = new Map();
         let sourceHealthPollTimer = null;
+        // The build token this page was served with; see noticeNewBuild()
+        const PAGE_BUILD = document.querySelector('meta[name="musicgrabber-build"]')?.content || '';
+        let dismissedReloadBuild = '';
 
         function showUnavailableSourcesToast(sources) {
             if (!Array.isArray(sources) || sources.length === 0) return;
@@ -1679,6 +1682,7 @@
                 sourceHealthState = new Map(sources.map(source => [source.id, source]));
                 renderSourceHealth(sources);
                 showUnavailableSourcesToast(newlyParked);
+                noticeNewBuild(data.build);
             } catch {
                 // Health is a useful hint, never a reason to break the search page.
             }
@@ -4154,7 +4158,7 @@
                         <div class="job-details-row">
                             <span class="job-details-label">Cycle ${escapeHtml(String(attempt.cycle_number || '?'))}:</span>
                             <span class="source-badge ${escapeHtml(attempt.source || '')}">${getSourceBadge(attempt.source || '')}</span>
-                            ${escapeHtml(attempt.status || '')}${attempt.error ? ` — ${escapeHtml(attempt.error)}` : ''}
+                            ${escapeHtml(attempt.status || '')}${attempt.error ? `: ${escapeHtml(attempt.error)}` : ''}
                         </div>`).join('')
                     : '';
                 return `
@@ -4176,7 +4180,7 @@
                             ${journeyHtml ? `<div class="job-details-row job-journey"><span class="job-details-label">Journey:</span> ${journeyHtml}</div>` : ''}
                             ${job.acquisition_attempt_count ? `<div class="job-details-row"><span class="job-details-label">Acquisition:</span> ${escapeHtml(String(job.acquisition_cycle_count || 0))} cycle${Number(job.acquisition_cycle_count || 0) === 1 ? '' : 's'} · ${escapeHtml(String(job.acquisition_attempt_count))} source attempt${Number(job.acquisition_attempt_count) === 1 ? '' : 's'}${job.acquisition_last_attempt_at ? ` · last ${formatTime(job.acquisition_last_attempt_at)}` : ''}</div>` : ''}
                             ${attemptHistoryHtml}
-                            ${job.acquisition_superseded_by ? `<div class="job-details-row job-superseded-note"><i class="fa-solid fa-circle-check"></i> Later succeeded on retry — <a href="#" onclick="event.preventDefault(); event.stopPropagation(); jumpToJob('${escapeAttr(job.acquisition_superseded_by)}')">jump to completed entry</a></div>` : ''}
+                            ${job.acquisition_superseded_by ? `<div class="job-details-row job-superseded-note"><i class="fa-solid fa-circle-check"></i> Later succeeded on retry; <a href="#" onclick="event.preventDefault(); event.stopPropagation(); jumpToJob('${escapeAttr(job.acquisition_superseded_by)}')">jump to completed entry</a></div>` : ''}
                             ${job.metadata_source ? `<div class="job-details-row"><span class="job-details-label">Metadata:</span> ${escapeHtml(formatMetadataSource(job.metadata_source))}</div>` : ''}
                             ${job.requested_video_fallback ? '<div class="job-details-row"><span class="job-details-label">Fallback:</span> Used the video from the original YouTube playlist after no confident alternative succeeded.</div>' : ''}
                             ${sourceUrl ? `<div class="job-details-row"><span class="job-details-label">URL:</span> ${isClickableUrl ? `<a href="${escapeHtml(sourceUrl)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${escapeHtml(sourceUrl)}</a>` : `<span class="job-details-url">${escapeHtml(sourceUrl)}</span>`}</div>` : ''}
@@ -5285,6 +5289,24 @@
         function dismissUpdateBanner() {
             const banner = document.getElementById('updateBanner');
             localStorage.setItem('dismissed_update_version', banner.dataset.version || '');
+            banner.style.display = 'none';
+        }
+
+        // Cache-busting covers fresh page loads, not a tab that never reloads: it
+        // carries on running the old app.js against the new server, rendering
+        // fine right up until it sends a request the new server will not take.
+        // The health poll brings the server's build token; differ from the one
+        // this page was served with and we say so.
+        function noticeNewBuild(build) {
+            if (!build || !PAGE_BUILD || build === PAGE_BUILD || build === dismissedReloadBuild) return;
+            const banner = document.getElementById('reloadBanner');
+            banner.dataset.build = build;
+            banner.style.display = 'flex';
+        }
+
+        function dismissReloadBanner() {
+            const banner = document.getElementById('reloadBanner');
+            dismissedReloadBuild = banner.dataset.build || '';
             banner.style.display = 'none';
         }
 
@@ -7121,7 +7143,7 @@
             if (detectedVia === 'chapters') return 'Detected from YouTube chapters';
             if (detectedVia === 'description') return 'Detected from a cue sheet in the video description';
             if (detectedVia === 'comments') return 'Detected from a comment cue sheet';
-            return 'No cue points found automatically — enter them manually below';
+            return 'No cue points found automatically, so enter them manually below';
         }
 
         function _formatTimestamp(totalSeconds) {
@@ -10824,7 +10846,7 @@
                 content.innerHTML = rows.map(m => `
                     <div class="mismatch-row">
                         <div class="mismatch-meta">
-                            <span class="mismatch-playlist">${escapeHtml(m.playlist_name || m.playlist_id || '—')}</span>
+                            <span class="mismatch-playlist">${escapeHtml(m.playlist_name || m.playlist_id || '-')}</span>
                             <span class="mismatch-date">${m.created_at ? m.created_at.slice(0, 16).replace('T', ' ') : ''}</span>
                         </div>
                         <div class="mismatch-pair">

@@ -13,6 +13,7 @@ import sqlite3
 import subprocess
 import tempfile
 import uuid
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
 
@@ -211,29 +212,39 @@ def _enforce_peon_format(request: Request, body) -> None:
 # Application Setup
 # =============================================================================
 
-app = FastAPI(title="Music Grabber", version=VERSION, root_path=ROOT_PATH)
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    """Boot work runs when uvicorn starts the app, not when something imports it.
+
+    Unit tests import this module for its route functions, and used to get the
+    whole boot thrown in: init_db against whichever DB they had patched in,
+    every scheduler, and a health sweep probing each source over the real
+    network at whatever moment it got round to it."""
+    # Ensure directories exist
+    get_singles_dir().mkdir(parents=True, exist_ok=True)
+    DB_PATH.parent.mkdir(parents=True, exist_ok=True)
+
+    # Initialise database and start background monitors
+    init_db()
+    migrate_trash_to_per_user()  # Reshape the bin if the account count has changed
+    cleanup_old_search_logs(SEARCH_LOG_RETENTION_DAYS)
+    start_stale_job_monitor()
+    start_scheduler()
+    start_artist_scheduler()
+    start_upgrade_scheduler()
+    # The library index reconciles on its own, well after the schedulers above have
+    # settled, and nothing reads it yet except the storage tile. If it cannot open
+    # its database it says so once and everything carries on walking the disk.
+    start_library_index_scheduler()
+    servicecheck.start_health_checks()  # initial background health sweep at boot
+
+    # Sync cookies file from settings at startup
+    _sync_cookies_file()
+    yield
+
+
+app = FastAPI(title="Music Grabber", version=VERSION, root_path=ROOT_PATH, lifespan=_lifespan)
 app.mount("/static", StaticFiles(directory="static"), name="static")
-
-# Ensure directories exist
-get_singles_dir().mkdir(parents=True, exist_ok=True)
-DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-
-# Initialise database and start background monitors
-init_db()
-migrate_trash_to_per_user()  # Reshape the bin if the account count has changed
-cleanup_old_search_logs(SEARCH_LOG_RETENTION_DAYS)
-start_stale_job_monitor()
-start_scheduler()
-start_artist_scheduler()
-start_upgrade_scheduler()
-# The library index reconciles on its own, well after the schedulers above have
-# settled, and nothing reads it yet except the storage tile. If it cannot open
-# its database it says so once and everything carries on walking the disk.
-start_library_index_scheduler()
-servicecheck.start_health_checks()  # initial background health sweep at boot
-
-# Sync cookies file from settings at startup
-_sync_cookies_file()
 
 # Register middleware
 app.add_middleware(AuthMiddleware)
@@ -254,7 +265,7 @@ def _static_cache_bust() -> str:
     """
     try:
         static_dir = Path("static")
-        names = ("app.js", "index.html", "release-notes.js")
+        names = ("app.js", "index.html", "release-notes.js", "style.css", "quips.js")
         mtimes = [(static_dir / n).stat().st_mtime for n in names if (static_dir / n).exists()]
         stamp = int(max(mtimes)) if mtimes else 0
         return f"{VERSION}.{stamp}"
@@ -2037,8 +2048,11 @@ def list_sources():
 
 @app.get("/api/sources/health")
 def sources_health():
-    """Per-source health snapshot; parked sources carry their cooldown reason."""
-    return {"sources": servicecheck.health_snapshot()}
+    """Per-source health snapshot; parked sources carry their cooldown reason.
+
+    Also carries the static build token. Every open tab polls this, so it is how
+    a tab left open across a redeploy finds out it is running yesterday's app.js."""
+    return {"sources": servicecheck.health_snapshot(), "build": _static_cache_bust()}
 
 
 @app.post("/api/sources/health/recheck")

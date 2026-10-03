@@ -9,7 +9,22 @@
 const RELEASE_NOTES = {
     "4.3.1": {
         title: "What's New in v4.3.1",
-        sections: []
+        sections: [
+            {
+                heading: "Tabs that know when they're out of date",
+                items: [
+                    "Left MusicGrabber open in a tab while it was updated? That tab now notices and offers a Reload button, instead of carrying on with yesterday's version until something mysteriously stops working.",
+                ]
+            },
+            {
+                heading: "Small fixes, nicely lined up",
+                items: [
+                    "On some phones the Sign out button was hanging off the edge of the screen. It's back where you can reach it.",
+                    "Down the rabbit hole in Find New Artists, the way back out now stays at the top of the screen however deep you dig.",
+                    "Spacing across the app has been tidied onto one consistent set of sizes. You probably won't spot it, which is rather the point.",
+                ]
+            },
+        ]
     },
     "4.3.0": {
         title: "What's New in v4.3.0: Death of the Phoenix",

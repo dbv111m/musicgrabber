@@ -46,10 +46,6 @@ if ! "$VENV/bin/python" -c "import Crypto" >/dev/null 2>&1; then
     "$VENV/bin/pip" install -q 'pycryptodome~=3.23.0'
 fi
 
-if ! "$VENV/bin/python" -c "import curl_cffi" >/dev/null 2>&1; then
-    "$VENV/bin/pip" install -q 'curl_cffi~=0.13.0'
-fi
-
 PYTEST="$VENV/bin/pytest"
 PYFLAKES="$VENV/bin/pyflakes"
 

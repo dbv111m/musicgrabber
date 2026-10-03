@@ -106,11 +106,17 @@
     --font-sans: 'Elms Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
     --font-mono: 'SUSE Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
 
-    /* Spacing scale (4px base) */
+    /* Spacing scale (4px base). The half-steps are there because 2, 6, 10
+       and 20px were already doing a lot of the work by hand; they are steps
+       to pick, not licence to invent 14px again. */
+    --space-0-5: 2px;
     --space-1: 4px;
+    --space-1-5: 6px;
     --space-2: 8px;
+    --space-2-5: 10px;
     --space-3: 12px;
     --space-4: 16px;
+    --space-4-5: 20px;
     --space-5: 24px;
     --space-6: 32px;
     /* The app column, content plus its 20px gutters. Shared with the Settings
@@ -153,12 +159,12 @@
 .warning-banner {
     background: var(--warning);
     color: #000;
-    padding: 10px 16px;
+    padding: var(--space-2-5) var(--space-4);
     font-size: 14px;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 12px;
+    gap: var(--space-3);
 }
 
 .warning-banner a {
@@ -173,7 +179,7 @@
     cursor: pointer;
     color: #000;
     opacity: 0.7;
-    padding: 0 4px;
+    padding: 0 var(--space-1);
 }
 
 .warning-dismiss:hover {
@@ -230,7 +236,7 @@ a:hover {
 .container {
     max-width: var(--container-max);
     margin: 0 auto;
-    padding: 20px;
+    padding: var(--space-4-5);
     padding-bottom: max(60px, env(safe-area-inset-bottom, 60px));
 }
 
@@ -246,9 +252,9 @@ a:hover {
 header {
     display: flex;
     align-items: center;
-    gap: 12px;
-    margin-bottom: 24px;
-    padding-bottom: 20px;
+    gap: var(--space-3);
+    margin-bottom: var(--space-5);
+    padding-bottom: var(--space-4-5);
     border-bottom: 1px solid var(--border);
 }
 
@@ -266,12 +272,12 @@ h1 {
 
 .search-box {
     position: relative;
-    margin-bottom: 8px;
+    margin-bottom: var(--space-2);
 }
 
 /* Toggle chip that reveals the playlist selector */
 .playlist-selector-toggle {
-    padding: 4px 10px;
+    padding: var(--space-1) var(--space-2-5);
     font-size: 12px;
     font-family: inherit;
     background: transparent;
@@ -297,13 +303,13 @@ h1 {
 .playlist-selector {
     display: flex;
     align-items: center;
-    gap: 8px;
-    margin-top: 6px;
+    gap: var(--space-2);
+    margin-top: var(--space-1-5);
     flex-wrap: wrap;
 }
 
 .playlist-selector-select {
-    padding: 5px 10px;
+    padding: var(--space-1) var(--space-2-5);
     font-size: 13px;
     font-family: inherit;
     background: var(--bg-tertiary);
@@ -331,7 +337,7 @@ h1 {
 }
 
 .playlist-selector-clear {
-    padding: 3px 7px;
+    padding: var(--space-1) var(--space-2);
     font-size: 13px;
     font-family: inherit;
     background: transparent;
@@ -348,7 +354,7 @@ h1 {
 }
 
 .playlist-new-name-input {
-    padding: 5px 10px;
+    padding: var(--space-1) var(--space-2-5);
     font-size: 13px;
     font-family: inherit;
     background: var(--bg-tertiary);
@@ -360,7 +366,7 @@ h1 {
 }
 
 .playlist-new-name-confirm {
-    padding: 3px 8px;
+    padding: var(--space-1) var(--space-2);
     font-size: 14px;
     font-family: inherit;
     background: transparent;
@@ -378,7 +384,7 @@ h1 {
 
 /* Track list panel  -  full track view per watched playlist */
 .track-list-summary {
-    margin-bottom: 10px;
+    margin-bottom: var(--space-2-5);
     color: var(--text-secondary);
     font-size: 12px;
 }
@@ -389,16 +395,16 @@ h1 {
     font-size: 12px;
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    margin: 10px 0 4px;
-    padding-bottom: 3px;
+    margin: var(--space-2-5) 0 var(--space-1);
+    padding-bottom: var(--space-1);
     border-bottom: 1px solid var(--border);
 }
 
 .track-list-row {
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 3px 0;
+    gap: var(--space-2);
+    padding: var(--space-1) 0;
     flex-wrap: wrap;
 }
 
@@ -412,14 +418,14 @@ h1 {
 
 .track-list-actions {
     display: flex;
-    gap: 4px;
+    gap: var(--space-1);
     align-items: center;
     flex-shrink: 0;
 }
 
 .track-status-chip {
     font-size: 12px;
-    padding: 2px 6px;
+    padding: var(--space-0-5) var(--space-1-5);
     border-radius: 4px;
     white-space: nowrap;
 }
@@ -430,7 +436,7 @@ h1 {
 .track-status-removed { color: var(--text-secondary); font-style: italic; }
 
 .track-action-btn, .track-replace-btn {
-    padding: 2px 8px;
+    padding: var(--space-0-5) var(--space-2);
     font-size: 12px;
     font-family: inherit;
     background: var(--bg-tertiary);
@@ -458,7 +464,7 @@ h1 {
 
 .search-input {
     width: 100%;
-    padding: 16px 20px;
+    padding: var(--space-4) var(--space-4-5);
     /* Keeps typed text from sliding under the clear button and search button. */
     padding-right: 180px;
     font-size: 16px;
@@ -484,8 +490,8 @@ h1 {
     display: flex;
     align-items: center;
     flex-wrap: wrap;
-    gap: 7px;
-    margin: 0 2px 14px;
+    gap: var(--space-2);
+    margin: 0 var(--space-0-5) var(--space-3);
     color: var(--text-secondary);
     font-size: 11px;
 }
@@ -497,8 +503,8 @@ h1 {
 .source-health-chip {
     display: inline-flex;
     align-items: center;
-    gap: 5px;
-    padding: 3px 7px;
+    gap: var(--space-1);
+    padding: var(--space-1) var(--space-2);
     border: 1px solid var(--border);
     border-radius: 999px;
     background: var(--bg-secondary);
@@ -527,13 +533,13 @@ h1 {
 }
 
 .source-health-recheck {
-    padding: 3px 7px;
-    margin-left: 2px;
+    padding: var(--space-1) var(--space-2);
+    margin-left: var(--space-0-5);
 }
 
 .search-source-retry {
-    padding: 2px 6px;
-    margin-left: 7px;
+    padding: var(--space-0-5) var(--space-1-5);
+    margin-left: var(--space-2);
 }
 
 .source-health-recheck:disabled,
@@ -550,7 +556,7 @@ h1 {
     display: flex;
     align-items: center;
     flex-wrap: wrap;
-    gap: 5px;
+    gap: var(--space-1);
 }
 
 .job-journey-arrow {
@@ -576,7 +582,7 @@ h1 {
 }
 
 .history-item {
-    padding: 12px 16px;
+    padding: var(--space-3) var(--space-4);
     font-size: 14px;
     color: var(--text-primary);
     cursor: pointer;
@@ -593,9 +599,9 @@ h1 {
 }
 
 .related-suggestions {
-    margin-top: 16px;
-    margin-bottom: 20px;
-    padding: 14px;
+    margin-top: var(--space-4);
+    margin-bottom: var(--space-4-5);
+    padding: var(--space-3);
     background: var(--bg-secondary);
     border: 1px solid var(--border);
     border-radius: 12px;
@@ -605,17 +611,17 @@ h1 {
     font-size: 13px;
     font-weight: 600;
     color: var(--text-secondary);
-    margin-bottom: 8px;
+    margin-bottom: var(--space-2);
 }
 
 .suggestion-chips {
     display: flex;
     flex-wrap: wrap;
-    gap: 8px;
+    gap: var(--space-2);
 }
 
 .suggestion-chip {
-    padding: 6px 12px;
+    padding: var(--space-1-5) var(--space-3);
     font-size: 13px;
     font-family: inherit;
     background: var(--bg-tertiary);
@@ -636,12 +642,12 @@ h1 {
 }
 
 .album-suggestion-chip i {
-    margin-right: 4px;
+    margin-right: var(--space-1);
     opacity: 0.7;
 }
 
 .related-title + .suggestion-chips {
-    margin-bottom: 12px;
+    margin-bottom: var(--space-3);
 }
 
 .related-title + .suggestion-chips:last-child {
@@ -681,7 +687,7 @@ h1 {
     right: 8px;
     top: 50%;
     transform: translateY(-50%);
-    padding: 10px 20px;
+    padding: var(--space-2-5) var(--space-4-5);
     font-size: 15px;
     /* Wide enough for "Searching…" as well as "Search", so the button keeps the
        same width whatever it is currently saying. The clear button is parked
@@ -700,8 +706,8 @@ h1 {
     top: 50%;
     transform: translateY(-50%);
     display: flex;
-    gap: 2px;
-    padding: 3px;
+    gap: var(--space-0-5);
+    padding: var(--space-1);
     background: var(--bg-tertiary);
     border: 1px solid var(--border);
     border-radius: 8px;
@@ -709,7 +715,7 @@ h1 {
 }
 
 .source-option {
-    padding: 5px 8px;
+    padding: var(--space-1) var(--space-2);
     font-size: 12px;
     font-weight: 600;
     font-family: inherit;
@@ -733,7 +739,7 @@ h1 {
 }
 
 .format-option {
-    padding: 5px 8px;
+    padding: var(--space-1) var(--space-2);
     font-size: 12px;
     font-weight: 600;
     font-family: inherit;
@@ -765,8 +771,8 @@ h1 {
 
 .tabs {
     display: flex;
-    gap: 5px;
-    margin-bottom: 20px;
+    gap: var(--space-1);
+    margin-bottom: var(--space-4-5);
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none;
@@ -797,7 +803,7 @@ h1 {
 #resultsTab.tab-panel.tab-visible {
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: var(--space-3);
 }
 
 .tabs::-webkit-scrollbar {
@@ -818,7 +824,7 @@ h1 {
 }
 
 .tab {
-    padding: 5px 8px;
+    padding: var(--space-1) var(--space-2);
     font-size: 12px;
     font-family: inherit;
     font-weight: 600;
@@ -846,15 +852,15 @@ h1 {
 .results {
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: var(--space-3);
 }
 
 .search-duplicate-notice {
     display: flex;
     align-items: flex-start;
-    gap: 10px;
-    padding: 12px 14px;
-    margin-bottom: 10px;
+    gap: var(--space-2-5);
+    padding: var(--space-3) var(--space-3);
+    margin-bottom: var(--space-2-5);
     background: rgba(245, 158, 11, 0.12);
     border: 1px solid rgba(245, 158, 11, 0.35);
     border-radius: var(--radius-md);
@@ -864,7 +870,7 @@ h1 {
 
 .search-duplicate-notice i {
     color: var(--warning);
-    margin-top: 2px;
+    margin-top: var(--space-0-5);
 }
 
 .search-duplicate-message {
@@ -873,7 +879,7 @@ h1 {
 }
 
 .search-duplicate-source {
-    margin-top: 3px;
+    margin-top: var(--space-1);
     color: var(--text-secondary);
     font-size: 12px;
 }
@@ -881,8 +887,8 @@ h1 {
 .result-item {
     display: flex;
     flex-wrap: wrap;
-    gap: 14px;
-    padding: 14px;
+    gap: var(--space-3);
+    padding: var(--space-3);
     background: var(--bg-secondary);
     border: 1px solid var(--border);
     border-radius: 12px;
@@ -903,7 +909,7 @@ h1 {
     bottom: 100%;
     left: 50%;
     transform: translateX(-50%);
-    padding: 6px 10px;
+    padding: var(--space-1-5) var(--space-2-5);
     background: var(--bg-tertiary);
     border: 1px solid var(--border);
     border-radius: 6px;
@@ -914,7 +920,7 @@ h1 {
     pointer-events: none;
     transition: opacity 0.15s;
     z-index: 100;
-    margin-bottom: 4px;
+    margin-bottom: var(--space-1);
 }
 
 .result-item:hover::after {
@@ -982,8 +988,8 @@ h1 {
 .preview-btn {
     display: inline-flex;
     align-items: center;
-    gap: 4px;
-    padding: 4px 10px;
+    gap: var(--space-1);
+    padding: var(--space-1) var(--space-2-5);
     font-size: 12px;
     font-family: inherit;
     font-weight: 600;
@@ -1018,7 +1024,7 @@ h1 {
    On mobile: always visible as a full-width button strip with both buttons. */
 .mobile-actions {
     display: none;
-    gap: 8px;
+    gap: var(--space-2);
     width: 100%;
 }
 
@@ -1075,7 +1081,7 @@ h1 {
     display: flex;
     flex-direction: column;
     justify-content: center;
-    gap: 4px;
+    gap: var(--space-1);
 }
 
 .result-title {
@@ -1112,7 +1118,7 @@ h1 {
     font-size: 12px;
     color: var(--text-secondary);
     background: var(--bg-tertiary);
-    padding: 2px 8px;
+    padding: var(--space-0-5) var(--space-2);
     border-radius: 4px;
     align-self: flex-start;
 }
@@ -1128,7 +1134,7 @@ h1 {
     font-family: var(--font-mono);
     font-size: 12px;
     color: var(--text-secondary);
-    padding: 2px 6px;
+    padding: var(--space-0-5) var(--space-1-5);
     border: 1px solid var(--border);
     border-radius: 4px;
     align-self: flex-start;
@@ -1155,7 +1161,7 @@ h1 {
     align-self: center;
     flex-shrink: 0;
     min-width: 58px;
-    padding: 6px 8px;
+    padding: var(--space-1-5) var(--space-2);
     border-radius: 8px;
     border: 1px solid var(--border);
     font-family: var(--font-mono);
@@ -1192,15 +1198,15 @@ h1 {
 .result-badges {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px;
+    gap: var(--space-1-5);
     align-items: center;
-    margin-top: 4px;
+    margin-top: var(--space-1);
 }
 
 .source-badge {
     font-size: 12px;
     font-weight: 600;
-    padding: 2px 6px;
+    padding: var(--space-0-5) var(--space-1-5);
     border-radius: 3px;
     text-transform: uppercase;
 }
@@ -1254,13 +1260,13 @@ h1 {
 .upgrade-row:hover { border-color: var(--border); background: var(--bg-secondary); }
 .upgrade-current { flex: 1 1 240px; min-width: 0; }
 .upgrade-track { font-weight: 500; }
-.upgrade-meta { font-size: 13px; color: var(--text-secondary); margin-top: 2px; }
+.upgrade-meta { font-size: 13px; color: var(--text-secondary); margin-top: var(--space-0-5); }
 .upgrade-quality-now { color: var(--text-secondary); }
 .upgrade-proposed {
     flex: 1 1 320px;
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--space-2);
     flex-wrap: wrap;
     font-size: 14px;
 }
@@ -1268,7 +1274,7 @@ h1 {
 .upgrade-quality-new { font-weight: 600; }
 .upgrade-conversion-arrow { color: var(--text-secondary); font-weight: 700; }
 .upgrade-output-label {
-    padding: 2px 7px;
+    padding: var(--space-0-5) var(--space-2);
     border-radius: 5px;
     background: var(--bg-tertiary);
     border: 1px solid var(--border);
@@ -1278,45 +1284,45 @@ h1 {
 .upgrade-conf { color: var(--text-secondary); font-size: 12px; }
 .upgrade-searching, .upgrade-none { color: var(--text-secondary); font-style: italic; }
 .upgrade-verified {
-    font-size: 11px; padding: 1px 6px; border-radius: 3px;
+    font-size: 11px; padding: 1px var(--space-1-5); border-radius: 3px;
     background: #0f766e; color: #fff; text-transform: uppercase; letter-spacing: 0.03em;
 }
 .upgrade-unverified {
-    font-size: 11px; padding: 1px 6px; border-radius: 3px;
+    font-size: 11px; padding: 1px var(--space-1-5); border-radius: 3px;
     background: var(--bg-tertiary); color: var(--text-secondary); border: 1px solid var(--border);
 }
-.upgrade-actions { flex: 0 0 auto; display: flex; gap: 6px; }
-.btn-sm { padding: 4px 10px; font-size: 13px; }
+.upgrade-actions { flex: 0 0 auto; display: flex; gap: var(--space-1-5); }
+.btn-sm { padding: var(--space-1) var(--space-2-5); font-size: 13px; }
 .upgrades-pager {
-    display: flex; align-items: center; justify-content: center; gap: 16px;
-    margin-top: 14px;
+    display: flex; align-items: center; justify-content: center; gap: var(--space-4);
+    margin-top: var(--space-3);
 }
 .upgrades-page-info { color: var(--text-secondary); font-size: 14px; }
 .upgrade-header-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
 .upgrade-go { white-space: nowrap; }
-.watched-empty-text { color: var(--text-secondary); padding: 12px 0; }
+.watched-empty-text { color: var(--text-secondary); padding: var(--space-3) 0; }
 
 /* Read-only Audio Provenance Audit */
 .audio-audit-header-actions {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--space-2);
     flex-wrap: wrap;
 }
 
 .audio-audit-summary {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-    gap: 8px;
-    margin: 12px 0;
+    gap: var(--space-2);
+    margin: var(--space-3) 0;
 }
 
 .audio-audit-summary-card {
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: var(--space-0-5);
     min-height: 66px;
-    padding: 10px 12px;
+    padding: var(--space-2-5) var(--space-3);
     border: 1px solid var(--border);
     border-left: 4px solid var(--text-secondary);
     border-radius: 8px;
@@ -1335,14 +1341,14 @@ h1 {
 .audio-audit-filters {
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(175px, 1fr));
-    gap: 10px;
-    margin-top: 12px;
+    gap: var(--space-2-5);
+    margin-top: var(--space-3);
 }
 
 .audio-audit-filters label {
     display: flex;
     flex-direction: column;
-    gap: 5px;
+    gap: var(--space-1);
     color: var(--text-secondary);
     font-size: 12px;
 }
@@ -1355,7 +1361,7 @@ h1 {
 .audio-audit-row {
     align-items: flex-start;
     cursor: default;
-    gap: 18px;
+    gap: var(--space-4);
 }
 
 .audio-audit-row:hover {
@@ -1377,7 +1383,7 @@ h1 {
 
 .audio-audit-identity,
 .audio-audit-meta {
-    margin-top: 3px;
+    margin-top: var(--space-1);
     color: var(--text-secondary);
     font-size: 12px;
 }
@@ -1387,7 +1393,7 @@ h1 {
     flex: 1 1 380px;
     flex-direction: column;
     align-items: flex-end;
-    gap: 8px;
+    gap: var(--space-2);
     min-width: 280px;
 }
 
@@ -1395,7 +1401,7 @@ h1 {
     display: inline-flex;
     align-items: center;
     width: fit-content;
-    padding: 3px 8px;
+    padding: var(--space-1) var(--space-2);
     border: 1px solid var(--border);
     border-radius: 999px;
     background: var(--bg-tertiary);
@@ -1455,18 +1461,18 @@ h1 {
 }
 
 .audio-audit-evidence h4 {
-    margin: 10px 0 4px;
+    margin: var(--space-2-5) 0 var(--space-1);
     color: var(--text-primary);
     font-size: 12px;
 }
 
 .audio-audit-evidence ul {
     margin: 0;
-    padding-left: 20px;
+    padding-left: var(--space-4-5);
 }
 
 .audio-audit-evidence li {
-    margin: 5px 0;
+    margin: var(--space-1) 0;
 }
 
 .audio-audit-evidence li span {
@@ -1510,14 +1516,14 @@ h1 {
     right: 2px;
     border-radius: 4px 0 10px 0;
     font-size: 10px;
-    padding: 3px 7px 3px 6px;
+    padding: var(--space-1) var(--space-2) var(--space-1) var(--space-1-5);
     line-height: 1;
 }
 
 .quality-badge {
     font-size: 12px;
     font-weight: 600;
-    padding: 2px 6px;
+    padding: var(--space-0-5) var(--space-1-5);
     border-radius: 3px;
     background: var(--accent);
     color: white;
@@ -1561,8 +1567,8 @@ h1 {
 .slskd-searching-indicator {
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding: 12px 14px;
+    gap: var(--space-2);
+    padding: var(--space-3) var(--space-3);
     color: var(--text-secondary);
     font-size: 13px;
 }
@@ -1571,9 +1577,9 @@ h1 {
 .search-progress {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px 16px;
-    padding: 10px 14px;
-    margin-bottom: 10px;
+    gap: var(--space-1-5) var(--space-4);
+    padding: var(--space-2-5) var(--space-3);
+    margin-bottom: var(--space-2-5);
     background: var(--bg-secondary);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
@@ -1587,7 +1593,7 @@ h1 {
 .search-progress-row {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--space-2);
     font-size: 13px;
     color: var(--text-secondary);
     opacity: 1;
@@ -1624,8 +1630,8 @@ h1 {
 
 .job-item {
     display: flex;
-    gap: 14px;
-    padding: 14px;
+    gap: var(--space-3);
+    padding: var(--space-3);
     background: var(--bg-secondary);
     border: 1px solid var(--border);
     border-radius: 12px;
@@ -1639,7 +1645,7 @@ h1 {
     height: 10px;
     border-radius: 50%;
     flex-shrink: 0;
-    margin-top: 6px;
+    margin-top: var(--space-1-5);
 }
 
 .job-status.queued { background: var(--warning); }
@@ -1654,21 +1660,21 @@ h1 {
 .job-warning-badge {
     font-size: 12px;
     font-weight: 600;
-    padding: 2px 6px;
+    padding: var(--space-0-5) var(--space-1-5);
     border-radius: 3px;
     background: var(--warning);
     color: #000;
-    margin-left: 6px;
+    margin-left: var(--space-1-5);
 }
 
 .job-upgrade-badge {
     font-size: 12px;
     font-weight: 600;
-    padding: 2px 6px;
+    padding: var(--space-0-5) var(--space-1-5);
     border-radius: 3px;
     background: var(--accent);
     color: #000;
-    margin-left: 6px;
+    margin-left: var(--space-1-5);
 }
 
 @keyframes pulse {
@@ -1702,18 +1708,18 @@ h1 {
     font-size: 12px;
     color: var(--accent);
     font-style: italic;
-    margin-left: 5px;
+    margin-left: var(--space-1);
 }
 
 .job-progress-stage::before {
     content: "·";
-    margin-right: 5px;
+    margin-right: var(--space-1);
     color: var(--text-secondary);
     font-style: normal;
 }
 
 .job-elapsed-wrap {
-    margin-left: 5px;
+    margin-left: var(--space-1);
     font-size: 11px;
     color: var(--text-secondary);
 }
@@ -1730,7 +1736,7 @@ h1 {
 .job-error {
     font-size: 13px;
     color: var(--error);
-    margin-top: 4px;
+    margin-top: var(--space-1);
 }
 
 /* "Already in library" rides in the error slot but is good news; a queue full
@@ -1767,22 +1773,22 @@ h1 {
 }
 
 .job-details {
-    margin-top: 8px;
-    padding-top: 8px;
+    margin-top: var(--space-2);
+    padding-top: var(--space-2);
     border-top: 1px solid var(--border);
     font-size: 13px;
     color: var(--text-secondary);
 }
 
 .job-details-row {
-    margin-bottom: 3px;
+    margin-bottom: var(--space-1);
     word-break: break-all;
 }
 
 .job-details-label {
     color: var(--text-secondary);
     opacity: 0.7;
-    margin-right: 4px;
+    margin-right: var(--space-1);
 }
 
 .job-details a {
@@ -1800,19 +1806,19 @@ h1 {
 
 .empty-state {
     text-align: center;
-    padding: 60px 20px;
+    padding: 60px var(--space-4-5);
     color: var(--text-secondary);
 }
 
 .empty-state-icon {
     font-size: 48px;
-    margin-bottom: 16px;
+    margin-bottom: var(--space-4);
     opacity: 0.5;
 }
 
 .empty-state small {
     display: block;
-    margin-top: 5px;
+    margin-top: var(--space-1);
     font-size: 12px;
     opacity: 0.8;
 }
@@ -1826,7 +1832,7 @@ h1 {
 .loading-with-copy {
     align-items: center;
     flex-direction: column;
-    gap: 12px;
+    gap: var(--space-3);
     color: var(--text-secondary);
     font-size: 13px;
 }
@@ -1849,7 +1855,7 @@ h1 {
     bottom: 100px;
     left: 50%;
     transform: translateX(-50%) translateY(100px);
-    padding: 14px 24px;
+    padding: var(--space-3) var(--space-5);
     background: var(--accent);
     color: #000;
     font-weight: 600;
@@ -1883,13 +1889,13 @@ h1 {
     gap: var(--space-2);
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 12px;
+    margin-bottom: var(--space-3);
 }
 
 .queue-header-actions {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: var(--space-2-5);
 }
 
 /* The Download Queue header carries a search box now, so give the heading its
@@ -1918,7 +1924,7 @@ h1 {
 .queue-search-input {
     width: 220px;
     max-width: 100%;
-    padding: 6px var(--space-2) 6px var(--space-5);
+    padding: var(--space-1-5) var(--space-2) var(--space-1-5) var(--space-5);
     font-size: 13px;
     font-family: inherit;
     background: var(--bg-tertiary);
@@ -1997,9 +2003,9 @@ h1 {
 
 .queue-live-summary {
     align-items: center;
-    gap: 10px;
-    padding: 10px 12px;
-    margin-bottom: 12px;
+    gap: var(--space-2-5);
+    padding: var(--space-2-5) var(--space-3);
+    margin-bottom: var(--space-3);
     background: color-mix(in srgb, var(--accent) 7%, var(--bg-secondary));
     border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
     border-radius: var(--radius-md);
@@ -2058,7 +2064,7 @@ h1 {
 .stats-loading {
     align-items: center;
     flex-direction: column;
-    gap: 12px;
+    gap: var(--space-3);
     color: var(--text-secondary);
     font-size: 13px;
 }
@@ -2067,7 +2073,7 @@ h1 {
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 5px;
+    gap: var(--space-1);
     width: 46px;
     height: 34px;
 }
@@ -2115,7 +2121,7 @@ h1 {
 
     .queue-live-updated {
         width: 100%;
-        margin-left: 19px;
+        margin-left: var(--space-4-5);
     }
 }
 
@@ -2158,21 +2164,21 @@ h1 {
 .watched-controls-row {
     display: flex;
     flex-wrap: wrap;
-    gap: 16px;
+    gap: var(--space-4);
     align-items: center;
-    margin-bottom: 8px;
+    margin-bottom: var(--space-2);
 }
 
 .watched-control-label {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--space-1-5);
     font-size: 13px;
     color: var(--text-secondary);
 }
 
 .watched-select {
-    padding: 6px 10px;
+    padding: var(--space-1-5) var(--space-2-5);
     font-size: 13px;
     font-family: inherit;
     background: var(--bg-tertiary);
@@ -2185,7 +2191,7 @@ h1 {
 .watched-dest-add-row {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--space-2);
     flex-wrap: wrap;
 }
 
@@ -2226,7 +2232,7 @@ h1 {
     color: var(--text-secondary);
     cursor: pointer;
     font-size: 12px;
-    padding: 2px 4px;
+    padding: var(--space-0-5) var(--space-1);
     line-height: 1;
     display: inline-flex;
     align-items: center;
@@ -2238,7 +2244,7 @@ h1 {
 .watched-card-dest-row {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--space-1-5);
     font-size: 12px;
     color: var(--text-secondary);
 }
@@ -2251,7 +2257,7 @@ h1 {
     display: inline-flex;
     align-items: center;
     gap: var(--space-1);
-    padding: 2px var(--space-2);
+    padding: var(--space-0-5) var(--space-2);
     font-size: 12px;
     font-weight: 600;
     background: var(--bg-tertiary);
@@ -2282,22 +2288,22 @@ h1 {
     background: var(--bg-secondary);
     border: 1px solid var(--border);
     border-radius: 12px;
-    padding: 24px;
+    padding: var(--space-5);
     width: min(480px, 92vw);
     max-height: 80vh;
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: var(--space-3);
 }
 
 .dest-picker-breadcrumb {
     font-size: 12px;
     color: var(--text-secondary);
-    margin-top: 4px;
+    margin-top: var(--space-1);
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 2px;
+    gap: var(--space-0-5);
 }
 
 .dest-crumb {
@@ -2316,14 +2322,14 @@ h1 {
     flex: 1;
     display: flex;
     flex-direction: column;
-    gap: 2px;
+    gap: var(--space-0-5);
     min-height: 120px;
     max-height: 280px;
 }
 
 .dest-picker-loading,
 .dest-picker-empty {
-    padding: 12px;
+    padding: var(--space-3);
     font-size: 12px;
     color: var(--text-secondary);
     text-align: center;
@@ -2332,10 +2338,10 @@ h1 {
 .dest-picker-item {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--space-2);
     width: 100%;
     text-align: left;
-    padding: 7px 10px;
+    padding: var(--space-2) var(--space-2-5);
     font-size: 13px;
     font-family: inherit;
     background: none;
@@ -2354,7 +2360,7 @@ h1 {
     color: var(--accent);
     border-color: var(--border);
     background: var(--bg-tertiary);
-    margin-bottom: 4px;
+    margin-bottom: var(--space-1);
     font-size: 12px;
 }
 
@@ -2363,8 +2369,8 @@ h1 {
 .dest-picker-custom-row {
     display: flex;
     align-items: center;
-    gap: 8px;
-    padding-top: 8px;
+    gap: var(--space-2);
+    padding-top: var(--space-2);
     border-top: 1px solid var(--border);
 }
 
@@ -2376,7 +2382,7 @@ h1 {
 
 .dest-picker-custom-input {
     flex: 1;
-    padding: 6px 10px;
+    padding: var(--space-1-5) var(--space-2-5);
     font-size: 13px;
     font-family: var(--font-mono);
     background: var(--bg-tertiary);
@@ -2387,19 +2393,19 @@ h1 {
 
 /* Watched playlist cards */
 .watched-card {
-    padding: 14px;
+    padding: var(--space-3);
     background: var(--bg-secondary);
     border: 1px solid var(--border);
     border-radius: 12px;
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: var(--space-2);
 }
 
 .watched-card-header {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--space-2);
 }
 
 .watched-card-name {
@@ -2411,7 +2417,7 @@ h1 {
     font-size: 12px;
     color: var(--text-secondary);
     background: var(--bg-tertiary);
-    padding: 2px 6px;
+    padding: var(--space-0-5) var(--space-1-5);
     border-radius: 4px;
 }
 
@@ -2423,19 +2429,19 @@ h1 {
     color: var(--accent, var(--text-primary));
     background: var(--bg-tertiary);
     border: 1px solid var(--border);
-    padding: 1px 6px;
+    padding: 1px var(--space-1-5);
     border-radius: 10px;
 }
 
 .watched-card-refreshing {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--space-1-5);
     font-size: 12px;
     color: var(--accent);
     background: color-mix(in srgb, var(--accent) 12%, transparent);
     border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
-    padding: 2px 7px;
+    padding: var(--space-0-5) var(--space-2);
     border-radius: 999px;
 }
 
@@ -2457,8 +2463,8 @@ h1 {
 .watched-card-refresh-error {
     display: flex;
     align-items: flex-start;
-    gap: 8px;
-    padding: 8px 10px;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-2-5);
     border-radius: 6px;
     border: 1px solid color-mix(in srgb, var(--error) 35%, transparent);
     background: color-mix(in srgb, var(--error) 10%, transparent);
@@ -2477,22 +2483,22 @@ h1 {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 12px;
-    padding-top: 6px;
+    gap: var(--space-3);
+    padding-top: var(--space-1-5);
     border-top: 1px solid var(--border);
 }
 
 .watched-card-toggle {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--space-1-5);
     font-size: 12px;
     color: var(--text-secondary);
     cursor: pointer;
 }
 
 .watched-card-select {
-    padding: 3px 6px;
+    padding: var(--space-1) var(--space-1-5);
     font-size: 12px;
     font-family: inherit;
     background: var(--bg-tertiary);
@@ -2504,7 +2510,7 @@ h1 {
 /* The singles start date, both as a card control and inside the "start watching"
    prompt. Same clothes as the interval dropdown, since they do the same sort of job. */
 .watched-card-date {
-    padding: 3px 6px;
+    padding: var(--space-1) var(--space-1-5);
     font-size: 12px;
     font-family: inherit;
     background: var(--bg-tertiary);
@@ -2518,9 +2524,9 @@ h1 {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 8px;
-    margin-top: 8px;
-    padding: 8px 10px;
+    gap: var(--space-2);
+    margin-top: var(--space-2);
+    padding: var(--space-2) var(--space-2-5);
     background: var(--bg-tertiary);
     border: 1px solid var(--border);
     border-radius: 6px;
@@ -2535,11 +2541,11 @@ h1 {
 .watched-sources-selector {
     display: flex;
     flex-wrap: wrap;
-    gap: 4px;
+    gap: var(--space-1);
 }
 
 .source-chip {
-    padding: 2px 7px;
+    padding: var(--space-0-5) var(--space-2);
     font-size: 12px;
     font-family: inherit;
     font-weight: 600;
@@ -2566,8 +2572,8 @@ h1 {
 .watched-card-stale-warning {
     display: flex;
     align-items: flex-start;
-    gap: 8px;
-    padding: 8px 10px;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-2-5);
     background: color-mix(in srgb, var(--warning, #f59e0b) 12%, transparent);
     border: 1px solid color-mix(in srgb, var(--warning, #f59e0b) 40%, transparent);
     border-radius: 6px;
@@ -2578,15 +2584,15 @@ h1 {
 
 .watched-card-stale-warning i {
     color: var(--warning, #f59e0b);
-    margin-top: 2px;
+    margin-top: var(--space-0-5);
     flex-shrink: 0;
 }
 
 .watched-card-actions {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px;
-    padding-top: 8px;
+    gap: var(--space-1-5);
+    padding-top: var(--space-2);
     border-top: 1px solid var(--border);
 }
 
@@ -2633,7 +2639,7 @@ h1 {
 }
 
 .watched-card-expanded {
-    padding-top: 10px;
+    padding-top: var(--space-2-5);
     border-top: 1px solid var(--border);
     font-size: 13px;
     color: var(--text-secondary);
@@ -2691,23 +2697,23 @@ h1 {
     background: var(--bg-secondary);
     border: 1px solid var(--border);
     border-radius: 12px;
-    padding: 16px;
-    margin-bottom: 16px;
+    padding: var(--space-4);
+    margin-bottom: var(--space-4);
 }
 
 .settings-section-title {
     font-size: 15px;
     font-weight: 600;
     color: var(--text-primary);
-    margin-bottom: 12px;
-    padding-bottom: 8px;
+    margin-bottom: var(--space-3);
+    padding-bottom: var(--space-2);
     border-bottom: 1px solid var(--border);
 }
 
 .settings-grid {
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: var(--space-3);
 }
 
 .settings-label {
@@ -2722,13 +2728,13 @@ h1 {
 .settings-form {
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: var(--space-3);
 }
 
 .settings-row {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--space-1);
 }
 
 .settings-row label {
@@ -2737,7 +2743,7 @@ h1 {
 }
 
 .settings-row input {
-    padding: 10px 12px;
+    padding: var(--space-2-5) var(--space-3);
     font-size: 14px;
     font-family: inherit;
     background: var(--bg-tertiary);
@@ -2758,7 +2764,7 @@ h1 {
 }
 
 .settings-row textarea {
-    padding: 10px 12px;
+    padding: var(--space-2-5) var(--space-3);
     font-size: 13px;
     font-family: var(--font-mono);
     background: var(--bg-tertiary);
@@ -2794,8 +2800,8 @@ h1 {
 }
 
 .settings-warning {
-    margin-bottom: 12px;
-    padding: 10px 12px;
+    margin-bottom: var(--space-3);
+    padding: var(--space-2-5) var(--space-3);
     border: 1px solid rgba(245, 158, 11, 0.45);
     border-radius: 8px;
     background: rgba(245, 158, 11, 0.08);
@@ -2820,7 +2826,7 @@ h1 {
 
 .password-field {
     display: flex;
-    gap: 8px;
+    gap: var(--space-2);
 }
 
 .password-field input {
@@ -2828,7 +2834,7 @@ h1 {
 }
 
 .password-toggle {
-    padding: 8px 12px;
+    padding: var(--space-2) var(--space-3);
     font-size: 12px;
     font-family: inherit;
     background: var(--bg-tertiary);
@@ -2850,7 +2856,7 @@ h1 {
 
 .setting-input-group {
     display: flex;
-    gap: 8px;
+    gap: var(--space-2);
 }
 
 .setting-input-group input,
@@ -2863,7 +2869,7 @@ h1 {
 
 .test-result {
     font-size: 13px;
-    padding: 8px 12px;
+    padding: var(--space-2) var(--space-3);
     border-radius: 6px;
     display: none;
 }
@@ -2891,7 +2897,7 @@ h1 {
 
 /* Step-by-step diagnostic output (Monochrome download test) */
 .diag-steps {
-    margin-top: 8px;
+    margin-top: var(--space-2);
     border: 1px solid var(--border);
     border-radius: 6px;
     overflow: hidden;
@@ -2900,9 +2906,9 @@ h1 {
 
 .diag-step {
     display: flex;
-    gap: 10px;
+    gap: var(--space-2-5);
     align-items: baseline;
-    padding: 7px 12px;
+    padding: var(--space-2) var(--space-3);
     border-bottom: 1px solid var(--border);
 }
 
@@ -2935,13 +2941,13 @@ h1 {
 
 .diag-step-detail {
     display: block;
-    margin-top: 2px;
+    margin-top: var(--space-0-5);
     color: var(--text-secondary);
     overflow-wrap: anywhere;
 }
 
 .diag-hint {
-    padding: 8px 12px;
+    padding: var(--space-2) var(--space-3);
     border-top: 1px solid var(--border);
     background: rgba(234, 179, 8, 0.1);
     color: var(--warning);
@@ -2960,7 +2966,7 @@ h1 {
     color: var(--text-secondary);
     font-size: 16px;
     cursor: pointer;
-    padding: 4px 6px;
+    padding: var(--space-1) var(--space-1-5);
     line-height: 1;
 }
 
@@ -2969,8 +2975,8 @@ h1 {
 }
 
 .user-info-panel {
-    margin: 0 0 14px 0;
-    padding: 12px 14px;
+    margin: 0 0 var(--space-3) 0;
+    padding: var(--space-3) var(--space-3);
     background: var(--surface-2, rgba(255,255,255,0.04));
     border: 1px solid var(--border);
     border-radius: 6px;
@@ -2980,7 +2986,7 @@ h1 {
 }
 
 .user-info-panel p {
-    margin: 0 0 8px 0;
+    margin: 0 0 var(--space-2) 0;
 }
 
 .user-info-panel p:last-child {
@@ -2992,14 +2998,14 @@ h1 {
 }
 
 .settings-details {
-    margin-top: 12px;
+    margin-top: var(--space-3);
 }
 
 .settings-details summary {
     font-size: 14px;
     color: var(--text-secondary);
     cursor: pointer;
-    padding: 8px 0;
+    padding: var(--space-2) 0;
 }
 
 .settings-details summary:hover {
@@ -3009,17 +3015,17 @@ h1 {
 .settings-actions {
     display: flex;
     align-items: stretch;
-    gap: 16px;
-    margin-top: 8px;
+    gap: var(--space-4);
+    margin-top: var(--space-2);
 }
 
 .donation-link {
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 6px;
+    gap: var(--space-1-5);
     flex: 1;
-    padding: 14px 28px;
+    padding: var(--space-3) var(--space-5);
     font-size: 14px;
     font-family: inherit;
     font-weight: 600;
@@ -3125,15 +3131,15 @@ h1 {
 }
 
 /* .save-btn now driven by .btn .btn-primary, just kept for layout (flex). */
-.save-btn { flex: 1; padding: 14px 28px; }
+.save-btn { flex: 1; padding: var(--space-3) var(--space-5); }
 
 /* .release-notes-btn now driven by .btn .btn-ghost, just kept for layout. */
-.release-notes-btn { flex: 1; padding: 14px 28px; }
+.release-notes-btn { flex: 1; padding: var(--space-3) var(--space-5); }
 
 .release-notes-nav {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--space-2);
 }
 
 .release-notes-nav-btn {
@@ -3187,7 +3193,7 @@ h1 {
     top: 50%;
     transform: translateY(-50%);
     font-size: 9px;
-    padding: 2px 8px;
+    padding: var(--space-0-5) var(--space-2);
     background: var(--warning);
     color: #000;
     border-radius: 4px;
@@ -3201,7 +3207,7 @@ h1 {
 
 @media (max-width: 400px) {
     .container {
-        padding: 16px;
+        padding: var(--space-4);
     }
 
     .result-thumb {
@@ -3217,7 +3223,7 @@ h1 {
     .result-match {
         min-width: 44px;
         font-size: 13px;
-        padding: 4px 6px;
+        padding: var(--space-1) var(--space-1-5);
     }
 
     .result-match-caption {
@@ -3232,7 +3238,7 @@ h1 {
 /* Settings readability/layout on phones */
 @media (max-width: 760px) {
     #settingsTabContainer .settings-section {
-        padding: 14px;
+        padding: var(--space-3);
     }
 
     #settingsTabContainer .settings-section-title {
@@ -3321,7 +3327,7 @@ h1 {
     font-size: 12px;
     font-family: inherit;
     font-weight: 500;
-    padding: 4px 10px;
+    padding: var(--space-1) var(--space-2-5);
     background: transparent;
     color: var(--text-secondary);
     border: 1px solid var(--border);
@@ -3348,12 +3354,12 @@ h1 {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 12px;
-    padding: 8px 12px;
+    gap: var(--space-3);
+    padding: var(--space-2) var(--space-3);
     background: var(--bg-tertiary);
     border: 1px solid var(--border);
     border-radius: 8px;
-    margin-bottom: 10px;
+    margin-bottom: var(--space-2-5);
     font-size: 13px;
 }
 
@@ -3371,7 +3377,7 @@ h1 {
 
 .explore-bar-actions {
     display: flex;
-    gap: 8px;
+    gap: var(--space-2);
     flex-shrink: 0;
 }
 
@@ -3379,7 +3385,7 @@ h1 {
     font-size: 13px;
     font-family: inherit;
     font-weight: 500;
-    padding: 4px 10px;
+    padding: var(--space-1) var(--space-2-5);
     background: var(--accent);
     color: var(--bg-primary);
     border: none;
@@ -3400,7 +3406,7 @@ h1 {
 .explore-back-btn {
     font-size: 13px;
     font-family: inherit;
-    padding: 4px 10px;
+    padding: var(--space-1) var(--space-2-5);
     background: var(--bg-secondary);
     color: var(--text-secondary);
     border: 1px solid var(--border);
@@ -3417,7 +3423,7 @@ h1 {
 .explore-playlist-label {
     display: flex;
     align-items: center;
-    gap: 5px;
+    gap: var(--space-1);
     font-size: 13px;
     color: var(--text-secondary);
     cursor: pointer;
@@ -3445,7 +3451,7 @@ h1 {
 
 .auth-card {
     background: var(--bg-secondary);
-    padding: 32px;
+    padding: var(--space-6);
     border-radius: 16px;
     width: 100%;
     max-width: 360px;
@@ -3454,29 +3460,29 @@ h1 {
 }
 
 .auth-title {
-    margin: 0 0 24px;
+    margin: 0 0 var(--space-5);
     font-size: 20px;
     font-weight: 600;
 }
 
 /* Slightly less bottom margin for the change-password heading */
 .auth-title-sm {
-    margin: 0 0 8px;
+    margin: 0 0 var(--space-2);
     font-size: 20px;
     font-weight: 600;
 }
 
 .auth-forced-notice {
     color: var(--warning, #fb923c);
-    margin-bottom: 16px;
+    margin-bottom: var(--space-4);
     font-size: 13px;
 }
 
 /* Shared text/password input used on auth screens */
 .auth-input {
     width: 100%;
-    padding: 10px 12px;
-    margin-bottom: 12px;
+    padding: var(--space-2-5) var(--space-3);
+    margin-bottom: var(--space-3);
     border-radius: 8px;
     border: 1px solid var(--border);
     background: var(--bg-primary);
@@ -3487,14 +3493,14 @@ h1 {
 
 /* Utility: slightly more bottom margin, used on the last input before a submit button */
 .mb-16 {
-    margin-bottom: 16px;
+    margin-bottom: var(--space-4);
 }
 
 /* .auth-submit-btn now driven by .btn .btn-primary .btn-block. */
 
 .auth-error {
     color: var(--error, #f87171);
-    margin-top: 10px;
+    margin-top: var(--space-2-5);
     font-size: 13px;
 }
 
@@ -3506,13 +3512,13 @@ h1 {
     margin-left: auto;
     display: flex;
     align-items: center;
-    gap: 12px;
+    gap: var(--space-3);
 }
 
 .header-format-label {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--space-1-5);
     font-size: 12px;
     color: var(--text-secondary);
     cursor: pointer;
@@ -3524,7 +3530,7 @@ h1 {
 .header-format-text {
     display: inline-flex;
     align-items: center;
-    gap: 5px;
+    gap: var(--space-1);
     white-space: nowrap;
 }
 
@@ -3545,7 +3551,7 @@ h1 {
     background: none;
     border: 1px solid var(--border);
     border-radius: 6px;
-    padding: 4px 8px;
+    padding: var(--space-1) var(--space-2);
     cursor: pointer;
     font-size: 14px;
     line-height: 1;
@@ -3638,8 +3644,8 @@ h1 {
 }
 
 .maintenance-preview {
-    margin: 12px 0;
-    padding: 12px;
+    margin: var(--space-3) 0;
+    padding: var(--space-3);
     border: 1px solid var(--border);
     border-radius: 8px;
     background: var(--bg-secondary);
@@ -3652,8 +3658,8 @@ h1 {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 10px;
-    margin-top: 12px;
+    gap: var(--space-2-5);
+    margin-top: var(--space-3);
 }
 
 .maintenance-history label {
@@ -3668,16 +3674,19 @@ h1 {
     }
 
     header {
-        gap: 8px;
+        gap: var(--space-2);
     }
 
     .header-controls {
-        gap: 8px;
+        gap: var(--space-2);
         min-width: 0;
     }
 }
 
-@media (max-width: 430px) {
+/* 520px rather than the phone-ish 430px: signed in, the controls beside the
+   two-line title clip Sign out off the edge up to 498px, and only have a
+   sensible gutter again from about 515px */
+@media (max-width: 520px) {
     header {
         flex-wrap: wrap;
     }
@@ -3700,27 +3709,27 @@ h1 {
 -------------------------------------------------------------------------- */
 
 .bulk-intro {
-    margin-bottom: 12px;
+    margin-bottom: var(--space-3);
 }
 
 .bulk-intro-text {
     font-size: 13px;
     color: var(--text-secondary);
-    margin-bottom: 12px;
+    margin-bottom: var(--space-3);
 }
 
 .bulk-file-row {
-    margin-bottom: 12px;
+    margin-bottom: var(--space-3);
 }
 
 .bulk-file-name {
-    margin-left: 12px;
+    margin-left: var(--space-3);
     font-size: 13px;
     color: var(--text-secondary);
 }
 
 .bulk-url-row {
-    margin-bottom: 12px;
+    margin-bottom: var(--space-3);
 }
 
 /* .bulk-url-flex now uses .input-action wrapper for the inside-button pattern.
@@ -3730,7 +3739,7 @@ h1 {
 }
 
 .bulk-url-input {
-    padding: 16px 20px;
+    padding: var(--space-4) var(--space-4-5);
     font-size: 16px;
     background: var(--bg-secondary);
     border: 1px solid var(--border);
@@ -3743,16 +3752,16 @@ h1 {
 .bulk-fetch-btn { white-space: nowrap; }
 
 .form-error {
-    margin-top: 8px;
+    margin-top: var(--space-2);
     font-size: 12px;
     color: var(--error);
 }
 
 .bulk-services-row {
-    margin-top: 6px;
+    margin-top: var(--space-1-5);
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--space-1-5);
 }
 
 .bulk-services-hint {
@@ -3775,7 +3784,7 @@ h1 {
 }
 
 .bulk-services-note {
-    margin-top: 6px;
+    margin-top: var(--space-1-5);
     font-size: 12px;
     color: var(--text-secondary);
 }
@@ -3792,30 +3801,30 @@ h1 {
     font-size: 12px;
     color: var(--text-secondary);
     background: var(--bg-tertiary);
-    padding: 4px 8px;
+    padding: var(--space-1) var(--space-2);
     border-radius: 4px;
 }
 
 .bulk-playlist-toggle {
-    margin-top: 12px;
-    margin-bottom: 12px;
+    margin-top: var(--space-3);
+    margin-bottom: var(--space-3);
 }
 
 .bulk-playlist-row-inline {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 16px;
+    gap: var(--space-4);
 }
 
 .bulk-playlist-row {
-    margin-top: 12px;
+    margin-top: var(--space-3);
 }
 
 .bulk-playlist-checkbox-label {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--space-2);
     font-size: 13px;
     color: var(--text-primary);
     cursor: pointer;
@@ -3831,8 +3840,8 @@ h1 {
    these rules handle the layout when it is visible */
 .bulk-playlist-name-input {
     width: 100%;
-    margin-top: 8px;
-    padding: 10px 14px;
+    margin-top: var(--space-2);
+    padding: var(--space-2-5) var(--space-3);
     font-size: 13px;
     font-family: inherit;
     background: var(--bg-secondary);
@@ -3844,11 +3853,11 @@ h1 {
 /* "Save files to Playlists folder" row - also JS-toggled */
 .bulk-playlists-dir-label {
     align-items: center;
-    gap: 8px;
+    gap: var(--space-2);
     font-size: 13px;
     color: var(--text-primary);
     cursor: pointer;
-    margin-top: 8px;
+    margin-top: var(--space-2);
 }
 
 /* .bulk-import-btn now driven by .btn .btn-primary .btn-lg .btn-block.
@@ -3866,18 +3875,18 @@ h1 {
 -------------------------------------------------------------------------- */
 
 .album-artist-results {
-    margin: 18px 0 26px;
-    padding: 6px 2px;
+    margin: var(--space-4) 0 var(--space-5);
+    padding: var(--space-1-5) var(--space-0-5);
     display: flex;
     flex-wrap: wrap;
-    column-gap: 12px;
-    row-gap: 12px;
+    column-gap: var(--space-3);
+    row-gap: var(--space-3);
 }
 
 .album-search-note {
-    margin-top: 10px;
-    margin-bottom: 10px;
-    padding: 10px 12px;
+    margin-top: var(--space-2-5);
+    margin-bottom: var(--space-2-5);
+    padding: var(--space-2-5) var(--space-3);
     border-radius: 10px;
     border: 1px solid var(--border);
     background: var(--bg-secondary);
@@ -3890,7 +3899,7 @@ h1 {
     background: var(--card-bg);
     border: 1px solid var(--border);
     border-radius: 8px;
-    padding: 14px 18px;
+    padding: var(--space-3) var(--space-4);
     text-align: left;
     cursor: pointer;
     color: var(--text-primary);
@@ -3910,8 +3919,8 @@ h1 {
 }
 
 .album-retry-btn {
-    margin-left: 8px;
-    padding: 4px 12px;
+    margin-left: var(--space-2);
+    padding: var(--space-1) var(--space-3);
     background: var(--accent);
     color: var(--accent-text, #000);
     border: none;
@@ -3932,7 +3941,7 @@ h1 {
 
 .album-artist-disambig {
     color: var(--text-secondary);
-    margin-left: 8px;
+    margin-left: var(--space-2);
     font-size: 12px;
 }
 
@@ -3940,24 +3949,24 @@ h1 {
     font-size: 13px;
     font-weight: 600;
     color: var(--text-secondary);
-    margin: 0 0 10px;
+    margin: 0 0 var(--space-2-5);
 }
 
 .album-list {
     display: flex;
     flex-direction: column;
-    gap: 5px;
-    margin-bottom: 16px;
+    gap: var(--space-1);
+    margin-bottom: var(--space-4);
 }
 
 .album-list-btn {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: var(--space-2-5);
     background: var(--card-bg);
     border: 1px solid var(--border);
     border-radius: 8px;
-    padding: 8px 14px;
+    padding: var(--space-2) var(--space-3);
     text-align: left;
     cursor: pointer;
     color: var(--text-primary);
@@ -3994,12 +4003,12 @@ h1 {
 
 .album-list-year {
     color: var(--text-secondary);
-    margin-left: 8px;
+    margin-left: var(--space-2);
     font-size: 12px;
 }
 
 .album-tracklist {
-    margin: 0 0 12px 20px;
+    margin: 0 0 var(--space-3) var(--space-4-5);
     padding: 0;
     font-size: 13px;
     color: var(--text-primary);
@@ -4016,7 +4025,7 @@ h1 {
 }
 
 .album-track-legend {
-    margin: 0 0 8px;
+    margin: 0 0 var(--space-2);
     font-size: 12px;
     color: var(--text-secondary);
 }
@@ -4031,14 +4040,14 @@ h1 {
 }
 
 .album-m3u-hint {
-    margin-top: 6px;
+    margin-top: var(--space-1-5);
     font-size: 12px;
     color: var(--text-secondary);
 }
 
 .album-existing-warning {
-    margin: 0 0 10px;
-    padding: 8px 10px;
+    margin: 0 0 var(--space-2-5);
+    padding: var(--space-2) var(--space-2-5);
     border-radius: 8px;
     border: 1px solid var(--warning-border, #d97706);
     background: var(--warning-bg, #fef3c7);
@@ -4060,21 +4069,21 @@ h1 {
 }
 
 .album-reset-btn.show {
-    margin-top: 12px;
+    margin-top: var(--space-3);
     max-height: 56px;
-    padding-top: 14px;
-    padding-bottom: 14px;
+    padding-top: var(--space-3);
+    padding-bottom: var(--space-3);
     opacity: 1;
     pointer-events: auto;
     transform: translateY(0);
 }
 
 .album-download-progress {
-    margin-top: 12px;
+    margin-top: var(--space-3);
 }
 
 .album-download-btn {
-    margin-top: 12px;
+    margin-top: var(--space-3);
 }
 
 /* --------------------------------------------------------------------------
@@ -4083,14 +4092,14 @@ h1 {
 
 .longform-split-panel {
     font-size: 13px;
-    margin-top: 12px;
+    margin-top: var(--space-3);
 }
 
 .longform-video-header {
     display: flex;
-    gap: 10px;
+    gap: var(--space-2-5);
     align-items: center;
-    margin-bottom: 10px;
+    margin-bottom: var(--space-2-5);
 }
 
 .longform-video-thumb {
@@ -4114,26 +4123,26 @@ h1 {
 .longform-field-row {
     display: flex;
     align-items: center;
-    gap: 8px;
-    margin-bottom: 10px;
+    gap: var(--space-2);
+    margin-bottom: var(--space-2-5);
 }
 
 .longform-rows-wrap {
     overflow-x: auto;
-    margin-bottom: 8px;
+    margin-bottom: var(--space-2);
 }
 
 .longform-row {
     display: grid;
     grid-template-columns: 90px 90px 1fr 1fr auto;
-    gap: 6px;
+    gap: var(--space-1-5);
     align-items: center;
-    margin-bottom: 6px;
+    margin-bottom: var(--space-1-5);
     min-width: 480px;
 }
 
 .longform-row-input {
-    padding: 6px 8px;
+    padding: var(--space-1-5) var(--space-2);
     font-size: 12px;
     font-family: inherit;
     background: var(--bg-secondary);
@@ -4144,17 +4153,17 @@ h1 {
 }
 
 .longform-row-remove {
-    padding: 4px 8px;
+    padding: var(--space-1) var(--space-2);
 }
 
 .longform-paste-wrap {
-    margin: 10px 0;
+    margin: var(--space-2-5) 0;
 }
 
 .longform-paste-textarea {
     width: 100%;
     min-height: 70px;
-    padding: 8px 10px;
+    padding: var(--space-2) var(--space-2-5);
     font-size: 12px;
     font-family: inherit;
     background: var(--bg-secondary);
@@ -4166,8 +4175,8 @@ h1 {
 
 .longform-actions {
     display: flex;
-    gap: 8px;
-    margin-top: 10px;
+    gap: var(--space-2);
+    margin-top: var(--space-2-5);
 }
 
 /* --------------------------------------------------------------------------
@@ -4216,8 +4225,8 @@ h1 {
 }
 
 .watched-add-panel {
-    margin-bottom: 16px;
-    padding: 14px;
+    margin-bottom: var(--space-4);
+    padding: var(--space-3);
     background: var(--bg-secondary);
     border: 1px solid var(--border);
     border-radius: 12px;
@@ -4226,24 +4235,24 @@ h1 {
 .watched-panel-text {
     font-size: 13px;
     color: var(--text-secondary);
-    margin-bottom: 8px;
+    margin-bottom: var(--space-2);
 }
 
 .watched-schedule-info {
     font-size: 12px;
     color: var(--text-secondary);
-    margin-bottom: 12px;
+    margin-bottom: var(--space-3);
     opacity: 0.8;
 }
 
 /* .watched-url-row now uses .input-action wrapper for inside-button pattern. */
 .watched-url-row {
-    margin-bottom: 8px;
+    margin-bottom: var(--space-2);
 }
 
 /* Shared URL/text input used inside watched and artist add panels */
 .panel-text-input {
-    padding: 16px 20px;
+    padding: var(--space-4) var(--space-4-5);
     font-size: 16px;
     background: var(--bg-secondary);
     border: 1px solid var(--border);
@@ -4268,16 +4277,16 @@ h1 {
 
 /* ListenBrainz row - JS-toggled; layout applied when visible */
 .lb-row {
-    gap: 8px;
-    margin-bottom: 8px;
+    gap: var(--space-2);
+    margin-bottom: var(--space-2);
     align-items: center;
 }
 
 
 /* Status feedback box (watched add, artist add) */
 .watched-status-box {
-    margin-top: 8px;
-    padding: 8px 12px;
+    margin-top: var(--space-2);
+    padding: var(--space-2) var(--space-3);
     background: var(--bg-tertiary);
     border: 1px solid var(--border);
     border-radius: 8px;
@@ -4290,22 +4299,22 @@ h1 {
 -------------------------------------------------------------------------- */
 
 .artist-add-panel {
-    padding: 10px 12px;
+    padding: var(--space-2-5) var(--space-3);
     background: var(--bg-tertiary);
     border: 1px solid var(--border);
     border-radius: 8px;
-    margin-bottom: 8px;
+    margin-bottom: var(--space-2);
 }
 
 .artist-selected-name {
     font-size: 13px;
     font-weight: 600;
     color: var(--text-primary);
-    margin-bottom: 8px;
+    margin-bottom: var(--space-2);
 }
 
 .artist-date-input {
-    padding: 4px 8px;
+    padding: var(--space-1) var(--space-2);
     font-size: 12px;
     font-family: inherit;
     background: var(--bg-secondary);
@@ -4317,12 +4326,12 @@ h1 {
 /* .artist-add-btn now driven by .btn .btn-primary, with just the layout
    spacing kept here (top margin so it sits below the controls grid). */
 .artist-add-btn {
-    margin-top: 8px;
+    margin-top: var(--space-2);
 }
 
 .artist-cancel-btn {
-    margin-top: 8px;
-    margin-left: 8px;
+    margin-top: var(--space-2);
+    margin-left: var(--space-2);
 }
 
 /* --------------------------------------------------------------------------
@@ -4332,8 +4341,8 @@ h1 {
 .artist-mode-row {
     display: flex;
     flex-wrap: wrap;
-    gap: 8px;
-    margin-bottom: 4px;
+    gap: var(--space-2);
+    margin-bottom: var(--space-1);
 }
 
 .artist-mode-btn {
@@ -4341,9 +4350,9 @@ h1 {
     display: flex;
     flex-direction: column;
     align-items: flex-start;
-    gap: 3px;
+    gap: var(--space-1);
     text-align: left;
-    padding: 10px 12px;
+    padding: var(--space-2-5) var(--space-3);
     height: auto;
 }
 
@@ -4365,8 +4374,8 @@ h1 {
 .artist-album-checklist-header {
     display: flex;
     align-items: center;
-    gap: 8px;
-    margin: 10px 0 6px;
+    gap: var(--space-2);
+    margin: var(--space-2-5) 0 var(--space-1-5);
 }
 
 .artist-album-count {
@@ -4386,8 +4395,8 @@ h1 {
 .album-checklist-row {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 7px 10px;
+    gap: var(--space-2-5);
+    padding: var(--space-2) var(--space-2-5);
     border-bottom: 1px solid var(--border);
     font-size: 13px;
 }
@@ -4437,13 +4446,13 @@ h1 {
 .downloadable-intro-text {
     font-size: 13px;
     color: var(--text-secondary);
-    margin-bottom: 12px;
+    margin-bottom: var(--space-3);
 }
 
 /* Pager controls - JS toggles display:none; layout applied when visible */
 .downloadable-pager {
-    margin-top: 12px;
-    gap: 8px;
+    margin-top: var(--space-3);
+    gap: var(--space-2);
     align-items: center;
     justify-content: center;
 }
@@ -4460,17 +4469,17 @@ h1 {
 .settings-label-top {
     align-items: flex-start;
     flex-wrap: wrap;
-    row-gap: 6px;
+    row-gap: var(--space-1-5);
 }
 
 .settings-label-top > span {
-    padding-top: 2px;
+    padding-top: var(--space-0-5);
 }
 
 .source-toggle-list {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: var(--space-1-5);
 }
 
 /* Individual source row (label wrapping the toggle) */
@@ -4478,7 +4487,7 @@ h1 {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 8px;
+    gap: var(--space-2);
     font-size: 13px;
     color: var(--text-secondary);
     cursor: pointer;
@@ -4488,7 +4497,7 @@ h1 {
 .source-toggle-text {
     display: inline-flex;
     align-items: center;
-    gap: 5px;
+    gap: var(--space-1);
 }
 
 .source-toggle-help {
@@ -4509,14 +4518,14 @@ h1 {
     width: 100%;
     display: grid;
     grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-    gap: 8px;
+    gap: var(--space-2);
 }
 
 .settings-inline-grid label {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 8px;
+    gap: var(--space-2);
     font-size: 12px;
     color: var(--text-secondary);
 }
@@ -4524,13 +4533,13 @@ h1 {
 /* Audio format selector */
 .format-selector-wrap {
     flex-wrap: wrap;
-    row-gap: 4px;
+    row-gap: var(--space-1);
 }
 
 .format-btn-group {
     display: flex;
-    gap: 2px;
-    padding: 3px;
+    gap: var(--space-0-5);
+    padding: var(--space-1);
     background: var(--bg-tertiary);
     border: 1px solid var(--border);
     border-radius: 8px;
@@ -4541,8 +4550,8 @@ h1 {
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 6px;
-    padding-top: 4px;
+    gap: var(--space-1-5);
+    padding-top: var(--space-1);
 }
 
 .conversion-target-options > .settings-label-sub {
@@ -4555,7 +4564,7 @@ h1 {
     font-size: 12px;
     font-weight: 600;
     color: var(--text-secondary);
-    margin-bottom: 4px;
+    margin-bottom: var(--space-1);
 }
 
 /* MP3 quality notice - JS-toggled; layout applied when visible */
@@ -4567,7 +4576,7 @@ h1 {
 
 .lossy-conversion-warning {
     width: 100%;
-    padding: 8px 10px;
+    padding: var(--space-2) var(--space-2-5);
     border: 1px solid var(--warning);
     border-radius: 6px;
     color: var(--warning);
@@ -4578,7 +4587,7 @@ h1 {
 /* Organise-by-artist hint row */
 .settings-label-wrap {
     flex-wrap: wrap;
-    row-gap: 4px;
+    row-gap: var(--space-1);
 }
 
 /* --------------------------------------------------------------------------
@@ -4586,7 +4595,7 @@ h1 {
 -------------------------------------------------------------------------- */
 
 .settings-form-top {
-    margin-top: 8px;
+    margin-top: var(--space-2);
 }
 
 .settings-input-sm {
@@ -4595,7 +4604,7 @@ h1 {
 
 .settings-input-path {
     width: 320px;
-    padding: 8px;
+    padding: var(--space-2);
     border-radius: 8px;
     border: 1px solid var(--border);
     background: var(--bg-primary);
@@ -4605,20 +4614,20 @@ h1 {
 
 .settings-subdir-flex {
     display: flex;
-    gap: 6px;
+    gap: var(--space-1-5);
     align-items: center;
 }
 
 /* Custom subdir input row - JS-toggled; layout applied when visible */
 .custom-subdir-row {
-    margin-top: 6px;
+    margin-top: var(--space-1-5);
 }
 
 .settings-path-preview {
     font-size: 12px;
     color: var(--text-secondary);
     font-family: var(--font-mono);
-    margin-top: 2px;
+    margin-top: var(--space-0-5);
 }
 
 .settings-hint-sm {
@@ -4638,13 +4647,13 @@ h1 {
 .notify-on-row {
     display: flex;
     flex-wrap: wrap;
-    gap: 12px;
+    gap: var(--space-3);
 }
 
 .notify-checkbox-label {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--space-1-5);
     font-size: 13px;
     cursor: pointer;
 }
@@ -4663,14 +4672,14 @@ h1 {
 /* Apprise test row */
 .apprise-test-row {
     display: flex;
-    gap: 8px;
+    gap: var(--space-2);
     align-items: center;
     flex-wrap: wrap;
 }
 
 /* Email settings - shown inside details */
 .email-settings-form {
-    margin-top: 12px;
+    margin-top: var(--space-3);
 }
 
 /* --------------------------------------------------------------------------
@@ -4680,7 +4689,7 @@ h1 {
 .blacklist-intro {
     font-size: 12px;
     color: var(--text-secondary);
-    margin: 0 0 12px;
+    margin: 0 0 var(--space-3);
 }
 
 /* --------------------------------------------------------------------------
@@ -4690,22 +4699,22 @@ h1 {
 .mismatch-intro {
     font-size: 12px;
     color: var(--text-secondary);
-    margin: 0 0 12px;
+    margin: 0 0 var(--space-3);
 }
 
 .mismatch-row {
     background: var(--bg-secondary);
     border: 1px solid var(--border);
     border-radius: 10px;
-    padding: 12px 14px;
-    margin-bottom: 8px;
+    padding: var(--space-3) var(--space-3);
+    margin-bottom: var(--space-2);
     font-size: 13px;
 }
 
 .mismatch-meta {
     display: flex;
     justify-content: space-between;
-    margin-bottom: 8px;
+    margin-bottom: var(--space-2);
 }
 
 .mismatch-playlist {
@@ -4722,14 +4731,14 @@ h1 {
 .mismatch-pair {
     display: flex;
     flex-direction: column;
-    gap: 4px;
-    margin-bottom: 8px;
+    gap: var(--space-1);
+    margin-bottom: var(--space-2);
 }
 
 .mismatch-line {
     display: flex;
     align-items: baseline;
-    gap: 8px;
+    gap: var(--space-2);
 }
 
 .mismatch-tag {
@@ -4759,15 +4768,15 @@ h1 {
 
 .mismatch-norm-line {
     display: flex;
-    gap: 8px;
-    margin-top: 4px;
+    gap: var(--space-2);
+    margin-top: var(--space-1);
     font-family: var(--font-mono);
     word-break: break-all;
 }
 
 .mismatch-accept-btn {
-    margin-top: 8px;
-    padding: 5px 12px;
+    margin-top: var(--space-2);
+    padding: var(--space-1) var(--space-3);
     font-size: 13px;
     font-family: inherit;
     font-weight: 500;
@@ -4792,8 +4801,8 @@ h1 {
 -------------------------------------------------------------------------- */
 
 .score-rationale {
-    margin-top: 10px;
-    padding: 10px 12px;
+    margin-top: var(--space-2-5);
+    padding: var(--space-2-5) var(--space-3);
     background: var(--bg-secondary);
     border: 1px solid var(--border);
     border-radius: 8px;
@@ -4805,7 +4814,7 @@ h1 {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: 8px;
+    margin-bottom: var(--space-2);
 }
 
 .score-rationale-header .score-rationale-query {
@@ -4815,8 +4824,8 @@ h1 {
 }
 
 .score-rationale-candidate {
-    margin-bottom: 8px;
-    padding: 6px 8px;
+    margin-bottom: var(--space-2);
+    padding: var(--space-1-5) var(--space-2);
     border-radius: 6px;
 }
 
@@ -4833,7 +4842,7 @@ h1 {
 .score-rationale-candidate-header {
     display: flex;
     align-items: baseline;
-    gap: 8px;
+    gap: var(--space-2);
     flex-wrap: wrap;
 }
 
@@ -4866,7 +4875,7 @@ h1 {
 }
 
 .score-rationale-reasons {
-    margin-top: 4px;
+    margin-top: var(--space-1);
     font-size: 12px;
     color: var(--text-secondary);
     line-height: 1.6;
@@ -4881,7 +4890,7 @@ h1 {
 }
 
 .score-rationale-raw {
-    margin-top: 6px;
+    margin-top: var(--space-1-5);
     font-size: 12px;
     color: var(--text-muted);
 }
@@ -4893,8 +4902,8 @@ h1 {
 }
 
 .score-rationale-raw pre {
-    margin: 4px 0 0;
-    padding: 6px 8px;
+    margin: var(--space-1) 0 0;
+    padding: var(--space-1-5) var(--space-2);
     background: var(--bg-primary);
     border-radius: 4px;
     font-family: var(--font-mono);
@@ -4905,7 +4914,7 @@ h1 {
 }
 
 .score-rationale-copy {
-    padding: 3px 8px;
+    padding: var(--space-1) var(--space-2);
     font-size: 10px;
     font-family: inherit;
     font-weight: 600;
@@ -4934,28 +4943,28 @@ h1 {
 -------------------------------------------------------------------------- */
 
 .user-list-wrap {
-    margin-bottom: 16px;
+    margin-bottom: var(--space-4);
 }
 
 .first-user-warning {
-    padding: 10px 14px;
+    padding: var(--space-2-5) var(--space-3);
     border-radius: 8px;
     background: rgba(251, 191, 36, 0.12);
     border: 1px solid rgba(251, 191, 36, 0.4);
     color: #fbbf24;
     font-size: 13px;
     line-height: 1.5;
-    margin-bottom: 12px;
+    margin-bottom: var(--space-3);
 }
 
 .user-create-grid {
     display: grid;
-    gap: 8px;
+    gap: var(--space-2);
 }
 
 .user-create-row {
     display: flex;
-    gap: 8px;
+    gap: var(--space-2);
     flex-wrap: wrap;
 }
 
@@ -4963,7 +4972,7 @@ h1 {
 .user-input {
     flex: 1;
     min-width: 120px;
-    padding: 8px 10px;
+    padding: var(--space-2) var(--space-2-5);
     border-radius: 8px;
     border: 1px solid var(--border);
     background: var(--bg-primary);
@@ -4972,7 +4981,7 @@ h1 {
 }
 
 .user-role-select {
-    padding: 8px 10px;
+    padding: var(--space-2) var(--space-2-5);
     border-radius: 8px;
     border: 1px solid var(--border);
     background: var(--bg-primary);
@@ -4988,7 +4997,7 @@ h1 {
 /* .user-add-btn now driven by .btn .btn-primary. */
 
 .user-action-btn {
-    padding: 6px 12px;
+    padding: var(--space-1-5) var(--space-3);
     font-size: 12px;
     font-family: inherit;
     font-weight: 600;
@@ -5016,7 +5025,7 @@ h1 {
 
 .session-auth-row {
     display: flex;
-    gap: 8px;
+    gap: var(--space-2);
     align-items: center;
 }
 
@@ -5026,12 +5035,12 @@ h1 {
 }
 
 .clear-stored-key-btn {
-    padding: 6px 12px;
+    padding: var(--space-1-5) var(--space-3);
     font-size: 12px;
 }
 
 .change-password-heading {
-    margin: 16px 0 8px;
+    margin: var(--space-4) 0 var(--space-2);
     font-size: 14px;
     font-weight: 600;
 }
@@ -5055,7 +5064,7 @@ h1 {
     z-index: 100;
     display: flex;
     justify-content: center;
-    padding: 12px 16px;
+    padding: var(--space-3) var(--space-4);
     background: var(--bg-secondary);
     border-top: 1px solid var(--border);
     box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.3);
@@ -5064,7 +5073,7 @@ h1 {
 .settings-floating-bar-inner {
     display: flex;
     align-items: stretch;
-    gap: 16px;
+    gap: var(--space-4);
     width: 100%;
     max-width: var(--container-max);
 }
@@ -5072,7 +5081,7 @@ h1 {
 @media (max-width: 600px) {
     .settings-floating-bar-inner {
         flex-direction: column;
-        gap: 8px;
+        gap: var(--space-2);
     }
 }
 
@@ -5094,19 +5103,19 @@ h1 {
     background: var(--bg-secondary);
     border: 1px solid var(--border);
     border-radius: 12px;
-    padding: 24px;
+    padding: var(--space-5);
     width: min(520px, 92vw);
     max-height: 80vh;
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: var(--space-4);
 }
 
 .modal-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 12px;
+    gap: var(--space-3);
 }
 
 .modal-title {
@@ -5121,7 +5130,7 @@ h1 {
     font-size: 18px;
     color: var(--text-secondary);
     cursor: pointer;
-    padding: 0 4px;
+    padding: 0 var(--space-1);
     line-height: 1;
 }
 
@@ -5137,7 +5146,7 @@ h1 {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 12px;
+    gap: var(--space-3);
 }
 
 .release-notes-footer {
@@ -5187,18 +5196,18 @@ h1 {
     background: var(--bg-secondary);
     border: 1px solid var(--border);
     border-radius: 16px;
-    padding: 24px;
+    padding: var(--space-5);
     width: min(560px, 92vw);
     max-width: 92vw;
     max-height: 85vh;
     display: flex;
     flex-direction: column;
-    gap: 18px;
+    gap: var(--space-4);
     box-shadow: 0 24px 60px rgba(0, 0, 0, 0.32);
 }
 
 .tag-editor-meta {
-    margin-top: 4px;
+    margin-top: var(--space-1);
     font-size: 12px;
     color: var(--text-secondary);
 }
@@ -5206,20 +5215,20 @@ h1 {
 .tag-editor-body {
     display: flex;
     flex-direction: column;
-    gap: 14px;
+    gap: var(--space-3);
     overflow-y: auto;
 }
 
 .tag-editor-grid {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 12px;
+    gap: var(--space-3);
 }
 
 .tag-editor-label {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: var(--space-1-5);
     font-size: 12px;
     color: var(--text-secondary);
 }
@@ -5230,7 +5239,7 @@ h1 {
 
 .tag-editor-input {
     width: 100%;
-    padding: 12px 12px;
+    padding: var(--space-3) var(--space-3);
     font-size: 14px;
     font-family: inherit;
     background: var(--bg-tertiary);
@@ -5246,7 +5255,7 @@ h1 {
 }
 
 .tag-editor-preview {
-    padding: 12px 14px;
+    padding: var(--space-3) var(--space-3);
     border: 1px solid var(--border);
     border-radius: 12px;
     background: linear-gradient(180deg, color-mix(in srgb, var(--bg-tertiary) 92%, white 8%), var(--bg-tertiary));
@@ -5268,7 +5277,7 @@ h1 {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 12px;
+    gap: var(--space-3);
     flex-wrap: wrap;
 }
 
@@ -5276,7 +5285,7 @@ h1 {
 .tag-editor-actions-right {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: var(--space-2-5);
     flex-wrap: wrap;
 }
 
@@ -5290,7 +5299,7 @@ h1 {
 @media (max-width: 640px) {
     .tag-editor-card {
         width: min(100vw - 20px, 100vw);
-        padding: 18px;
+        padding: var(--space-4);
         border-radius: 14px;
     }
 
@@ -5324,13 +5333,13 @@ h1 {
     background: var(--bg-secondary);
     border: 1px solid var(--border);
     border-radius: 16px;
-    padding: 24px;
+    padding: var(--space-5);
     width: min(760px, 94vw);
     max-width: 94vw;
     max-height: 85vh;
     display: flex;
     flex-direction: column;
-    gap: 16px;
+    gap: var(--space-4);
     box-shadow: 0 24px 60px rgba(0, 0, 0, 0.32);
 }
 
@@ -5342,13 +5351,13 @@ h1 {
 .missing-track-modal-body {
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: var(--space-3);
     overflow-y: auto;
     min-height: 180px;
 }
 
 .missing-track-modal-empty {
-    padding: 18px;
+    padding: var(--space-4);
     border: 1px solid var(--border);
     border-radius: 12px;
     background: var(--bg-tertiary);
@@ -5372,7 +5381,7 @@ h1 {
     transform: translateY(-50%);
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--space-2);
     z-index: 2;
 }
 
@@ -5383,7 +5392,7 @@ h1 {
 }
 
 .missing-track-candidate-btn {
-    padding: 9px 14px;
+    padding: var(--space-2) var(--space-3);
     font-size: 12px;
     font-family: inherit;
     font-weight: 600;
@@ -5402,12 +5411,12 @@ h1 {
 @media (max-width: 640px) {
     .missing-track-modal-card {
         width: min(100vw - 16px, 100vw);
-        padding: 18px;
+        padding: var(--space-4);
         border-radius: 14px;
     }
 
     .missing-track-candidate .result-item {
-        padding-right: 16px;
+        padding-right: var(--space-4);
         padding-bottom: 62px;
     }
 
@@ -5423,31 +5432,31 @@ h1 {
     background: var(--bg-secondary);
     border: 1px solid var(--border);
     border-radius: 12px;
-    padding: 24px;
+    padding: var(--space-5);
     width: min(400px, 90vw);
     max-width: 90vw;
 }
 
 .report-title {
-    margin: 0 0 16px;
+    margin: 0 0 var(--space-4);
     font-size: 15px;
     color: var(--text-primary);
 }
 
 .report-field {
-    margin-bottom: 12px;
+    margin-bottom: var(--space-3);
 }
 
 .report-field-label {
     display: block;
     font-size: 12px;
     color: var(--text-secondary);
-    margin-bottom: 4px;
+    margin-bottom: var(--space-1);
 }
 
 .report-select {
     width: 100%;
-    padding: 8px;
+    padding: var(--space-2);
     font-size: 13px;
     font-family: inherit;
     background: var(--bg-primary);
@@ -5458,7 +5467,7 @@ h1 {
 
 .report-text-input {
     width: 100%;
-    padding: 8px;
+    padding: var(--space-2);
     font-size: 13px;
     font-family: inherit;
     background: var(--bg-primary);
@@ -5469,13 +5478,13 @@ h1 {
 }
 
 .report-uploader-row {
-    margin-bottom: 16px;
+    margin-bottom: var(--space-4);
 }
 
 .report-uploader-label {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--space-2);
     font-size: 13px;
     color: var(--text-primary);
     cursor: pointer;
@@ -5487,7 +5496,7 @@ h1 {
 
 .report-actions {
     display: flex;
-    gap: 8px;
+    gap: var(--space-2);
     justify-content: flex-end;
 }
 
@@ -5502,8 +5511,8 @@ h1 {
     background: var(--warning-bg, #fef3c7);
     border: 1px solid var(--warning-border, #d97706);
     border-radius: 6px;
-    padding: 10px 14px;
-    margin-bottom: 12px;
+    padding: var(--space-2-5) var(--space-3);
+    margin-bottom: var(--space-3);
     font-size: 13px;
     color: var(--warning-text, #92400e);
 }
@@ -5515,7 +5524,7 @@ h1 {
 .cookie-expiry-hint {
     font-size: 12px;
     font-family: var(--font-mono);
-    margin-top: 2px;
+    margin-top: var(--space-0-5);
 }
 
 /* Destination picker row (unified "Add to...") - JS-toggled */
@@ -5523,32 +5532,32 @@ h1 {
     display: inline-flex;
     flex-direction: column;
     vertical-align: top;
-    margin: 0 8px 8px 0;
+    margin: 0 var(--space-2) var(--space-2) 0;
 }
 
 /* Mode choice panel shown after clicking "Add to..." */
 .dest-mode-panel {
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: var(--space-2);
     flex-wrap: wrap;
-    margin-top: 4px;
+    margin-top: var(--space-1);
 }
 
 /* Album two-level browser panel */
 .album-route-panel {
     flex-wrap: wrap;
-    gap: 8px;
+    gap: var(--space-2);
 }
 
 /* ListenBrainz toggle row */
 .lb-toggle-row {
-    margin-bottom: 8px;
+    margin-bottom: var(--space-2);
 }
 
 /* Artist search results list - JS-toggled; bottom margin applied when visible */
 .artist-search-results {
-    margin-bottom: 8px;
+    margin-bottom: var(--space-2);
 }
 
 /* Custom subdir text input - width matches the select above it */
@@ -5740,7 +5749,7 @@ h1 {
     right: 8px;
     top: 50%;
     transform: translateY(-50%);
-    padding: 10px 20px;
+    padding: var(--space-2-5) var(--space-4-5);
     font-size: 15px;
     /* Busy-state labels ("Hunting for a cue sheet…", "Scrolling playlist
        (large lists take a minute)...") can run much longer than "Fetch" -
@@ -5761,7 +5770,7 @@ h1 {
     display: inline-flex;
     align-items: center;
     gap: var(--space-1);
-    padding: 2px var(--space-2);
+    padding: var(--space-0-5) var(--space-2);
     font-size: 12px;
     font-weight: 600;
     background: var(--bg-tertiary);
@@ -5782,10 +5791,10 @@ h1 {
 .quality-filter-row {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: var(--space-2-5);
     flex-wrap: wrap;
-    margin: 0 0 12px;
-    padding: 8px 12px;
+    margin: 0 0 var(--space-3);
+    padding: var(--space-2) var(--space-3);
     border: 1px solid var(--border);
     border-radius: 8px;
     background: var(--bg-secondary, transparent);
@@ -5800,7 +5809,7 @@ h1 {
 .quality-filter-check {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--space-1-5);
     font-size: 13px;
     color: var(--text-secondary);
     cursor: pointer;
@@ -5839,8 +5848,8 @@ h1 {
     background: var(--bg-tertiary);
     border: 1px solid var(--border);
     border-radius: var(--radius-pill);
-    padding: 3px;
-    gap: 2px;
+    padding: var(--space-1);
+    gap: var(--space-0-5);
     max-width: 100%;
     overflow-x: auto;
     scrollbar-width: none;
@@ -5853,7 +5862,7 @@ h1 {
 .pill {
     position: relative;
     z-index: 1;
-    padding: 7px 16px;
+    padding: var(--space-2) var(--space-4);
     font-size: 13px;
     font-family: inherit;
     font-weight: 600;
@@ -5888,7 +5897,7 @@ h1 {
 
 @media (max-width: 480px) {
     .pill {
-        padding: 7px 12px;
+        padding: var(--space-2) var(--space-3);
         font-size: 12px;
     }
 }
@@ -5904,7 +5913,7 @@ h1 {
 .discover-rows {
     display: flex;
     flex-direction: column;
-    gap: 24px;
+    gap: var(--space-5);
 }
 
 .discover-row {
@@ -5937,8 +5946,8 @@ h1 {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 10px;
-    margin: 0 0 10px;
+    gap: var(--space-2-5);
+    margin: 0 0 var(--space-2-5);
 }
 
 .discover-row-heading {
@@ -5976,14 +5985,14 @@ h1 {
 }
 
 .discover-row-retry-btn {
-    margin-left: 4px;
+    margin-left: var(--space-1);
 }
 
 .discover-row-scroll {
     display: flex;
-    gap: 14px;
+    gap: var(--space-3);
     overflow-x: auto;
-    padding: 2px 2px 10px;
+    padding: var(--space-0-5) var(--space-0-5) var(--space-2-5);
     scroll-snap-type: x proximity;
     -webkit-overflow-scrolling: touch;
 }
@@ -5998,8 +6007,8 @@ h1 {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 6px;
-    padding: 12px 10px;
+    gap: var(--space-1-5);
+    padding: var(--space-3) var(--space-2-5);
     background: var(--bg-secondary);
     border: 1px solid var(--border);
     border-radius: var(--radius-md);
@@ -6099,23 +6108,28 @@ h1 {
 
 .discover-card-actions {
     display: flex;
-    gap: 6px;
-    margin-top: 2px;
+    gap: var(--space-1-5);
+    margin-top: var(--space-0-5);
 }
 
 .discover-play-btn,
 .discover-dl-btn {
-    padding: 4px 10px;
+    padding: var(--space-1) var(--space-2-5);
     font-size: 12px;
 }
 
+/* Sticky, because new rows land at the bottom and the way out used to be
+   3,000px back up the page by the second hop */
 .discover-breadcrumb {
+    position: sticky;
+    top: 0;
+    z-index: 10;
     display: flex;
     align-items: center;
     flex-wrap: wrap;
-    gap: 6px;
-    padding: 8px 12px;
-    margin-bottom: 16px;
+    gap: var(--space-1-5);
+    padding: var(--space-2) var(--space-3);
+    margin-bottom: var(--space-4);
     background: var(--bg-tertiary);
     border: 1px solid var(--border);
     border-radius: 8px;
@@ -6128,7 +6142,7 @@ h1 {
 }
 
 .discover-breadcrumb-item {
-    padding: 2px 4px;
+    padding: var(--space-0-5) var(--space-1);
     background: none;
     border: none;
     font-family: inherit;

@@ -33,6 +33,12 @@ _MATCH_YT_ID, _MATCH_ARTIST, _MATCH_TITLE = MATCHABLE_SONG
 
 _TERMINAL = ("completed", "failed", "completed_with_errors")
 
+# Playlist-routed tests write "Combo Test.m3u", and nothing over the API can
+# delete an M3U, so they used to leave one in the real Playlists folder every
+# run. A dot-folder is skipped by Navidrome, Jellyfin and Plex alike, so the
+# leftover sits where no media server will ever offer it as a playlist.
+_TEST_PLAYLISTS_SUBDIR = ".musicgrabber-tests"
+
 
 # ---------------------------------------------------------------------------
 # Fast: numbered filename padding (issue #86)
@@ -1273,9 +1279,10 @@ def test_queue_playlist_routed_download_accepted(api, base_url):
     playlist_name is not persisted to the DB for single downloads (only passed in-memory
     to the worker), so we just verify the request is accepted and the job is created.
     """
-    job_id, _ = _queue_download(api, base_url, playlist_name="Test Playlist", use_playlists_dir=True)
-    assert api.get(f"{base_url}/api/jobs/{job_id}", timeout=10).json()["id"] == job_id
-    _cleanup_downloaded_file(api, base_url, job_id)
+    with _temp_settings(api, base_url, playlists_subdir=_TEST_PLAYLISTS_SUBDIR):
+        job_id, _ = _queue_download(api, base_url, playlist_name="Test Playlist", use_playlists_dir=True)
+        assert api.get(f"{base_url}/api/jobs/{job_id}", timeout=10).json()["id"] == job_id
+        _cleanup_downloaded_file(api, base_url, job_id)
 
 
 def test_download_missing_video_id_rejected(api, base_url):
@@ -1394,7 +1401,7 @@ def test_playlist_routed_single_album_routing_off(api, base_url):
     Requires playlists_subdir to be non-empty; test sets it temporarily if not.
     """
     with _temp_settings(api, base_url,
-                        playlists_subdir="Playlists",
+                        playlists_subdir=_TEST_PLAYLISTS_SUBDIR,
                         auto_album_singles=False):
         job_id, _ = _queue_download(api, base_url,
                                     playlist_name="Combo Test",
@@ -1414,7 +1421,7 @@ def test_playlist_routed_single_album_routing_on(api, base_url):
     the playlist folder: the M3U is what keeps it in the playlist (unit tests
     cover the entry it writes)."""
     with _temp_settings(api, base_url,
-                        playlists_subdir="Playlists",
+                        playlists_subdir=_TEST_PLAYLISTS_SUBDIR,
                         auto_album_singles=True,
                         playlist_album_as_name=False):
         job = _queue_matchable(api, base_url, playlist_name="Combo Test", use_playlists_dir=True)
@@ -1432,7 +1439,7 @@ def test_playlist_routed_single_album_routing_on(api, base_url):
 def test_playlist_routed_compilation_stays_in_the_playlist_folder(api, base_url):
     """Compilation mode wins over album routing: the playlist stays together."""
     with _temp_settings(api, base_url,
-                        playlists_subdir="Playlists",
+                        playlists_subdir=_TEST_PLAYLISTS_SUBDIR,
                         auto_album_singles=True,
                         playlist_album_as_name=True):
         job = _queue_matchable(api, base_url, playlist_name="Combo Test", use_playlists_dir=True)
@@ -1448,7 +1455,7 @@ def test_playlist_routed_compilation_stays_in_the_playlist_folder(api, base_url)
 def test_playlist_routed_single_track_number_completes(api, base_url):
     """Track number in filename + playlist routing -- should complete without error."""
     with _temp_settings(api, base_url,
-                        playlists_subdir="Playlists",
+                        playlists_subdir=_TEST_PLAYLISTS_SUBDIR,
                         include_track_number_in_filename=True,
                         auto_album_singles=False):
         job_id, _ = _queue_download(api, base_url,
@@ -1465,7 +1472,7 @@ def test_playlist_routed_single_all_settings_on(api, base_url):
     """Album routing + track numbers + playlist folder all on at once: still Albums,
     and the track-number naming must not trip up the pipeline."""
     with _temp_settings(api, base_url,
-                        playlists_subdir="Playlists",
+                        playlists_subdir=_TEST_PLAYLISTS_SUBDIR,
                         auto_album_singles=True,
                         playlist_album_as_name=False,
                         include_track_number_in_filename=True):
