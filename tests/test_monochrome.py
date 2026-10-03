@@ -454,3 +454,12 @@ def test_monochrome_playlist_fetch_uses_tidal_embed_not_hifi_api(monkeypatch):
 
     assert tracks == [("Kylie Cantrall", "Carrie Bradshaw")]
     assert name == "Chill Pop"
+
+
+@pytest.mark.parametrize("version", ["Acapella", "A Cappella", "Vocals Only"])
+def test_vocals_only_version_is_penalised_unless_asked_for(version):
+    import monochrome
+
+    penalty, reason = monochrome._version_penalty(version, "Adele Hello")
+    assert (penalty, reason) == (-45, "version_instrumental=-45")
+    assert monochrome._version_penalty(version, f"Adele Hello {version}") == (0, None)

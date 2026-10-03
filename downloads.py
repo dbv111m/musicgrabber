@@ -3406,13 +3406,13 @@ def _refresh_album_m3u_if_present(override_dir: str | None) -> None:
 def create_bulk_playlist(
     bulk_import_id: str,
     playlist_name: str,
-    expected_count: int,
     use_playlists_dir: bool = False,
     user_id: str | None = None,
 ):
     """Create an M3U playlist from a bulk import after all downloads complete
 
-    Waits for all jobs with the matching playlist_name to complete, then generates the M3U file.
+    Waits until no job with the matching playlist_name is still queued or downloading,
+    whether the rest succeeded or failed, then generates the M3U file.
     When use_playlists_dir is True and playlists_subdir is configured, the M3U and its
     relative track paths are written into the Playlists folder instead of Singles.
     """
@@ -3426,24 +3426,21 @@ def create_bulk_playlist(
         rebuild_album_m3u(Path(override_dir), playlist_name)
         return
 
-    # Wait for all downloads to complete (with timeout)
+    # Wait until nothing is still in flight (with timeout). This used to wait
+    # for every job to be 'completed', which a failed one never is, so a single
+    # dud in a fifty-track import held the M3U back for the full hour.
     max_wait_time = PLAYLIST_WAIT_MAX
     check_interval = PLAYLIST_WAIT_INTERVAL
     waited = 0
 
     while waited < max_wait_time:
         with db_conn() as conn:
-            cursor = conn.execute(
-                "SELECT COUNT(*) as total, SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed FROM jobs WHERE playlist_name = ?",
+            in_flight = conn.execute(
+                "SELECT COUNT(*) FROM jobs WHERE playlist_name = ? AND status IN ('queued', 'downloading')",
                 (bulk_import_id,)
-            )
-            row = cursor.fetchone()
+            ).fetchone()[0]
 
-        total, completed = row
-        completed = completed or 0
-
-        # All downloads complete
-        if completed >= expected_count or total == completed:
+        if not in_flight:
             break
 
         time.sleep(check_interval)

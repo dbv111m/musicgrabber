@@ -190,3 +190,26 @@ def test_search_stream_results_have_expected_shape(api, base_url):
     for item in flat:
         for key in RESULT_KEYS:
             assert key in item, f"streamed result missing key: {key}"
+
+
+@pytest.mark.parametrize("title", [
+    "Adele - Hello (Acapella)",
+    "Adele - Hello Acappella",
+    "Adele - Hello [Vocals Only]",
+    "Adele - Hello (Isolated Vocals)",
+])
+def test_youtube_vocals_only_upload_ranks_below_the_song(title):
+    youtube = pytest.importorskip("youtube")
+    song, _ = youtube._score_search_result_with_breakdown(
+        "Adele - Hello (Official Audio)", "Adele", query="Adele - Hello")
+    vocals, breakdown = youtube._score_search_result_with_breakdown(
+        title, "Adele", query="Adele - Hello")
+    assert "vocals_only=-100" in breakdown
+    assert song - vocals >= 100
+
+
+def test_youtube_vocals_only_upload_is_fine_when_asked_for():
+    youtube = pytest.importorskip("youtube")
+    _, breakdown = youtube._score_search_result_with_breakdown(
+        "Adele - Hello (Acapella)", "Adele", query="Adele - Hello acapella")
+    assert not any(b.startswith("vocals_only") for b in breakdown)

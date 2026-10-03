@@ -17,6 +17,13 @@ const RELEASE_NOTES = {
                 ]
             },
             {
+                heading: "Playlists and picky matching",
+                items: [
+                    "Bulk Import playlists now appear as soon as the downloads finish. One failed track used to hold the whole playlist back for an hour.",
+                    "Vocals-only versions (\"Acapella\", \"Vocals Only\" and friends) no longer sneak in pretending to be the real song. Search for one on purpose and you'll still get it.",
+                ]
+            },
+            {
                 heading: "Small fixes, nicely lined up",
                 items: [
                     "On some phones the Sign out button was hanging off the edge of the screen. It's back where you can reach it.",

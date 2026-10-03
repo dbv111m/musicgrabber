@@ -1074,7 +1074,6 @@ def process_bulk_import_worker(import_id: str):
                 create_bulk_playlist,
                 import_id,
                 playlist_name or f"Playlist {import_id}",
-                final_queued,
                 use_playlists_dir,
                 user_id,
             )

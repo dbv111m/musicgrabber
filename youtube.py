@@ -580,7 +580,7 @@ _PLAIN_TITLE_VARIANT_RE = re.compile(
     r'mahogany|colors?\s+show|radio\s*1|from\s+the\s+basement|'
     r'la\s+blogotheque|paste\s+studio|stripped|acoustic|demo|instrumental|'
     r'remix|edit|mix|version|unplugged|reprise|bootleg|rework|flip|refix|'
-    r'cover|tribute|karaoke|orchestral|piano)\b',
+    r'cover|tribute|karaoke|orchestral|piano|a\s?capp?ella|vocals?\s+only)\b',
     re.IGNORECASE,
 )
 
@@ -713,6 +713,14 @@ def _score_search_result_with_breakdown(
     if re.search(_bootleg_re, title_lower):
         if not re.search(_bootleg_re, query_lower):
             _bump(-100, "bootleg_edit")
+
+    # Vocals-only uploads are the song with the song taken out, and they match
+    # title and duration perfectly, so nothing else catches them. Retail spells
+    # it "a cappella"; YouTube manages "acapella", "acappella" and "(Vocals Only)".
+    _vocals_only_re = r'\b(a\s?capp?ella|vocals?\s+only|isolated\s+vocals?)\b'
+    if re.search(_vocals_only_re, title_lower) or re.search(_vocals_only_re, album_lower):
+        if not re.search(_vocals_only_re, query_lower):
+            _bump(-100, "vocals_only")
 
     # Penalties for covers, remixes, instrumentals  -  check title AND album name.
     # Piano cover albums tag the track artist as the original artist, so the

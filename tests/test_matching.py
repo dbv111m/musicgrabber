@@ -497,3 +497,34 @@ def test_title_credits_still_count_for_uploaders():
     for title in ("RAYE - Where Is My Husband!", "Where Is My Husband! by RAYE", "Various - RAYE - Where Is My Husband!"):
         conf, _ = compute_match_confidence("Raye", "Where Is My Husband!", title, "SomeUploader")
         assert conf >= 0.85, title
+
+
+# Vocals-only rips match title and duration perfectly, so only the words give
+# them away, and uploaders cannot agree on how to spell those.
+@pytest.mark.parametrize("variant", [
+    "Acapella", "A Cappella", "Acappella", "A Capella", "Vocals Only", "Isolated Vocals",
+])
+def test_vocals_only_filename_demoted_for_plain_query(variant):
+    conf_original, _ = score_track_against_filename(
+        expected_artist="Adele",
+        expected_title="Hello",
+        filename=r"Adele\25\01 - Hello.flac",
+    )
+    conf_vocals, breakdown = score_track_against_filename(
+        expected_artist="Adele",
+        expected_title="Hello",
+        filename=rf"Adele\25\01 - Hello ({variant}).flac",
+    )
+    assert conf_original > conf_vocals
+    assert conf_vocals < 0.55
+
+
+def test_acapella_query_keeps_acapella_candidate():
+    assert query_requests_variant("Adele - Hello acapella")
+    conf, _ = score_track_against_filename(
+        expected_artist="Adele",
+        expected_title="Hello (Acapella)",
+        filename=r"Adele\Hello (Acapella).flac",
+        query="Adele - Hello Acapella",
+    )
+    assert conf >= 0.7

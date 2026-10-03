@@ -48,6 +48,9 @@ _HEAVY_VERSION_KEYWORDS = (
     "acoustic", "unplugged", "stripped",
     "slowed", "reverb", "sped up", "speed up",
     "instrumental", "karaoke",
+    # Vocals-only rips, spelt every way uploaders manage
+    "a cappella", "a capella", "acappella", "acapella",
+    "vocals only", "vocal only", "isolated vocals",
     "demo", "rough cut", "medley",
     "radio edit", "radio version", "single edit",
     "8d audio", "bass boosted", "nightcore",

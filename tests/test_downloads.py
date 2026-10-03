@@ -1963,3 +1963,80 @@ def test_weekly_carry_over_track_stays_relative_to_the_playlists_folder(tmp_path
         f"{this_week}/Yussef Dayes - Rust.mp3",
     ], "last week's track must stay relative to Playlists/, not go absolute"
     assert not any(e.startswith("/") for e in entries)
+
+
+# ---------------------------------------------------------------------------
+# Bulk import M3U: a failed track must not hold the playlist hostage
+# ---------------------------------------------------------------------------
+
+@pytest.fixture
+def bulk_playlist_db(monkeypatch, tmp_path):
+    """A real schema in a temp DB, plus a downloads module whose library
+    lookups are stubbed: 'Good' is on disk, everything else is not."""
+    import queue
+    import threading
+    downloads = _import_downloads_or_skip()
+    import constants
+    import db
+
+    monkeypatch.setenv("MUSIC_DIR", str(tmp_path / "music"))
+    monkeypatch.setattr(constants, "DB_PATH", tmp_path / "bulk-m3u.db")
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "bulk-m3u.db")
+    monkeypatch.setattr(db, "_DB_POOL_SIZE", 4)
+    monkeypatch.setattr(db, "_db_pool", queue.LifoQueue(maxsize=4))
+    monkeypatch.setattr(db, "_db_pool_created", 0)
+    monkeypatch.setattr(db, "_db_pool_lock", threading.Lock())
+    db.init_db()
+
+    monkeypatch.setattr(downloads, "get_singles_dir", lambda user_id=None: tmp_path)
+    monkeypatch.setattr(
+        downloads, "check_duplicate",
+        lambda artist, title, user_id=None: tmp_path / f"{artist} - {title}.flac" if title == "Good" else None,
+    )
+    monkeypatch.setattr(downloads, "_m3u_entry", lambda audio_file, m3u_dir, user_id=None: audio_file.name)
+    return downloads, db, tmp_path
+
+
+def _add_bulk_job(db, job_id, title, status, import_id="imp-1"):
+    with db.db_conn() as conn:
+        conn.execute(
+            "INSERT INTO jobs (id, artist, title, status, playlist_name) VALUES (?, ?, ?, ?, ?)",
+            (job_id, "Band", title, status, import_id),
+        )
+        conn.commit()
+
+
+def test_bulk_playlist_does_not_wait_out_the_hour_for_a_failed_track(bulk_playlist_db, monkeypatch):
+    """The Reddit report: one failure kept the M3U away for PLAYLIST_WAIT_MAX,
+    because the loop only stopped once every job was 'completed'."""
+    downloads, db, tmp_path = bulk_playlist_db
+    _add_bulk_job(db, "j1", "Good", "completed")
+    _add_bulk_job(db, "j2", "Dud", "failed")
+
+    def no_waiting(_seconds):
+        raise AssertionError("waited for a playlist with nothing left in flight")
+    monkeypatch.setattr(downloads.time, "sleep", no_waiting)
+
+    downloads.create_bulk_playlist("imp-1", "Mix")
+
+    assert (tmp_path / "Mix.m3u").read_text(encoding="utf-8") == "#EXTM3U\nBand - Good.flac\n"
+
+
+def test_bulk_playlist_still_waits_for_tracks_in_flight(bulk_playlist_db, monkeypatch):
+    """Not waiting at all would write the M3U before the last track lands."""
+    downloads, db, tmp_path = bulk_playlist_db
+    _add_bulk_job(db, "j1", "Good", "downloading")
+    _add_bulk_job(db, "j2", "Dud", "failed")
+
+    naps = []
+    def finish_download(seconds):
+        naps.append(seconds)
+        with db.db_conn() as conn:
+            conn.execute("UPDATE jobs SET status = 'completed' WHERE id = 'j1'")
+            conn.commit()
+    monkeypatch.setattr(downloads.time, "sleep", finish_download)
+
+    downloads.create_bulk_playlist("imp-1", "Mix")
+
+    assert len(naps) == 1
+    assert (tmp_path / "Mix.m3u").read_text(encoding="utf-8") == "#EXTM3U\nBand - Good.flac\n"
