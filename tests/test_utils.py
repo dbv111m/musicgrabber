@@ -118,6 +118,28 @@ def test_check_duplicate_falls_back_to_primary_credited_artist(tmp_path, monkeyp
     )
 
 
+def test_check_duplicate_does_not_treat_instrumental_as_original(tmp_path, monkeypatch):
+    """A version qualifier must not make a different recording a duplicate."""
+    import utils
+
+    singles = tmp_path / "Singles"
+    instrumental = singles / "Michael Jackson - Thriller (Instrumental).flac"
+    instrumental.parent.mkdir(parents=True)
+    instrumental.write_bytes(b"not the original")
+
+    monkeypatch.setattr(utils, "get_download_dir", lambda *a, **kw: singles)
+    monkeypatch.setattr(utils, "get_singles_dir", lambda **kw: singles)
+    monkeypatch.setattr(utils, "get_albums_dir", lambda **kw: tmp_path / "Albums")
+    monkeypatch.setattr(utils, "get_playlists_dir", lambda **kw: None)
+    monkeypatch.setattr(utils, "_tagged_duplicate", lambda *a, **kw: None)
+
+    assert utils.check_duplicate("Michael Jackson", "Thriller") is None
+    assert (
+        utils.check_duplicate("Michael Jackson", "Thriller (Instrumental)")
+        == instrumental
+    )
+
+
 def test_check_duplicate_finds_externally_renamed_file_by_tags(tmp_path, monkeypatch):
     import metadata
     import time

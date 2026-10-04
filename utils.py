@@ -159,10 +159,16 @@ def clean_title(title: str) -> str:
 
 
 def _normalise_duplicate_stem(stem: str) -> str:
-    """Normalise a filename stem for duplicate comparisons."""
+    """Normalise a filename stem for duplicate comparisons.
+
+    Keep bracketed version details.  They are part of a recording's identity:
+    treating ``Thriller (Instrumental)`` as ``Thriller`` means the instrumental
+    can prevent the actual song being downloaded.  ``clean_title`` has already
+    removed disposable publishing noise such as "Official Video" before this
+    point, so retaining the remaining words is the safer choice.
+    """
     s = clean_title(stem or "")
     s = s.replace("’", "'").replace("‘", "'").replace("`", "'")
-    s = re.sub(r"\s*[\(\[].*?[\)\]]", "", s)
     s = re.sub(r"[^a-z0-9]+", " ", s.lower())
     return re.sub(r"\s+", " ", s).strip()
 

@@ -45,7 +45,11 @@ RUN pip install --no-cache-dir \
 # SeleniumBase is kept beside Playwright rather than replacing the working
 # Spotify/Amazon playlist scrapers. Its undetected mode is what gets an Amazon
 # Music album page to name itself (amazonalbum.py); Playwright cannot.
-RUN pip install --no-cache-dir seleniumbase~=4.54.0
+# It floats within 4.x on purpose: Chrome below is whatever is current at build
+# time, and SeleniumBase is where the fixes for Chrome's changes arrive. A pin
+# only froze the half that does not break. test_amazon_album_names_itself (slow)
+# is the safety net; <5 keeps out a major rewrite.
+RUN pip install --no-cache-dir "seleniumbase>=4.54,<5"
 
 # Install Playwright browsers into a fixed path so non-root users (PUID/PGID) can find them.
 # Without this, Playwright falls back to ~/.cache/ms-playwright which resolves differently per user.

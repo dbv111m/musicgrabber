@@ -5,6 +5,7 @@ All are @pytest.mark.slow - they hit real external services.
 Current state (2026-09-22):
   - Spotify embed: BROKEN (returns 1 track) - tests correctly catch this
   - Amazon: working (showHome JSON with rendered-page fallback)
+  - Amazon albums: working (SeleniumBase undetected mode, page title)
   - Apple Music: working
   - YouTube: working (see test_playlists.py)
   - ListenBrainz: working
@@ -156,6 +157,31 @@ def test_fetch_amazon_playlist_over_one_hundred_tracks(api, base_url):
     d = r.json()
     assert d.get("platform") == "amazon"
     assert len(d.get("tracks", [])) > 100
+
+
+# Album pages are named by amazonalbum.py driving SeleniumBase's undetected
+# mode, and SeleniumBase floats within 4.x while Chrome is whatever is current
+# at build time. This is the test that notices when one of them, or Amazon,
+# moves the goalposts, rather than the next person to paste an album link.
+_AMAZON_ALBUM_URL = "https://music.amazon.co.uk/albums/B0FBGRYDM9"  # Olivia Dean, The Art of Loving
+
+
+@pytest.mark.slow
+def test_amazon_album_names_itself(api, base_url):
+    r = api.post(
+        f"{base_url}/api/albums/resolve-album-url",
+        json={"url": _AMAZON_ALBUM_URL},
+        timeout=150,
+    )
+    if r.status_code == 503:
+        pytest.skip(f"MusicBrainz unreachable, which says nothing about Amazon: {r.text}")
+    assert r.status_code == 200, f"resolve failed ({r.status_code}): {r.text}"
+    d = r.json()
+    assert d.get("service") == "amazon"
+    assert (d.get("artist"), d.get("album")) == ("Olivia Dean", "The Art of Loving"), (
+        "Amazon did not name the album; check SeleniumBase, Chrome and "
+        f"amazonalbum.py against the container logs. Got: {d}"
+    )
 
 
 # ---------------------------------------------------------------------------
