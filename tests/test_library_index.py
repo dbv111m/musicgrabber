@@ -617,6 +617,36 @@ def test_a_stale_schema_is_discarded_rather_than_migrated(index, library):
     assert index.file_count(library) == 1
 
 
+def test_schema_2_is_re_keyed_in_place_not_rebuilt(index, library, monkeypatch):
+    """Only the key rules changed in 3, so the rows are re-keyed from the tags
+    they already hold. A rebuild would leave duplicate checks half-blind for
+    as long as a cold build takes."""
+    _track(library, "Praise You (Instrumental).flac")
+    _track(library, "Right Here (feat. Someone).flac")
+    index.reconcile(library, probe=Probe())
+
+    # Write the keys the way schema 2 did: every bracket thrown away.
+    with sqlite3.connect(str(index.LIBRARY_INDEX_DB_PATH)) as conn:
+        conn.execute("UPDATE library_files SET title_key = 'praise you' WHERE title LIKE 'Praise You%'")
+        conn.execute("UPDATE library_files SET title_key = 'right here' WHERE title LIKE 'Right Here%'")
+        conn.execute("PRAGMA user_version = 2")
+        conn.commit()
+    library_index.reset_for_tests()
+
+    monkeypatch.setattr(library_index, "probe_file",
+                        lambda path: pytest.fail(f"re-keying read a file: {path}"))
+    assert index.init_index() is True
+    assert index.file_count(library) == 2, "rows must survive a re-key"
+    assert index.is_ready(library) is True
+    with sqlite3.connect(str(index.LIBRARY_INDEX_DB_PATH)) as conn:
+        assert conn.execute("PRAGMA user_version").fetchone()[0] == library_index.SCHEMA_VERSION
+
+    # The instrumental no longer answers for the song; the feat. still does.
+    assert index.find_by_tags(library, ["Fatboy Slim"], "Praise You") == []
+    assert len(index.find_by_tags(library, ["Fatboy Slim"], "Praise You (Instrumental)")) == 1
+    assert len(index.find_by_tags(library, ["Fatboy Slim"], "Right Here")) == 1
+
+
 def test_a_current_schema_is_left_well_alone(index, library):
     _track(library, "Praise You.flac")
     index.reconcile(library, probe=Probe())

@@ -1,6 +1,8 @@
 import os
 import sys
 
+import pytest
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 
@@ -138,6 +140,40 @@ def test_check_duplicate_does_not_treat_instrumental_as_original(tmp_path, monke
         utils.check_duplicate("Michael Jackson", "Thriller (Instrumental)")
         == instrumental
     )
+
+
+@pytest.mark.parametrize("on_disk", [
+    "Thriller (feat. Someone)",
+    "Thriller [Explicit]",
+    "Thriller (Single Version)",
+    "Thriller (Original Mix)",
+    "Thriller (Remastered 2011)",
+])
+def test_presentation_brackets_still_count_as_the_song(on_disk):
+    """Keeping the instrumental out must not cost a second copy of songs you own."""
+    import utils
+
+    assert utils._normalise_duplicate_stem(on_disk) == utils._normalise_duplicate_stem("Thriller")
+
+
+@pytest.mark.parametrize("on_disk", [
+    "Thriller (Instrumental)",
+    "Thriller (Acapella)",
+    "Thriller (Live at Wembley)",
+    "Thriller (R3hab Remix)",
+    "Thriller (Devonshire Mix)",
+    "Thriller (Radio Edit)",
+])
+def test_version_brackets_are_a_different_recording(on_disk):
+    import utils
+
+    assert utils._normalise_duplicate_stem(on_disk) != utils._normalise_duplicate_stem("Thriller")
+
+
+def test_live_needs_to_be_a_whole_word():
+    import utils
+
+    assert utils._normalise_duplicate_stem("Deliver Us (Deliverance)") == "deliver us"
 
 
 def test_check_duplicate_finds_externally_renamed_file_by_tags(tmp_path, monkeypatch):

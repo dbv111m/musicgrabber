@@ -21,6 +21,7 @@ const RELEASE_NOTES = {
                 items: [
                     "Bulk Import playlists now appear as soon as the downloads finish. One failed track used to hold the whole playlist back for an hour.",
                     "Vocals-only versions (\"Acapella\", \"Vocals Only\" and friends) no longer sneak in pretending to be the real song. Search for one on purpose and you'll still get it.",
+                    "Having the instrumental (or a live or remixed version) of a song no longer stops you downloading the real thing.",
                 ]
             },
             {

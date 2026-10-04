@@ -24,6 +24,7 @@ from constants import (
     EXCLUDED_SCAN_DIR_NAMES, EXCLUDED_SCAN_DIR_PREFIXES,
 )
 from settings import get_singles_dir, get_albums_dir, get_download_dir, get_playlists_dir, get_trash_dir, get_setting
+from matching import _CANONICAL_MIX_RE, _HEAVY_VERSION_KEYWORDS, _NAMED_MIX_RE
 
 
 def truncate_to_bytes(name: str, max_bytes: int) -> str:
@@ -158,17 +159,37 @@ def clean_title(title: str) -> str:
     return title.strip()
 
 
+# The matcher's own idea of "a different recording", so the dupe check and the
+# matcher cannot drift apart on what counts as the same song.
+_VERSION_BRACKET_RE = re.compile(
+    r"\b(?:" + "|".join(re.escape(kw) for kw in _HEAVY_VERSION_KEYWORDS) + r")\b",
+    re.IGNORECASE,
+)
+
+
+def _keep_version_bracket(match: re.Match) -> str:
+    bracket = match.group(0)
+    if _VERSION_BRACKET_RE.search(bracket):
+        return bracket
+    if _NAMED_MIX_RE.search(bracket) and not _CANONICAL_MIX_RE.search(bracket):
+        return bracket
+    return ""
+
+
 def _normalise_duplicate_stem(stem: str) -> str:
     """Normalise a filename stem for duplicate comparisons.
 
-    Keep bracketed version details.  They are part of a recording's identity:
-    treating ``Thriller (Instrumental)`` as ``Thriller`` means the instrumental
-    can prevent the actual song being downloaded.  ``clean_title`` has already
-    removed disposable publishing noise such as "Official Video" before this
-    point, so retaining the remaining words is the safer choice.
+    A bracket that names a different recording is part of its identity, so
+    ``Thriller (Instrumental)``, ``(Live at Wembley)`` or ``(Devonshire Mix)``
+    stays put; treating the instrumental as ``Thriller`` let it block the
+    actual song. Every other bracket is presentation and goes, so
+    ``(feat. Someone)``, ``[Explicit]``, ``(Single Version)`` and
+    ``(Original Mix)`` still match the plain title and do not earn you a
+    second copy of something you already own.
     """
     s = clean_title(stem or "")
     s = s.replace("’", "'").replace("‘", "'").replace("`", "'")
+    s = re.sub(r"\s*[\(\[][^\)\]]*[\)\]]", _keep_version_bracket, s)
     s = re.sub(r"[^a-z0-9]+", " ", s.lower())
     return re.sub(r"\s+", " ", s).strip()
 

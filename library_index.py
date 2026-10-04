@@ -52,7 +52,14 @@ from constants import (
 from settings import get_setting
 from utils import iter_library_audio_files, path_has_excluded_scan_dir
 
-SCHEMA_VERSION = 2
+# 3: duplicate keys now keep version brackets ("(Instrumental)", "(Live at
+# Wembley)") and drop the rest. Same table shape, new key formula, so version 2
+# is re-keyed in place rather than rebuilt (see _rekey_tag_identities).
+SCHEMA_VERSION = 3
+
+# Versions whose rows only need their artist/title keys recomputing from the
+# tags they already store. Anything else is a shape change and starts again.
+_REKEYABLE_VERSIONS = {2}
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS library_roots (
@@ -159,11 +166,18 @@ def init_index() -> bool:
             with index_conn() as conn:
                 conn.execute("PRAGMA journal_mode=WAL")
                 found = conn.execute("PRAGMA user_version").fetchone()[0]
-                if found and found != SCHEMA_VERSION:
+                if found in _REKEYABLE_VERSIONS:
+                    changed = _rekey_tag_identities(conn)
+                    print(f"Library index schema {found} re-keyed to {SCHEMA_VERSION} ({changed} rows changed)")
+                elif found and found != SCHEMA_VERSION:
                     # A disposable cache does not get migration scripts. If the
                     # shape has moved on, throw the contents away and let the
                     # next reconciliation rebuild them from the disk, which is
-                    # the only source of truth any of this ever had.
+                    # the only source of truth any of this ever had. Re-keying
+                    # above is the one exception, because it never reads the
+                    # disk; a rebuild leaves duplicate checks half-blind for
+                    # as long as a cold build takes, which on a big library is
+                    # long enough for a watched playlist to re-download things.
                     print(
                         f"Library index schema {found} is not {SCHEMA_VERSION}; "
                         "discarding and rebuilding from disk"
@@ -193,6 +207,27 @@ def reset_for_tests() -> None:
         _unavailable_logged = False
     with _scan_state_lock:
         _scans_running.clear()
+
+
+def _rekey_tag_identities(conn) -> int:
+    """Recompute every row's artist/title keys from the tags it already stores.
+
+    For when only the normalisation rules changed. Seconds rather than a cold
+    rebuild's tens of minutes, no file is touched, and rows whose keys come
+    out the same are not written. Returns how many rows changed.
+    """
+    updates = []
+    for root, rel, artist, title, artist_key, title_key in conn.execute(
+        "SELECT root_path, relative_path, artist, title, artist_key, title_key FROM library_files"
+    ):
+        new_artist_key, new_title_key = _tag_keys(artist, title)
+        if (new_artist_key, new_title_key) != (artist_key, title_key):
+            updates.append((new_artist_key, new_title_key, root, rel))
+    conn.executemany(
+        "UPDATE library_files SET artist_key = ?, title_key = ? WHERE root_path = ? AND relative_path = ?",
+        updates,
+    )
+    return len(updates)
 
 
 def _tag_keys(artist: str | None, title: str | None) -> tuple[str | None, str | None]:
