@@ -115,3 +115,16 @@ def test_email_delivery_rejects_incomplete_settings_before_connecting(monkeypatc
 
     assert success is False
     assert "from address" in message.lower()
+
+
+def test_failure_notices_are_held_but_successes_still_go(monkeypatch):
+    sent = []
+    monkeypatch.setattr(
+        notifications, "_should_notify",
+        lambda notification_type, status, error=None, user_id=None: sent.append(notification_type) or False,
+    )
+    with notifications.failure_notices_held():
+        notifications.send_notification("error", "Track", status="failed", error="nope")
+        notifications.send_notification("single", "Track", status="completed")
+    notifications.send_notification("error", "Track", status="failed", error="nope")
+    assert sent == ["single", "error"]

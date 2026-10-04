@@ -10,8 +10,9 @@ ones that can't, and parks a failing source for a cooldown before re-checking.
 
 Design notes:
 - Each source gets the *cheapest* check that proves it works. Monochrome runs
-  one small search against its tracks API, the route that actually streams;
-  the Deezer search leg being up is worthless if that cannot deliver. Direct-MP3 sites just need a live root. The
+  one small search against its tracks API, the route that actually streams,
+  then pulls the first megabyte of audio, since search kept answering while
+  downloads died; the Deezer search leg being up is worthless if that cannot deliver. Direct-MP3 sites just need a live root. The
   big platforms need host reachability. Soulseek needs to be configured and
   slskd reachable.
 - Last-known state is persisted in SQLite. Startup honours a still-live cooldown

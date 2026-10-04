@@ -656,7 +656,7 @@ This is a refresh nudge, not a promise that Lidarr will suddenly become reasonab
 
 ### Monochrome Source (Optional)
 
-Monochrome is enabled by default. MusicGrabber searches Deezer and uses the ISRC to pin down the exact recording. Downloads go through Monochrome's own tracks API, the same one its web player uses: a plain HTTP catalogue with no account, token or browser involved. MusicGrabber searches it by artist and title, keeps only the result carrying exactly the right ISRC, and downloads the FLAC directly. The same check runs at search time, so Monochrome only offers what it can actually deliver; if the tracks API cannot be reached, results are still shown but marked unverified. When Deezer comes back light, unconvincing or empty, the tracks API is searched directly to top it up. At download time, a miss gets an ISRC rescue through Deezer and a second try with the corrected ISRC.
+Monochrome is enabled by default. MusicGrabber searches Deezer and uses the ISRC to pin down the exact recording. Downloads go through Monochrome's own tracks API, the same one its web player uses: a plain HTTP catalogue with no account, token or browser involved. MusicGrabber searches it by artist and title, keeps only the result carrying exactly the right ISRC, and downloads the FLAC directly. The same check runs at search time, so Monochrome only offers what it can actually deliver; if the tracks API cannot be reached, results are still shown but marked unverified. When Deezer comes back light, unconvincing or empty, the tracks API is searched directly to top it up. At download time, a miss gets an ISRC rescue through Deezer and a second try with the corrected ISRC. The source health check searches the tracks API and then pulls the first megabyte of a real FLAC, so Monochrome is parked when its audio stalls or breaks off, even while its search still answers.
 
 Monochrome downloads are 16-bit/44.1kHz FLAC. The tracks API ignores requests for anything higher, so 24-bit hi-res is not on offer from this source.
 
@@ -682,7 +682,7 @@ Get notified when downloads complete or fail via Telegram, email, or a generic w
 | `singles` | Notify for each individual track download |
 | `playlists` | Notify when playlist downloads complete |
 | `bulk` | Notify when bulk imports complete |
-| `errors` | Notify when any download fails |
+| `errors` | Notify when a download fails. With cross-source fallback on, that means every source it tried failed; a source that fails and is then rescued by another stays quiet |
 
 Default is `playlists,bulk,errors`: notifications for playlist/bulk completions and any failures, but not for every single track.
 

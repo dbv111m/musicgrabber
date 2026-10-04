@@ -69,7 +69,7 @@ def download_leg_healthy() -> tuple[bool, str]:
     """Health check for the source layer: can Monochrome actually stream a FLAC?
 
     One small live search against the tracks API, the route that serves
-    Monochrome downloads.
+    Monochrome downloads, then the first megabyte of the FLAC it found.
     """
     from monochrome_tracks import health as tracks_health
     return tracks_health()

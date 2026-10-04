@@ -29,11 +29,13 @@ from urllib.parse import urljoin
 import httpx
 
 from constants import (
+    MONOCHROME_STREAM_PROBE_BYTES,
     MONOCHROME_TRACKS_API_FALLBACK,
     MONOCHROME_TRACKS_API_URL,
     MONOCHROME_TRACKS_DISCOVERY_TTL,
     MONOCHROME_WEB_URL,
     TIMEOUT_MONOCHROME_SEARCH,
+    TIMEOUT_MONOCHROME_STREAM_PROBE,
 )
 
 _HEADERS = {
@@ -188,8 +190,45 @@ def resolve_stream_url(isrc: str, artist: str, title: str) -> str | None:
     return f"{api_base()}/track/{track_id(track)}" if track else None
 
 
+def _stream_probe(track: dict) -> tuple[bool, str]:
+    """Pull the first megabyte of a real FLAC, against a wall clock.
+
+    httpx's timeout is per read, and a server dribbling a few KB a second never
+    trips it, hence the clock of our own.
+    """
+    started = time.monotonic()
+    received = 0
+    try:
+        with httpx.stream(
+            "GET",
+            f"{api_base()}/track/{track_id(track)}",
+            headers={**_HEADERS, "Accept": "*/*", "Range": f"bytes=0-{MONOCHROME_STREAM_PROBE_BYTES - 1}"},
+            timeout=TIMEOUT_MONOCHROME_STREAM_PROBE,
+            follow_redirects=True,
+        ) as resp:
+            resp.raise_for_status()
+            for chunk in resp.iter_bytes(chunk_size=65536):
+                received += len(chunk)
+                if (received >= MONOCHROME_STREAM_PROBE_BYTES
+                        or time.monotonic() - started > TIMEOUT_MONOCHROME_STREAM_PROBE):
+                    break
+    except Exception as exc:
+        return False, (f"Monochrome audio broke off after {received // 1024} KB: "
+                       f"{type(exc).__name__}: {exc}")
+    elapsed = time.monotonic() - started
+    if received < MONOCHROME_STREAM_PROBE_BYTES:
+        return False, (f"Monochrome audio too slow to use: {received // 1024} KB "
+                       f"in {elapsed:.0f}s")
+    return True, f"first {received // 1024} KB of audio in {elapsed:.1f}s"
+
+
 def health() -> tuple[bool, str]:
-    """Cheap live probe: one small search that should always find something."""
+    """Live probe: one small search, then the first megabyte of what it found.
+
+    Search alone is not enough. On 2026-10-04 searches answered while every
+    download crawled and was cut off mid-file, so the source stayed green and
+    each track wasted half a minute on it before another source took over.
+    """
     try:
         base = api_base()
         tracks = search_tracks("Radiohead Creep", 1)
@@ -197,4 +236,9 @@ def health() -> tuple[bool, str]:
         return False, f"Monochrome tracks API unreachable: {type(exc).__name__}: {exc}"
     if not tracks:
         return False, f"Monochrome tracks API at {base} answered but found nothing"
-    return True, f"Monochrome tracks API answering at {base}"
+    if not track_id(tracks[0]):
+        return True, f"Monochrome tracks API answering at {base} (no track id to test audio with)"
+    streaming, detail = _stream_probe(tracks[0])
+    if not streaming:
+        return False, detail
+    return True, f"Monochrome tracks API answering at {base}, {detail}"

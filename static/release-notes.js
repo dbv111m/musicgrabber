@@ -30,6 +30,8 @@ const RELEASE_NOTES = {
                     "On some phones the Sign out button was hanging off the edge of the screen. It's back where you can reach it.",
                     "Down the rabbit hole in Find New Artists, the way back out now stays at the top of the screen however deep you dig.",
                     "Spacing across the app has been tidied onto one consistent set of sizes. You probably won't spot it, which is rather the point.",
+                    "No more \"failed\" notifications for songs that turned up anyway. If one source falls over and another delivers, you won't hear about it; you'll only get a ping when every source has let you down.",
+                    "When Monochrome's downloads stall, it now gets benched straight away instead of making every song wait for it to fail first.",
                 ]
             },
         ]

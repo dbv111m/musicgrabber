@@ -7,12 +7,35 @@ Telegram webhook, SMTP email, generic webhook, and Apprise dispatch.
 import smtplib
 import socket
 import ssl
+import threading
+from contextlib import contextmanager
 from email.mime.text import MIMEText
 
 import httpx
 
 from constants import TIMEOUT_HTTP_REQUEST
 from settings import get_setting, get_setting_bool, get_setting_int
+
+# Per-thread: is someone above us still going to try another source?
+_failure_hold = threading.local()
+
+
+@contextmanager
+def failure_notices_held():
+    """Swallow failure notifications sent from this thread for the duration.
+
+    The download workers announce their own failures, which is right when they
+    are the last word and wrong when an acquisition cycle is about to hand the
+    track to the next source. Monochrome fell over four times in five minutes on
+    2026-10-04, and four "FAILED" pings went out for four tracks that JioSaavn
+    and Soulseek delivered seconds later. The cycle holds the workers' notices
+    and sends one of its own if every source really does let it down.
+    """
+    _failure_hold.active = True
+    try:
+        yield
+    finally:
+        _failure_hold.active = False
 
 
 def _build_notification_message(
@@ -309,6 +332,8 @@ def send_notification(
         playlist_name: Name of playlist (for playlist downloads)
         user_id: User whose notification settings to use (None = global)
     """
+    if notification_type == "error" and getattr(_failure_hold, "active", False):
+        return
     if not _should_notify(notification_type, status, error, user_id=user_id):
         return
 

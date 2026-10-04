@@ -2,6 +2,7 @@
 
 import os
 import sys
+from types import SimpleNamespace
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -208,11 +209,69 @@ def test_a_client_error_is_not_retried(monkeypatch):
 # Health
 # ---------------------------------------------------------------------------
 
-def test_health_is_true_when_search_finds_something(monkeypatch):
+class FakeStream:
+    """httpx.stream stand-in: hands out chunks, then optionally drops the line."""
+
+    def __init__(self, chunks, broken=None, status=206):
+        self.chunks = chunks
+        self.broken = broken
+        self.status_code = status
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise httpx.HTTPStatusError(f"{self.status_code}", request=None, response=None)
+
+    def iter_bytes(self, chunk_size=None):
+        yield from self.chunks
+        if self.broken:
+            raise self.broken
+
+
+def _stream(monkeypatch, fake):
+    seen = []
+
+    def fake_stream(method, url, **kwargs):
+        seen.append((url, kwargs.get("headers", {}).get("Range")))
+        return fake
+
+    monkeypatch.setattr(tracks.httpx, "stream", fake_stream)
+    return seen
+
+
+def test_health_is_true_when_search_finds_something_and_audio_flows(monkeypatch):
     _catalogue(monkeypatch, {"Radiohead Creep": [{"trackId": "1", "isrc": "GBAYE9200070"}]})
+    seen = _stream(monkeypatch, FakeStream([b"x" * 65536] * 16))
     ok, reason = tracks.health()
     assert ok is True
     assert "https://tracks.test" in reason
+    assert seen == [("https://tracks.test/track/1", "bytes=0-1048575")]
+
+
+def test_health_fails_when_audio_is_cut_off_mid_file(monkeypatch):
+    """2026-10-04: search answered, downloads died a few hundred KB in."""
+    _catalogue(monkeypatch, {"Radiohead Creep": [{"trackId": "1", "isrc": "GBAYE9200070"}]})
+    cut = httpx.RemoteProtocolError("peer closed connection without sending complete message body")
+    _stream(monkeypatch, FakeStream([b"x" * 65536] * 4, broken=cut))
+    ok, reason = tracks.health()
+    assert ok is False
+    assert "256 KB" in reason
+    assert "peer closed" in reason
+
+
+def test_health_fails_when_audio_crawls(monkeypatch):
+    _catalogue(monkeypatch, {"Radiohead Creep": [{"trackId": "1", "isrc": "GBAYE9200070"}]})
+    clock = iter(range(0, 1000, 10))  # ten seconds a chunk, which is no way to live
+    monkeypatch.setattr(tracks, "time", SimpleNamespace(monotonic=lambda: next(clock), sleep=lambda _s: None))
+    _stream(monkeypatch, FakeStream([b"x" * 12288] * 50))
+    ok, reason = tracks.health()
+    assert ok is False
+    assert "too slow" in reason
 
 
 def test_health_reports_an_outage(monkeypatch):

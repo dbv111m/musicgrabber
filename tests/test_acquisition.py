@@ -13,6 +13,7 @@ import acquisition
 import bulk_import
 import db
 import downloads
+import notifications
 import search
 
 
@@ -26,6 +27,27 @@ def _candidate(source, video_id, quality, score=80, title="Track", artist="Artis
         "artist": artist,
         "channel": artist,
     }
+
+
+def _capture_notifications(monkeypatch):
+    """Record what would actually be sent, and send none of it."""
+    sent = []
+
+    def should_notify(notification_type, status, error=None, user_id=None):
+        sent.append((notification_type, status, error))
+        return False
+
+    monkeypatch.setattr(notifications, "_should_notify", should_notify)
+    return sent
+
+
+def _worker_fails(job_id, error):
+    """What a real worker does on failure: mark the job and announce it."""
+    downloads._update_job(job_id, status="failed", error=error)
+    downloads.send_notification(
+        notification_type="error", title="Track", artist="Artist",
+        status="failed", error=error,
+    )
 
 
 def test_automatic_ladder_keeps_lossless_ahead_of_lossy_preference():
@@ -313,7 +335,7 @@ def test_automatic_cycle_falls_through_and_records_each_source(monkeypatch, tmp_
 
     def fake_provider(job_id, video_id, *args, source_url=None, **kwargs):
         if video_id == "mono":
-            downloads._update_job(job_id, status="failed", error="lossless unavailable")
+            _worker_fails(job_id, "lossless unavailable")
         else:
             downloads._update_job(job_id, status="completed", error=None)
 
@@ -322,6 +344,7 @@ def test_automatic_cycle_falls_through_and_records_each_source(monkeypatch, tmp_
     ])
     monkeypatch.setattr(downloads, "process_download", fake_provider)
     monkeypatch.setattr(downloads, "get_setting_bool", lambda *args, **kwargs: True)
+    sent = _capture_notifications(monkeypatch)
     monkeypatch.setattr(
         downloads,
         "_find_alternate_search_candidate",
@@ -356,6 +379,8 @@ def test_automatic_cycle_falls_through_and_records_each_source(monkeypatch, tmp_
         ("youtube", "completed", None),
     ]
     assert job == ("completed", "youtube", '["monochrome", "youtube"]')
+    # Monochrome's failure was rescued, so nobody hears about it.
+    assert sent == []
 
 
 def test_manual_cycle_never_calls_cross_source_selector(monkeypatch, tmp_path):
@@ -388,10 +413,9 @@ def test_manual_cycle_never_calls_cross_source_selector(monkeypatch, tmp_path):
     monkeypatch.setattr(
         downloads,
         "process_slskd_download",
-        lambda job_id, *args, **kwargs: downloads._update_job(
-            job_id, status="failed", error="peer vanished"
-        ),
+        lambda job_id, *args, **kwargs: _worker_fails(job_id, "peer vanished"),
     )
+    sent = _capture_notifications(monkeypatch)
     monkeypatch.setattr(
         downloads,
         "_find_alternate_search_candidate",
@@ -421,6 +445,8 @@ def test_manual_cycle_never_calls_cross_source_selector(monkeypatch, tmp_path):
         assert conn.execute(
             "SELECT status, attempt_count, last_error FROM acquisition_targets"
         ).fetchone() == ("failed", 1, "peer vanished")
+    # One failure notice, from the cycle, not one per attempt.
+    assert sent == [("error", "failed", "peer vanished")]
 
 
 def test_later_watched_refresh_reuses_target_without_reusing_queue_job(monkeypatch, tmp_path):

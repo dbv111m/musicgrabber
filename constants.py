@@ -135,6 +135,11 @@ TIMEOUT_JIOSAAVN_SEARCH = 15     # JioSaavn api.php search
 TIMEOUT_JIOSAAVN_DOWNLOAD = int(os.getenv("TIMEOUT_JIOSAAVN_DOWNLOAD", "120"))  # JioSaavn direct AAC stream
 TIMEOUT_MONOCHROME_SEARCH = 15   # Monochrome tracks API catalogue lookups
 TIMEOUT_MONOCHROME_DOWNLOAD = int(os.getenv("TIMEOUT_MONOCHROME_DOWNLOAD", "300"))  # Monochrome FLAC download (FLACs are big)
+# The health probe pulls this much FLAC and wants it inside the deadline. A
+# search answering proves nothing about audio: on 2026-10-04 searches were fine
+# while every download crawled at 12 KB/s and was cut off at 38 seconds.
+MONOCHROME_STREAM_PROBE_BYTES = 1024 * 1024
+TIMEOUT_MONOCHROME_STREAM_PROBE = 15
 STALE_JOB_TIMEOUT = 900          # Mark downloading/queued jobs as failed after 15 minutes
 STALE_JOB_CHECK_INTERVAL = 120   # Check for stale jobs every 2 minutes
 

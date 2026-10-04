@@ -49,7 +49,7 @@ from metadata import (
     apply_replaygain_tags, read_replaygain_tags, read_artist_title,
     parse_reject_keywords, title_has_version_annotation,
 )
-from notifications import send_notification
+from notifications import failure_notices_held, send_notification
 from settings import get_setting, get_setting_bool, get_setting_int, get_singles_dir, get_download_dir, get_playlists_dir, get_albums_dir, resolve_custom_subdir
 from slskd import (
     download_from_slskd, extract_track_info_from_path,
@@ -1038,6 +1038,21 @@ def process_acquisition_cycle(
     attempted_ids: set[str] = set()
     attempted_sources: set[str] = set()
     last_error = "No candidate succeeded"
+    source = None
+
+    def _give_up() -> None:
+        # The workers' own failure notices were held while other sources
+        # might still deliver, so this is the one that actually goes out.
+        finish_acquisition_cycle(target_id, "failed", last_error)
+        send_notification(
+            notification_type="error",
+            title=expected_title,
+            artist=expected_artist,
+            source=source,
+            status="failed",
+            error=last_error,
+            user_id=user_id,
+        )
 
     requested_video_tried = False
     while candidate:
@@ -1070,38 +1085,39 @@ def process_acquisition_cycle(
         attempt_id = start_acquisition_attempt(target_id, cycle, job_id, candidate)
 
         try:
-            if source == "soulseek":
-                process_slskd_download(
-                    job_id,
-                    slskd_username,
-                    slskd_filename,
-                    expected_artist,
-                    expected_title,
-                    convert_audio,
-                    user_id=user_id,
-                    override_dir=override_dir,
-                    playlist_name=playlist_name,
-                    use_playlists_dir=use_playlists_dir,
-                    custom_subdir=custom_subdir,
-                    slskd_size=slskd_size,
-                    skip_dupe_check=skip_dupe_check,
-                )
-            else:
-                process_download(
-                    job_id,
-                    candidate_id,
-                    convert_audio,
-                    source_url=source_url,
-                    playlist_name=playlist_name,
-                    use_playlists_dir=use_playlists_dir,
-                    attempted_ids={candidate_id} if candidate_id else set(),
-                    user_id=user_id,
-                    override_dir=override_dir,
-                    skip_dupe_check=skip_dupe_check,
-                    custom_subdir=custom_subdir,
-                    fallback_allowed_sources=allowed_sources,
-                    allow_cross_source_fallback=False,
-                )
+            with failure_notices_held():
+                if source == "soulseek":
+                    process_slskd_download(
+                        job_id,
+                        slskd_username,
+                        slskd_filename,
+                        expected_artist,
+                        expected_title,
+                        convert_audio,
+                        user_id=user_id,
+                        override_dir=override_dir,
+                        playlist_name=playlist_name,
+                        use_playlists_dir=use_playlists_dir,
+                        custom_subdir=custom_subdir,
+                        slskd_size=slskd_size,
+                        skip_dupe_check=skip_dupe_check,
+                    )
+                else:
+                    process_download(
+                        job_id,
+                        candidate_id,
+                        convert_audio,
+                        source_url=source_url,
+                        playlist_name=playlist_name,
+                        use_playlists_dir=use_playlists_dir,
+                        attempted_ids={candidate_id} if candidate_id else set(),
+                        user_id=user_id,
+                        override_dir=override_dir,
+                        skip_dupe_check=skip_dupe_check,
+                        custom_subdir=custom_subdir,
+                        fallback_allowed_sources=allowed_sources,
+                        allow_cross_source_fallback=False,
+                    )
         except Exception as exc:
             _update_job(
                 job_id,
@@ -1134,7 +1150,7 @@ def process_acquisition_cycle(
         if not automatic or not get_setting_bool(
             "source_offline_fallback", True, user_id=user_id
         ):
-            finish_acquisition_cycle(target_id, "failed", last_error)
+            _give_up()
             return
 
         candidate = next(
@@ -1166,7 +1182,7 @@ def process_acquisition_cycle(
                 user_id,
             )
 
-    finish_acquisition_cycle(target_id, "failed", last_error)
+    _give_up()
 
 
 def trigger_navidrome_scan(user_id: str | None = None):
