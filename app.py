@@ -48,7 +48,7 @@ from settings import (
 )
 from source_urls import is_valid_source_url, validate_source_url
 from models import (
-    SearchRequest, DownloadRequest, PlaylistFetchRequest,
+    SearchRequest, DownloadRequest, PlaylistFetchRequest, AlbumTrackRepairRequest,
     AsyncBulkImportRequest, WatchedPlaylistRequest, WatchedPlaylistUpdate,
     WatchedArtistRequest, WatchedArtistUpdate,
     SettingsUpdate, SearchResult, BlacklistRequest,
@@ -85,7 +85,7 @@ from slskd import slskd_enabled, search_slskd
 from downloads import (
     process_acquisition_cycle, process_download, process_playlist_download,
     process_slskd_download,
-    rebuild_watched_playlist_m3u,
+    rebuild_watched_playlist_m3u, _refresh_album_m3u_if_present,
     trigger_navidrome_scan, trigger_jellyfin_scan, trigger_plex_scan,
     jellyfin_auth_headers,
     check_navidrome_duplicate, check_lidarr_duplicate,
@@ -139,6 +139,7 @@ from album_urls import resolve_album_url
 from albums import (
     album_audio_file_count,
     album_track_status,
+    resolve_album_track_repair, album_repair_files,
     queue_album_download,
     album_on_disk,
     watched_album_display_state,
@@ -342,6 +343,8 @@ def get_config(request: Request):
     default_convert_audio = get_setting_bool("default_convert_audio", False)
     return {
         "version": VERSION,
+        "listen_addr": os.getenv("LISTEN_ADDR") or "0.0.0.0",
+        "listen_port": int(os.getenv("LISTEN_PORT") or "8080"),
         "default_convert_audio": default_convert_audio,
         # Compatibility for pre-v4 browsers and API clients. The stored setting and
         # its column have both been renamed; this key is emitted purely so an older
@@ -2325,9 +2328,28 @@ def download(body: DownloadRequest, http_request: Request):
     # Extract artist/title if not provided
     artist = body.artist
     title = body.title
+    repair_context = None
+    if body.album_repair:
+        if body.download_type != "single" or body.playlist_name or body.use_playlists_dir:
+            raise HTTPException(status_code=400, detail="Album repair cannot be combined with playlist routing")
+        try:
+            repair_context = resolve_album_track_repair(
+                **body.album_repair.model_dump(), user_id=user_id,
+            )
+        except MusicBrainzUnavailable as exc:
+            raise HTTPException(status_code=503, detail=f"MusicBrainz unreachable: {exc}")
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        artist = repair_context["track_artist"]
+        title = repair_context["track_title"]
 
     # Create job record
     with db_conn() as conn:
+        if repair_context:
+            conn.execute("BEGIN IMMEDIATE")
+            _ensure_album_repair_idle(conn, repair_context["override_dir"])
+            if album_repair_files(repair_context):
+                raise HTTPException(status_code=409, detail="A copy of this album track is present; use Search replacement again before downloading")
         # Determine source type
         source = body.source or "youtube"
         if source == "soulseek" and not (body.slskd_username and body.slskd_filename):
@@ -2390,6 +2412,15 @@ def download(body: DownloadRequest, http_request: Request):
                 raise HTTPException(status_code=400, detail="album_artist (or artist) is required for album routing")
             override_dir = str(get_albums_dir(user_id=user_id) / sanitize_filename(route_artist) / sanitize_filename(album_name))
 
+        if repair_context:
+            override_dir = repair_context["override_dir"]
+            album_release_mbid = repair_context["release_mbid"]
+            album_artist = repair_context["album_artist"]
+            album_name = repair_context["album_name"]
+            album_track_title = repair_context["track_title"]
+            album_track_number = repair_context["track_number"]
+            album_track_total = repair_context["track_total"]
+
         valid_search_token = _validated_search_token(body.search_token, user_id=user_id)
         # Only a server-issued search token turns this client-supplied value into
         # manual-result evidence. API callers without a preceding search cannot
@@ -2444,6 +2475,8 @@ def download(body: DownloadRequest, http_request: Request):
                          )""",
                     (job_id, track_hash, user_id, body.playlist_name),
                 )
+        if repair_context:
+            conn.execute("UPDATE jobs SET album_context = ? WHERE id = ?", (json.dumps(repair_context), job_id))
         conn.commit()
 
     acquisition_target_id = None
@@ -3255,6 +3288,8 @@ def _create_rescue_job(job: dict, destination: dict, candidate: dict | None = No
                 int(bool(job.get("skip_mismatch_check"))), target_id, cycle,
             ),
         )
+        if job.get("album_context"):
+            conn.execute("UPDATE jobs SET album_context = ? WHERE id = ?", (job["album_context"], new_job_id))
         conn.execute(
             """UPDATE bulk_import_tracks
                SET job_id = ?, status = 'queued', error = NULL, acquisition_cycle = ?
@@ -4047,6 +4082,17 @@ def restore_trash_file(http_request: Request, path: str = ""):
             _tag_track_comment(restored, restored_artist, restored_title)
     except Exception as e:
         print(f"Restore COMMENT re-tag failed for {restored}: {e}")
+
+    # Abandoning an album repair must put the old copy back into its M3Us too.
+    try:
+        album_relative = restored.parent.resolve().relative_to(get_albums_dir(user_id=user_id).resolve())
+    except ValueError:
+        album_relative = None
+    if album_relative is not None and len(album_relative.parts) == 2:
+        with db_conn() as conn:
+            conn.execute("UPDATE jobs SET file_deleted = 0 WHERE final_path = ? AND user_id IS ?", (str(restored), user_id))
+            conn.commit()
+        _refresh_album_m3u_if_present(str(restored.parent))
 
     return {"restored": str(restored.name), "path": str(restored), "job_id": restored_job_id}
 
@@ -6386,6 +6432,55 @@ def albums_get_tracklist_by_group(release_group_mbid: str):
 # still leans on _normalise_album_match_text for its own fuzzy matching.
 
 
+def _ensure_album_repair_idle(conn, album_dir: str) -> None:
+    busy = conn.execute(
+        """SELECT 1 FROM jobs WHERE override_dir = ? AND status IN ('queued', 'downloading')
+           UNION ALL
+           SELECT 1 FROM bulk_imports WHERE override_dir = ? AND status IN ('pending', 'processing')
+           LIMIT 1""", (album_dir, album_dir),
+    ).fetchone()
+    if busy:
+        raise HTTPException(status_code=409, detail="This album has a download in progress; wait for it to finish before repairing a track")
+
+
+@app.post("/api/albums/repair-track")
+def albums_repair_track(body: AlbumTrackRepairRequest, request: Request):
+    """Prepare a manual rescue, keeping the bad copy recoverable in Trash."""
+    user_id = request.state.user_id
+    selection = body.model_dump(exclude={"trash_existing"})
+    try:
+        context = resolve_album_track_repair(**selection, user_id=user_id)
+    except MusicBrainzUnavailable as exc:
+        raise HTTPException(status_code=503, detail=f"MusicBrainz unreachable: {exc}")
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    files = album_repair_files(context)
+    if len(files) > 1:
+        raise HTTPException(status_code=409, detail="Several files match this album track; remove the unwanted copies through Queue before searching for a replacement")
+    if files and not body.trash_existing:
+        raise HTTPException(status_code=409, detail="This track is on disk; confirm moving the current copy to Trash before replacing it")
+    with db_conn() as conn:
+        conn.execute("BEGIN IMMEDIATE")
+        _ensure_album_repair_idle(conn, context["override_dir"])
+        if files:
+            from settings import get_trash_dir
+            music_root = Path(get_setting("music_dir", str(MUSIC_DIR), user_id=user_id))
+            trash_path = get_trash_dir(user_id=user_id) / files[0].relative_to(music_root)
+            if trash_path.exists() or trash_path.with_suffix(".lrc").exists():
+                raise HTTPException(status_code=409, detail="An earlier copy is already in Trash; restore or remove it before replacing this track again")
+            from utils import move_to_trash
+            if move_to_trash(files[0], user_id=user_id) is None:
+                raise HTTPException(status_code=500, detail="Could not move the current copy to Trash; no replacement was prepared")
+            conn.execute("UPDATE jobs SET file_deleted = 1 WHERE final_path = ? AND user_id IS ?", (str(files[0]), user_id))
+        conn.commit()
+    _refresh_album_m3u_if_present(context["override_dir"])
+    selection.update({
+        "album_dir": context["override_dir"], "track_title": context["track_title"],
+        "disc_number": context["disc_number"], "track_number": context["track_number"],
+    })
+    return {"selection": selection, "context": context, "trashed": bool(files)}
+
+
 def _match_album_track(tracks: list[dict], candidate_title: str) -> dict | None:
     """Return a single best album track match for a candidate title."""
     cand = _normalise_album_match_text(candidate_title)
@@ -6470,13 +6565,37 @@ def albums_missing_tracks(release_mbid: str, artist: str, album_title: str, requ
     if not artist or not album_title:
         raise HTTPException(status_code=400, detail="artist and album_title are required")
 
-    tracks = fetch_album_tracks(release_mbid.strip())
+    try:
+        tracks = fetch_album_tracks(release_mbid.strip())
+    except MusicBrainzUnavailable as exc:
+        raise HTTPException(status_code=503, detail=f"MusicBrainz unreachable: {exc}. Try again in a moment.")
     if not tracks:
         raise HTTPException(status_code=404, detail="No tracks found for this release")
 
     user_id = getattr(request.state, "user_id", None)
     status = album_track_status(artist, album_title, tracks, user_id=user_id)
+    # Existing albums belong to the pressing recorded when they were queued,
+    # which may differ from today's representative release in the artist browser.
+    info_path = status["album_dir"] / ".albuminfo"
+    if info_path.is_file() and not info_path.is_symlink():
+        try:
+            info = json.loads(info_path.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            info = {}
+        stored_release = info.get("release_mbid")
+        if stored_release and stored_release != release_mbid:
+            try:
+                tracks = fetch_album_tracks(stored_release)
+            except MusicBrainzUnavailable as exc:
+                raise HTTPException(status_code=503, detail=f"MusicBrainz unreachable: {exc}. Try again in a moment.")
+            if not tracks:
+                raise HTTPException(status_code=404, detail="No tracks found for the album's stored release")
+            release_mbid = stored_release
+            status = album_track_status(artist, album_title, tracks, user_id=user_id)
     return {
+        "release_mbid": release_mbid,
+        "artist": artist,
+        "album_title": album_title,
         "album_dir": str(status["album_dir"]),
         "total_tracks": len(status["tracks"]),
         "tracks": status["tracks"],

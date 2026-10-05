@@ -12,10 +12,20 @@ PGID=${PGID:-0}
 LISTEN_ADDR=${LISTEN_ADDR:-0.0.0.0}
 LISTEN_PORT=${LISTEN_PORT:-8080}
 
+# Port zero asks the server for a random port, which makes published ports and
+# the health check useless. Refuse it, and other invalid values, before boot work.
+if ! [[ "$LISTEN_PORT" =~ ^[0-9]{1,5}$ ]] || (( 10#$LISTEN_PORT < 1 || 10#$LISTEN_PORT > 65535 )); then
+    echo "Error: LISTEN_PORT must be a whole number from 1 to 65535 (got '$LISTEN_PORT')." >&2
+    exit 1
+fi
+
 echo ""
 echo "=========================================="
 echo "  Music Grabber is starting..."
-echo "  Listening on ${LISTEN_ADDR}:${LISTEN_PORT} (map host port in docker-compose as needed)"
+echo "  Configured bind: ${LISTEN_ADDR}:${LISTEN_PORT}"
+echo "  Docker bridge: publish a host port to container port ${LISTEN_PORT}."
+echo "  Shared VPN network: publish port ${LISTEN_PORT} on the VPN container, not MusicGrabber."
+echo "  Set LISTEN_PORT in the container environment and recreate the container to change it."
 
 # yt-dlp goes stale a great deal faster than this image does. YouTube swaps a
 # player client, and a binary that was perfectly happy last month starts handing

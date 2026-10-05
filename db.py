@@ -238,6 +238,7 @@ def init_db():
             album_track_title TEXT,
             album_track_number INTEGER,
             album_track_total INTEGER,
+            album_context TEXT,
             skip_mismatch_check INTEGER DEFAULT 0,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             completed_at TIMESTAMP
@@ -336,6 +337,10 @@ def init_db():
         except sqlite3.OperationalError:
             pass
         conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_search_token ON jobs(search_token)")
+        try:
+            conn.execute("ALTER TABLE jobs ADD COLUMN album_context TEXT")
+        except sqlite3.OperationalError:
+            pass
 
         # Bulk imports table - tracks the overall import job
         conn.execute("""

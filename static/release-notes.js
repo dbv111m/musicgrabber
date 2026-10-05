@@ -11,6 +11,20 @@ const RELEASE_NOTES = {
         title: "What's New in v4.3.1",
         sections: [
             {
+                heading: "Put that album track back where it belongs",
+                items: [
+                    "Wrong recording in an album? Choose Search replacement beside its track in Artists or Bulk Import, confirm moving the old copy to Trash, then pick the right result. The replacement keeps the album folder, pressing, disc and track numbers, and updates its existing M3U. No accidental promotion to a solo career in Singles.",
+                    "Cancelling clears the repair destination; it does not restore the old file. Queue's Trash view has that copy if you change your mind.",
+                ]
+            },
+            {
+                heading: "Know what you're following, and where it's listening",
+                items: [
+                    "The Artists tab now spells out how shared credits, guest appearances and remixers are treated. Following uses the artist credit on the release itself; guests credited only on a track stay out. MusicBrainz's release types decide the exclusions, so an untyped remix can still turn up.",
+                    "Running through a VPN container? Settings now shows MusicGrabber's internal port, startup logs explain where to publish it, and the README has Compose and Unraid instructions. Set LISTEN_PORT in the container environment and recreate it to change the port; invalid values now get a clear error at startup.",
+                ]
+            },
+            {
                 heading: "Tabs that know when they're out of date",
                 items: [
                     "Left MusicGrabber open in a tab while it was updated? That tab now notices and offers a Reload button, instead of carrying on with yesterday's version until something mysteriously stops working.",

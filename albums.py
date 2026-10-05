@@ -18,6 +18,7 @@ import re
 import sqlite3
 import tempfile
 import unicodedata
+from collections import Counter
 from difflib import SequenceMatcher
 from pathlib import Path
 
@@ -255,6 +256,7 @@ def album_track_status(artist: str, album_title: str, tracks: list[dict], user_i
         if p.is_file() and p.suffix.lower() in AUDIO_EXTENSIONS
     ]
 
+    title_counts = Counter(_normalise_album_match_text(t.get("title") or "") for t in tracks)
     track_status = []
     for t in tracks:
         title = (t.get("title") or "").strip()
@@ -271,11 +273,21 @@ def album_track_status(artist: str, album_title: str, tracks: list[dict], user_i
             exists_exact
             or any(_album_file_matches_track(path, track_artist, title) for path in audio_files)
         )
+        if (t.get("disc_total") or 1) > 1:
+            exists = any(album_repair_files({
+                "override_dir": str(folder), "track_artist": track_artist,
+                "track_title": title, "track_number": int(t.get("position") or 1),
+                "disc_number": t.get("disc_number") or 1,
+                "title_unique": title_counts[_normalise_album_match_text(title)] == 1,
+            }) for folder in matched_dirs)
         track_status.append({
             "position": t.get("position"),
             "title": title,
             "artist": track_artist,
             "isrc": t.get("isrc"),
+            "disc_number": t.get("disc_number", 1),
+            "disc_total": t.get("disc_total", 1),
+            "track_total": t.get("track_total"),
             "exists": exists,
         })
 
@@ -292,6 +304,99 @@ def album_track_status(artist: str, album_title: str, tracks: list[dict], user_i
         "missing_tracks": missing_tracks,
         "m3u_files": m3u_files,
     }
+
+
+def resolve_album_track_repair(
+    artist: str, album_title: str, release_mbid: str, track_index: int,
+    album_dir: str | None = None, user_id: str | None = None,
+    track_title: str | None = None, disc_number: int | None = None,
+    track_number: int | None = None,
+) -> dict:
+    """Resolve a rescue to one pressing, one track and a confined album folder."""
+    if not artist.strip() or not album_title.strip() or not release_mbid or track_index < 0:
+        raise ValueError("An artist, album, release and valid track selection are required")
+    root = get_albums_dir(user_id=user_id)
+    candidates = _matching_album_dirs(artist, album_title, user_id=user_id)
+    target = Path(album_dir) if album_dir else (
+        candidates[0] if candidates else root / sanitize_filename(artist) / sanitize_filename(album_title)
+    )
+    try:
+        relative = target.resolve().relative_to(root.resolve())
+    except ValueError:
+        raise ValueError("Album destination must stay inside your Albums directory")
+    if len(relative.parts) != 2 or any(p.is_symlink() for p in (target, target.parent)):
+        raise ValueError("Album destination must be an artist/album folder without symlinks")
+    expected = root / sanitize_filename(artist) / sanitize_filename(album_title)
+    if target != expected and target not in candidates:
+        raise ValueError("Album destination does not match the selected artist and album")
+
+    info_path = target / ".albuminfo"
+    if info_path.is_symlink():
+        raise ValueError("Album info must not be a symlink")
+    info = json.loads(info_path.read_text(encoding="utf-8")) if info_path.exists() else {}
+    if info.get("release_mbid") and info["release_mbid"] != release_mbid:
+        raise ValueError("This folder belongs to a different pressing; reopen its album track list")
+    release = fetch_album_release(release_mbid)
+    tracks = release["tracks"]
+    if track_index >= len(tracks):
+        raise ValueError("The selected album track no longer exists; reload the track list")
+    track = tracks[track_index]
+    number = int(track.get("position") or track_index + 1)
+    resolved_disc = int(track.get("disc_number") or 1)
+    disc_total = int(track.get("disc_total") or 1)
+    if (
+        track_title is not None and track_title != track["title"]
+        or disc_number is not None and disc_number != resolved_disc
+        or track_number is not None and track_number != number
+    ):
+        raise ValueError("The selected album track has changed; reload the track list")
+    return {
+        "override_dir": str(target), "release_mbid": release_mbid,
+        "album_artist": info.get("artist") or artist,
+        "album_name": info.get("album") or album_title,
+        "track_artist": track.get("artist") or artist,
+        "track_title": track["title"], "track_number": number,
+        "track_total": int(track.get("track_total") or len(tracks)),
+        "disc_number": resolved_disc, "disc_total": disc_total,
+        "year": info.get("year") or release.get("year") or None,
+        "title_unique": sum(
+            _normalise_album_match_text(t["title"]) == _normalise_album_match_text(track["title"])
+            for t in tracks
+        ) == 1,
+    }
+
+
+def album_repair_files(context: dict) -> list[Path]:
+    """Find this track only in its destination, distinguishing numbered discs."""
+    from mutagen import File as MutagenFile
+    from mutagen import MutagenError
+    target = Path(context["override_dir"])
+    matches = []
+    if not target.exists():
+        return matches
+    for path in target.iterdir():
+        if path.is_symlink() or not path.is_file() or path.suffix.lower() not in AUDIO_EXTENSIONS:
+            continue
+        if not _album_file_matches_track(path, context["track_artist"], context["track_title"]):
+            continue
+        # A wrong recording can also have wrong numbering. A unique release
+        # title identifies it without trusting those tags; repeated titles need
+        # the extra disc/track evidence to distinguish their local copies.
+        if context.get("title_unique"):
+            matches.append(path)
+            continue
+        try:
+            tags = MutagenFile(str(path), easy=True)
+            for key, expected in (("tracknumber", context["track_number"]), ("discnumber", context["disc_number"])):
+                values = tags.get(key) if tags else None
+                if values and int(str(values[0]).split("/")[0]) != expected:
+                    break
+            else:
+                matches.append(path)
+        except (MutagenError, ValueError, OSError):
+            # An untagged bad download can still be rescued by its filename.
+            matches.append(path)
+    return matches
 
 
 def queue_album_download(

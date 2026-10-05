@@ -20,7 +20,11 @@ services:
       - DB_PATH=/data/music_grabber.db
       # Optional: serve behind a reverse-proxy subpath (proxy must strip the prefix)
       # - ROOT_PATH=/musicgrabber
-      # Optional: custom bind (defaults to 0.0.0.0:8080 if unset)
+      # Optional: custom bind (defaults to 0.0.0.0:8080 if unset).
+      # If LISTEN_PORT changes, update the right side of ports above to match.
+      # Shared VPN network: remove this service's ports/networks, publish on
+      # the VPN container instead; see README "VPN-container networking".
+      # Recreate the container after changing environment variables.
       # IPv6 demo (commented out):
       # - LISTEN_ADDR=::
       # - LISTEN_PORT=8080

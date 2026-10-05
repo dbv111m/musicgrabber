@@ -1939,6 +1939,8 @@ def apply_metadata_to_file(
     source_codec: str | None = None,
     source_bitrate_kbps: int | None = None,
     compilation: bool = False,
+    disc_number: int | None = None,
+    disc_total: int | None = None,
 ):
     """Apply metadata to audio file using mutagen (supports multiple formats).
 
@@ -1966,6 +1968,8 @@ def apply_metadata_to_file(
         suffix = file_path.suffix.lower()
         track_number = int(track_number) if track_number else None
         track_total = int(track_total) if track_total else None
+        disc_number = int(disc_number) if disc_number else None
+        disc_total = int(disc_total) if disc_total else None
         art_mime = (album_art_mime or "image/jpeg").lower()
         has_art = bool(album_art_bytes)
 
@@ -1983,6 +1987,10 @@ def apply_metadata_to_file(
                 audio["COMPILATION"] = "1"
             if year:
                 audio["DATE"] = year
+            if disc_number:
+                audio["DISCNUMBER"] = str(disc_number)
+                if disc_total:
+                    audio["DISCTOTAL"] = str(disc_total)
             if track_number:
                 audio["TRACKNUMBER"] = str(track_number)
                 if track_total:
@@ -2041,6 +2049,8 @@ def apply_metadata_to_file(
             if track_number:
                 tn = f"{track_number}/{track_total}" if track_total else str(track_number)
                 audio["tracknumber"] = [tn]
+            if disc_number:
+                audio["discnumber"] = [f"{disc_number}/{disc_total}" if disc_total else str(disc_number)]
             if any(_is_source_branding(c) for c in audio.get("comment", [])):
                 audio["comment"] = []
             if source or source_quality:
@@ -2084,6 +2094,8 @@ def apply_metadata_to_file(
                 audio["\xa9day"] = [year]
             if track_number:
                 audio["trkn"] = [(track_number, track_total or 0)]
+            if disc_number:
+                audio["disk"] = [(disc_number, disc_total or 0)]
             # \xa9cmt is the comment atom
             if any(_is_source_branding(c) for c in audio.get("\xa9cmt", [])):
                 audio["\xa9cmt"] = []
@@ -2123,6 +2135,10 @@ def apply_metadata_to_file(
                     audio["COMPILATION"] = "1"
                 if year:
                     audio["DATE"] = year
+                if disc_number:
+                    audio["DISCNUMBER"] = str(disc_number)
+                    if disc_total:
+                        audio["DISCTOTAL"] = str(disc_total)
                 if track_number:
                     audio["TRACKNUMBER"] = str(track_number)
                     if track_total:
@@ -2272,7 +2288,12 @@ def search_artist_mbid(name: str) -> list[dict]:
 
 
 def fetch_artist_singles(mbid: str) -> list[dict]:
-    """Fetch all singles for an artist from MusicBrainz.
+    """Fetch singles credited to this artist at release level in MusicBrainz.
+
+    Shared release credits qualify regardless of the artist's position. There
+    is no track_artist browse or remixer-relationship lookup: track-only guest
+    appearances do not qualify. Exclusions use release-group secondary types,
+    not title text, so an untyped remix can still be returned.
 
     Returns a flat list of track dicts: {title, artist, release_date, release_mbid}.
     Singles with multiple tracks (A-side + B-side) are each returned as separate rows.
@@ -2507,7 +2528,8 @@ def fetch_album_release(release_mbid: str) -> dict:
     year = year_match.group(1) if year_match else ""
     release_credit = data.get("artist-credit") or []
     tracks: list[dict] = []
-    for medium in data.get("media", []):
+    media = data.get("media", [])
+    for disc_index, medium in enumerate(media, 1):
         for track in medium.get("tracks", []):
             recording = track.get("recording") or {}
             title = recording.get("title") or track.get("title", "")
@@ -2537,6 +2559,9 @@ def fetch_album_release(release_mbid: str) -> dict:
                     "artist": artist,
                     "isrc": isrc,
                     "recording_mbid": recording.get("id") or None,
+                    "disc_number": medium.get("position") or disc_index,
+                    "disc_total": len(media),
+                    "track_total": len(medium.get("tracks", [])),
                 })
     return {"year": year, "tracks": tracks}
 

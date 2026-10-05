@@ -474,6 +474,7 @@
         let _albumDirArtist = null;
         let _albumDirAlbum = null;
         let _albumInfo = null; // response from /api/albums/dirs/{artist}/{album}/info
+        let _albumRepairSelection = null;
 
         let playlistScanTimer = null;
         let playlistScanBusy = false;
@@ -587,6 +588,9 @@
         }
 
         function _resetDestination() {
+            _albumRepairSelection = null;
+            const repairBanner = document.getElementById('albumRepairBanner');
+            if (repairBanner) repairBanner.style.display = 'none';
             _destinationMode = null;
             _albumDirArtist = null;
             _albumDirAlbum = null;
@@ -787,7 +791,7 @@
             if (!toggle) return;
 
             toggle.addEventListener('click', () => {
-                if (_destinationMode !== null) { _resetDestination(); return; }
+                if (_destinationMode !== null || _albumRepairSelection) { _resetDestination(); return; }
                 if (modePanel) modePanel.style.display = 'flex';
                 toggle.classList.add('active');
             });
@@ -1032,6 +1036,12 @@
 
             if (config) {
                 serverConfig = config;
+
+                const bindLabel = document.getElementById('serverBindAddress');
+                if (bindLabel && config.listen_addr && config.listen_port) {
+                    const address = config.listen_addr.includes(':') ? `[${config.listen_addr}]` : config.listen_addr;
+                    bindLabel.textContent = `${address}:${config.listen_port}`;
+                }
 
                 // Set version label
                 if (config.version) {
@@ -3704,6 +3714,7 @@
         }
 
         async function downloadTrack(result, element) {
+            const repairSelection = _albumRepairSelection;
             // Check queue size limit
             const queueSize = await getQueueSize();
             if (queueSize >= MAX_QUEUE_SIZE) {
@@ -3748,7 +3759,8 @@
                     }
                 }
 
-                const albumRoute = getSelectedAlbumRoute();
+                if (repairSelection) payload.album_repair = repairSelection;
+                const albumRoute = repairSelection ? null : getSelectedAlbumRoute();
                 if (_destinationMode === 'album' && !albumRoute) {
                     throw new Error('Select an artist and album folder before downloading.');
                 }
@@ -3809,7 +3821,10 @@
                     body: JSON.stringify(payload)
                 });
 
-                if (!response.ok) throw new Error('Download failed');
+                if (!response.ok) {
+                    const error = await response.json().catch(() => ({}));
+                    throw new Error(error.detail || 'Download failed');
+                }
 
                 const data = await response.json();
 
@@ -3819,8 +3834,9 @@
                 const pl = getSelectedPlaylist();
                 const playlistMsg = pl ? ` → ${pl.name}` : '';
                 const al = getSelectedAlbumRoute();
-                const albumMsg = al ? ` → ${al.album_name}` : '';
+                const albumMsg = repairSelection ? ` → ${repairSelection.album_title} (album repair)` : (al ? ` → ${al.album_name}` : '');
                 showToast(`Added to queue${qualityMsg}${formatMsg}${playlistMsg}${albumMsg}`);
+                if (repairSelection && _albumRepairSelection === repairSelection) _resetDestination();
             } catch (error) {
                 downloadingIds.delete(result.video_id);
                 element.classList.remove('downloading');
@@ -5951,6 +5967,39 @@
                 await loadAlbums(a);
             }
 
+            function renderAlbumTracks(album, tracks, statusData = null) {
+                els.tracklist.innerHTML = '';
+                tracks.forEach((track, index) => {
+                    const li = document.createElement('li');
+                    li.className = 'album-track-item';
+                    if (statusData) li.classList.add(track.exists ? 'album-track-existing' : 'album-track-missing');
+                    const title = document.createElement('span');
+                    title.className = 'album-track-title';
+                    const disc = (track.disc_total || 1) > 1 ? `Disc ${track.disc_number}, ${track.position}. ` : '';
+                    title.textContent = disc + track.title;
+                    li.appendChild(title);
+                    const repairBtn = document.createElement('button');
+                    repairBtn.type = 'button';
+                    repairBtn.className = 'btn btn-ghost btn-sm album-track-repair-btn';
+                    repairBtn.textContent = 'Search replacement';
+                    repairBtn.setAttribute('aria-label', `Search replacement for ${disc}${track.title}`);
+                    // Wait for the on-disk pressing and destination before enabling.
+                    repairBtn.disabled = !statusData;
+                    repairBtn.addEventListener('click', () => startAlbumTrackRepair({
+                        artist: statusData.artist || state.selectedArtist.name,
+                        album_title: statusData.album_title || album.title,
+                        release_mbid: statusData.release_mbid || album.release_mbid,
+                        track_index: index,
+                        album_dir: statusData.album_dir,
+                        track_title: track.title,
+                        disc_number: track.disc_number || 1,
+                        track_number: Number(track.position) || index + 1,
+                    }, track, repairBtn));
+                    li.appendChild(repairBtn);
+                    els.tracklist.appendChild(li);
+                });
+            }
+
             async function selectAlbum(album, btn) {
                 state.selectedRelease = album;
                 containerEl.querySelectorAll('.album-list-btn').forEach(b => b.classList.remove('selected'));
@@ -5981,6 +6030,7 @@
                         return;
                     }
                     const data = await resp.json();
+                    if (state.selectedRelease !== album) return;
                     if (!album.release_mbid && data.release_mbid) album.release_mbid = data.release_mbid;
                     const tracks = data.tracks || [];
                     if (!els.tracklist) return;
@@ -5988,13 +6038,7 @@
                         els.tracklist.innerHTML = '<li>No tracks found.</li>';
                         return;
                     }
-                    els.tracklist.innerHTML = '';
-                    for (const t of tracks) {
-                        const li = document.createElement('li');
-                        li.className = 'album-track-item';
-                        li.textContent = t.title;
-                        els.tracklist.appendChild(li);
-                    }
+                    renderAlbumTracks(album, tracks);
                     if (state.selectedArtist && els.existingWarning) {
                         try {
                             const params = new URLSearchParams({
@@ -6004,21 +6048,16 @@
                             const statusResp = await apiFetch(
                                 `/api/albums/release/${encodeURIComponent(album.release_mbid)}/missing?${params.toString()}`
                             );
+                            if (!statusResp.ok) throw new Error(await _readApiErrorDetail(statusResp));
                             if (statusResp.ok) {
                                 const statusData = await statusResp.json();
+                                if (state.selectedRelease !== album) return;
+                                if (statusData.release_mbid) album.release_mbid = statusData.release_mbid;
                                 const existing = Number(statusData.existing_count || 0);
                                 const missing = Number(statusData.missing_count || 0);
                                 const total = Number(statusData.total_tracks || tracks.length || 0);
 
-                                if (Array.isArray(statusData.tracks) && statusData.tracks.length === tracks.length) {
-                                    const liEls = els.tracklist.querySelectorAll('li');
-                                    statusData.tracks.forEach((st, idx) => {
-                                        const li = liEls[idx];
-                                        if (!li) return;
-                                        li.classList.remove('album-track-existing', 'album-track-missing');
-                                        li.classList.add(st.exists ? 'album-track-existing' : 'album-track-missing');
-                                    });
-                                }
+                                if (Array.isArray(statusData.tracks)) renderAlbumTracks(album, statusData.tracks, statusData);
 
                                 if (els.trackLegend && existing > 0) {
                                     els.trackLegend.style.display = 'block';
@@ -6045,7 +6084,9 @@
                                 }
                             }
                         } catch (e) {
-                            // Non-fatal; user can still download.
+                            if (state.selectedRelease !== album) return;
+                            els.existingWarning.style.display = 'block';
+                            _renderRetryError(els.existingWarning, `Could not verify the album folder for replacement: ${e.message}`, () => selectAlbum(album, btn));
                         }
                     }
                     if (els.downloadBtn) { els.downloadBtn.disabled = false; els.downloadBtn.textContent = 'Download Album'; }
@@ -8535,7 +8576,43 @@
             }
         }
 
+        document.getElementById('cancelAlbumRepairBtn')?.addEventListener('click', _resetDestination);
+
+        async function startAlbumTrackRepair(selection, track, button) {
+            if (track.exists && !confirm(`Move the current copy of "${track.title}" to Trash and search for a replacement? You can restore it through Queue if you change your mind.`)) return;
+            button.disabled = true;
+            button.textContent = 'Preparing…';
+            try {
+                const response = await apiFetch('/api/albums/repair-track', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ ...selection, trash_existing: !!track.exists }),
+                });
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.detail || 'Could not prepare album repair');
+                _resetDestination();
+                _albumRepairSelection = data.selection;
+                const context = data.context;
+                document.getElementById('albumRepairLabel').textContent = `Repairing ${context.album_artist} / ${context.album_name}: disc ${context.disc_number}, track ${context.track_number}, ${context.track_title}`;
+                document.getElementById('albumRepairBanner').style.display = 'block';
+                track.exists = false;
+                button.closest('li')?.classList.replace('album-track-existing', 'album-track-missing');
+                setSearchValue(`${context.track_artist} - ${context.track_title}`);
+                document.querySelector('.tab[data-tab="results"]')?.click();
+                showToast(data.trashed ? 'Current copy moved to Trash. Choose the replacement below.' : 'Searching for this album track.');
+                // An album rescue supersedes any Tracks search still in flight.
+                ++currentSearchToken;
+                searchBtn.disabled = false;
+                search();
+            } catch (error) {
+                showToast(error.message || 'Could not prepare album repair', true);
+            } finally {
+                button.disabled = false;
+                button.textContent = 'Search replacement';
+            }
+        }
+
         async function searchMissingTrack(playlistId, playlistName, artist, title) {
+            _resetDestination();
             // Pre-fill the search input
             setSearchValue(`${artist} - ${title}`);
 

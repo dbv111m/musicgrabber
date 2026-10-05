@@ -4054,6 +4054,18 @@ h1 {
     color: var(--text-secondary);
 }
 
+.album-track-item {
+    padding: var(--space-1) 0;
+}
+
+.album-track-title {
+    margin-right: var(--space-3);
+}
+
+.album-track-repair-btn {
+    white-space: nowrap;
+}
+
 .album-track-missing {
     color: var(--accent);
     font-weight: 600;

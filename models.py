@@ -74,6 +74,22 @@ class SearchRequest(BaseModel):
     limit: int = 15
     source: str = "all"  # Registry source ID, or "all"
 
+class AlbumTrackSelection(BaseModel):
+    artist: str = Field(min_length=1)
+    album_title: str = Field(min_length=1)
+    release_mbid: str
+    _validate_release_mbid = field_validator("release_mbid")(_validate_mbid)
+    track_index: int = Field(ge=0)
+    album_dir: Optional[str] = None
+    track_title: Optional[str] = None
+    disc_number: Optional[int] = Field(default=None, ge=1)
+    track_number: Optional[int] = Field(default=None, ge=1)
+
+
+class AlbumTrackRepairRequest(AlbumTrackSelection):
+    trash_existing: bool = False
+
+
 class DownloadRequest(BaseModel):
     video_id: str
     title: str
@@ -105,6 +121,9 @@ class DownloadRequest(BaseModel):
     album_track_title: Optional[str] = None
     album_track_number: Optional[int] = None
     album_track_total: Optional[int] = None
+    # An explicit album rescue selection; metadata and destination are resolved
+    # again by the server rather than trusting a candidate's album tags.
+    album_repair: Optional[AlbumTrackSelection] = None
 
 class PlaylistFetchRequest(BaseModel):
     url: str  # Spotify, YouTube, Apple Music, Amazon Music, SoundCloud, etc. playlist URL

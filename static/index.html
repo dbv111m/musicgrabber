@@ -170,6 +170,11 @@
             <div class="search-history" id="searchHistory"></div>
         </div>
         <div id="sourceHealthStrip" class="source-health-strip" style="display:none" aria-live="polite"></div>
+        <div id="albumRepairBanner" class="album-search-note" style="display:none;" role="status">
+            <strong id="albumRepairLabel"></strong>
+            <p>Choose a replacement below. Its release, album folder, disc and track numbers will be kept, and existing album M3Us will be updated. Any copy moved to Trash can be restored through Queue.</p>
+            <button type="button" id="cancelAlbumRepairBtn" class="btn btn-ghost btn-sm">Cancel album repair</button>
+        </div>
 
         <!-- Unified destination picker - shown when search results are present -->
         <div id="destinationPickerRow" style="display: none;" class="playlist-selector-row-wrap">
@@ -363,6 +368,12 @@
             </div>
 
             <div id="followedArtistsPanel">
+            <details class="album-search-note">
+                <summary>What does following an artist include?</summary>
+                <p>MusicBrainz must credit the artist on the release itself. Shared credits such as <strong>A feat. B &amp; C</strong> qualify for any of those artists; the full credit is kept. Guest appearances credited only on individual tracks and remixer relationships are not followed.</p>
+                <p>Singles include A-sides and B-sides. Releases marked Remix, Live, Compilation, Soundtrack, Interview, Spokenword, Audiobook, Audio drama, DJ-mix or Mixtape/Street in MusicBrainz are skipped. Album following covers albums and EPs with the same exclusions, plus Demo.</p>
+                <p>These rules depend on MusicBrainz's release types, not words in titles. An untyped remix can still appear. Follow for Singles uses your chosen from-date; automatic future albums marks the current catalogue as seen when enabled.</p>
+            </details>
             <div class="watched-add-panel">
                 <p class="watched-panel-text">
                     Search MusicBrainz for an artist, then choose what to do with them.
@@ -1591,6 +1602,13 @@
                     <button type="button" class="btn btn-danger" onclick="clearSelectedQueueHistory()">Remove selected history</button>
                 </div>
                 <div id="maintenanceResult" class="save-result"></div>
+            </div>
+
+            <div class="settings-section admin-only">
+                <h3 class="settings-section-title">Server networking</h3>
+                <p class="settings-hint settings-hint-full">Configured bind: <code id="serverBindAddress">Unavailable</code> (inside the container). Your browser's host port may differ.</p>
+                <p class="settings-hint settings-hint-full">To change it, set <code>LISTEN_PORT</code> (1 to 65535; default 8080) and optionally <code>LISTEN_ADDR</code> (default 0.0.0.0) in the container environment, then recreate the container. Saving Settings cannot change the running server's port.</p>
+                <p class="settings-hint settings-hint-full">Sharing a VPN container's network? Publish the chosen internal port on the VPN container and allow it through that container's firewall. Remove MusicGrabber's own port mappings and use a port that no other service in that shared network is listening on. See the README's VPN-container networking instructions for Compose and Unraid examples.</p>
             </div>
 
             <div class="settings-actions-spacer"></div>

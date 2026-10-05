@@ -208,6 +208,8 @@ def _numbered_output_stem(
     track_total: int | None = None,
     user_id: str | None = None,
     playlist_routed: bool = False,
+    disc_number: int | None = None,
+    disc_total: int | None = None,
 ) -> str | None:
     """Return the final filename stem when track-number filenames are enabled."""
     if not track_number:
@@ -230,6 +232,8 @@ def _numbered_output_stem(
 
     safe_title = _safe_sanitized_title(title, fallback)
     numbered_title = f"{track_number:0{pad_width}d} - {safe_title}"
+    if disc_number and (disc_total or 1) > 1:
+        numbered_title = f"{disc_number:02d}-{numbered_title}"
     if playlist_routed or not get_setting_bool("organise_by_artist", True, user_id=user_id):
         safe_artist = sanitize_filename(artist or "Unknown Artist")
         return cap_filename_stem(f"{safe_artist} - {numbered_title}")
@@ -245,6 +249,8 @@ def _rename_with_track_number_if_enabled(
     track_total: int | None = None,
     user_id: str | None = None,
     playlist_routed: bool = False,
+    disc_number: int | None = None,
+    disc_total: int | None = None,
 ) -> Path:
     """Rename a tagged file to include its resolved track number, when configured."""
     if not get_setting_bool("include_track_number_in_filename", False, user_id=user_id):
@@ -253,6 +259,7 @@ def _rename_with_track_number_if_enabled(
     new_stem = _numbered_output_stem(
         artist, title, fallback, track_number, track_total,
         user_id=user_id, playlist_routed=playlist_routed,
+        disc_number=disc_number, disc_total=disc_total,
     )
     if not new_stem or audio_file.stem == new_stem:
         return audio_file
@@ -315,8 +322,7 @@ def _get_job_album_context(job_id: str) -> dict:
             conn.row_factory = sqlite3.Row
             row = conn.execute(
                 """
-                SELECT override_dir, album_release_mbid, album_name, album_track_title,
-                       album_track_number, album_track_total, download_type
+                SELECT *
                 FROM jobs
                 WHERE id = ?
                 LIMIT 1
@@ -329,6 +335,8 @@ def _get_job_album_context(job_id: str) -> dict:
             # the dark. perform_upgrade() reapplies the original artist/title itself
             # once the file lands, so there's nothing useful for us to add here.
             return {}
+        if row and "album_context" in row.keys() and row["album_context"]:
+            return json.loads(row["album_context"])
         if not row:
             with db_conn() as conn:
                 conn.row_factory = sqlite3.Row
@@ -412,6 +420,17 @@ def _get_job_album_context(job_id: str) -> dict:
         }
     except Exception:
         return {}
+
+
+def _album_repair_output_stem(context: dict, fallback: str, user_id: str | None) -> str | None:
+    """Keep repeated multi-disc titles from sharing one output filename."""
+    if (context.get("disc_total") or 1) <= 1:
+        return None
+    return _numbered_output_stem(
+        context["track_artist"], context["track_title"], fallback,
+        context["track_number"], context["track_total"], user_id=user_id,
+        disc_number=context["disc_number"], disc_total=context["disc_total"],
+    )
 
 
 def _get_album_track_tag_context(job_id: str) -> tuple[int | None, int | None]:
@@ -3345,13 +3364,13 @@ def rebuild_album_m3u(album_dir: Path, playlist_name: str | None = None) -> Path
         if not album_dir.exists() or not album_dir.is_dir():
             return None
 
-        def _audio_meta(file_path: Path) -> tuple[int | None, int, str]:
-            """Return (track_number, duration_secs, display_title) from mutagen tags."""
+        def _audio_meta(file_path: Path) -> tuple[int | None, int, str, int]:
+            """Return track number, duration, title and disc number from tags."""
             try:
                 from mutagen import File as MutagenFile
                 audio = MutagenFile(str(file_path), easy=True)
                 if not audio:
-                    return None, -1, file_path.stem
+                    return None, -1, file_path.stem, 1
                 # Track number
                 track_no = None
                 vals = audio.get("tracknumber") or audio.get("TRACKNUMBER") or []
@@ -3366,17 +3385,21 @@ def rebuild_album_m3u(album_dir: Path, playlist_name: str | None = None) -> Path
                 # Display title: prefer title tag, fall back to stem
                 title_vals = audio.get("title") or audio.get("TITLE") or []
                 display = str(title_vals[0]).strip() if title_vals else file_path.stem
-                return track_no, duration, display
+                disc_vals = audio.get("discnumber") or audio.get("DISCNUMBER") or []
+                disc_match = re.match(r"(\d+)", str(disc_vals[0])) if disc_vals else None
+                disc_no = int(disc_match.group(1)) if disc_match else 1
+                return track_no, duration, display, disc_no
             except Exception:
-                return None, -1, file_path.stem
+                return None, -1, file_path.stem, 1
 
         audio_files = [p for p in album_dir.iterdir() if p.is_file() and p.suffix.lower() in AUDIO_EXTENSIONS]
-        if not audio_files:
+        if not audio_files and not any(album_dir.glob("*.m3u")):
             return None
 
         meta_cache = {p: _audio_meta(p) for p in audio_files}
         audio_files.sort(
             key=lambda p: (
+                meta_cache[p][3],
                 meta_cache[p][0] is None,
                 meta_cache[p][0] if meta_cache[p][0] is not None else 10_000,
                 p.name.casefold(),
@@ -3391,7 +3414,7 @@ def rebuild_album_m3u(album_dir: Path, playlist_name: str | None = None) -> Path
         with open(m3u_path, 'w', encoding='utf-8') as f:
             f.write("#EXTM3U\n")
             for p in audio_files:
-                _, duration, display = meta_cache[p]
+                _, duration, display, _ = meta_cache[p]
                 f.write(f"#EXTINF:{duration},{display}\n")
                 f.write(f"{p.name}\n")
         set_file_permissions(m3u_path)
@@ -4502,6 +4525,7 @@ def process_slskd_download(job_id: str, username: str, filename: str, artist: st
             sanitized_title = _playlist_stem(forced_album_artist or artist, forced_track_title or title, Path(filename).stem or job_id)
         else:
             sanitized_title = _output_stem(forced_album_artist or artist, forced_track_title or title, Path(filename).stem or job_id, user_id=user_id)
+        sanitized_title = _album_repair_output_stem(album_ctx, job_id, user_id) or sanitized_title
         source_ext = downloaded_file.suffix.lower()
 
         # Probe the source file BEFORE conversion so we know the real quality.
@@ -4604,7 +4628,7 @@ def process_slskd_download(job_id: str, username: str, filename: str, artist: st
         if not album_art_bytes:
             cover = fetch_cover_art(
                 artist, title,
-                release_mbid=(mb_metadata or {}).get("release_mbid"),
+                release_mbid=album_ctx.get("release_mbid") or (mb_metadata or {}).get("release_mbid"),
             )
             if cover:
                 album_art_bytes, album_art_mime = cover
@@ -4612,7 +4636,7 @@ def process_slskd_download(job_id: str, username: str, filename: str, artist: st
         tag_album_artist = forced_album_artist
         if mb_metadata:
             metadata_source = mb_metadata.get("metadata_source", metadata_source)
-            mb_artist = mb_metadata.get("artist", artist)
+            mb_artist = album_ctx.get("track_artist") or mb_metadata.get("artist", artist)
             mb_title = mb_metadata.get("title", title)
             tag_title = forced_track_title or mb_title
             tag_album = forced_album_name or mb_metadata.get("album", "")
@@ -4624,6 +4648,7 @@ def process_slskd_download(job_id: str, username: str, filename: str, artist: st
                 final_file, mb_artist, tag_title,
                 pl_album or tag_album,
                 forced_album_year or mb_metadata.get("year"),
+                disc_number=album_ctx.get("disc_number"), disc_total=album_ctx.get("disc_total"),
                 track_number=tag_track_num,
                 track_total=tag_track_total,
                 album_art_bytes=album_art_bytes,
@@ -4661,6 +4686,7 @@ def process_slskd_download(job_id: str, username: str, filename: str, artist: st
                 forced_track_title or title,
                 pl_album or forced_album_name or "",
                 year=forced_album_year,
+                disc_number=album_ctx.get("disc_number"), disc_total=album_ctx.get("disc_total"),
                 track_number=tag_track_num,
                 track_total=tag_track_total,
                 album_art_bytes=album_art_bytes,
@@ -4676,6 +4702,7 @@ def process_slskd_download(job_id: str, username: str, filename: str, artist: st
             final_file, tag_album_artist or artist, title, Path(filename).stem or job_id,
             tag_track_num, tag_track_total, user_id=user_id,
             playlist_routed=bool(playlists_dir) and not playlist_album_routed,
+            disc_number=album_ctx.get("disc_number"), disc_total=album_ctx.get("disc_total"),
         )
 
         # Fetch and save lyrics
@@ -4950,6 +4977,7 @@ def _process_direct_mp3_download(job_id: str, download_url: str, artist_hint: st
         else:
             artist_dir = get_download_dir(artist, user_id=user_id)
             safe_title = _output_stem(artist, forced_track_title or title, job_id, user_id=user_id)
+        safe_title = _album_repair_output_stem(album_ctx, job_id, user_id) or safe_title
         artist_dir.mkdir(parents=True, exist_ok=True)
 
         # Direct sources mostly serve MP3. Monochrome serves FLAC and JioSaavn AAC,
@@ -5108,7 +5136,7 @@ def _process_direct_mp3_download(job_id: str, download_url: str, artist_hint: st
             raise Exception(dur_reason)
 
         if mb_metadata:
-            artist = mb_metadata.get("artist") or artist
+            artist = album_ctx.get("track_artist") or mb_metadata.get("artist") or artist
             title  = forced_track_title or mb_metadata.get("title") or title
             _update_job(job_id, artist=artist, title=title)
         else:
@@ -5122,7 +5150,7 @@ def _process_direct_mp3_download(job_id: str, download_url: str, artist_hint: st
         if not album_art_bytes:
             cover = fetch_cover_art(
                 artist, title,
-                release_mbid=(mb_metadata or {}).get("release_mbid"),
+                release_mbid=album_ctx.get("release_mbid") or (mb_metadata or {}).get("release_mbid"),
             )
             if cover:
                 album_art_bytes, album_art_mime = cover
@@ -5136,6 +5164,7 @@ def _process_direct_mp3_download(job_id: str, download_url: str, artist_hint: st
             title,
             pl_album or album or "Singles",
             year,
+            disc_number=album_ctx.get("disc_number"), disc_total=album_ctx.get("disc_total"),
             track_number=tag_track_num,
             track_total=tag_track_total,
             album_art_bytes=album_art_bytes,
@@ -5159,6 +5188,7 @@ def _process_direct_mp3_download(job_id: str, download_url: str, artist_hint: st
             output_path, tag_album_artist or artist, title, job_id,
             tag_track_num, tag_track_total, user_id=user_id,
             playlist_routed=bool(playlists_dir) and not playlist_album_routed,
+            disc_number=album_ctx.get("disc_number"), disc_total=album_ctx.get("disc_total"),
         )
 
         _update_job(job_id, progress_stage="Fetching lyrics")
@@ -5480,6 +5510,7 @@ def process_download(job_id: str, video_id: str, convert_audio: bool = True, sou
         full_title = info.get("title", "Unknown")
         channel = info.get("uploader", info.get("channel", "Unknown")) if is_url_source else info.get("channel", info.get("uploader", "Unknown"))
         artist, title = extract_artist_title(full_title, channel)
+        artist = album_ctx.get("track_artist") or artist
         if forced_track_title:
             title = forced_track_title
 
@@ -5558,6 +5589,7 @@ def process_download(job_id: str, video_id: str, convert_audio: bool = True, sou
         else:
             artist_dir = get_download_dir(artist, user_id=user_id)
             safe_title = _output_stem(artist, forced_track_title or title, video_id, user_id=user_id)
+        safe_title = _album_repair_output_stem(album_ctx, job_id, user_id) or safe_title
         artist_dir.mkdir(parents=True, exist_ok=True)
 
         # Download with best audio quality, into this job's own staging directory
@@ -5815,7 +5847,7 @@ def process_download(job_id: str, video_id: str, convert_audio: bool = True, sou
         if not album_art_bytes:
             cover = fetch_cover_art(
                 artist, title,
-                release_mbid=(mb_metadata or {}).get("release_mbid"),
+                release_mbid=album_ctx.get("release_mbid") or (mb_metadata or {}).get("release_mbid"),
             )
             if cover:
                 album_art_bytes, album_art_mime = cover
@@ -5824,7 +5856,7 @@ def process_download(job_id: str, video_id: str, convert_audio: bool = True, sou
         tag_album_artist = forced_album_artist
         if mb_metadata:
             metadata_source = mb_metadata.get("metadata_source", metadata_source)
-            mb_artist = mb_metadata.get("artist", artist)
+            mb_artist = album_ctx.get("track_artist") or mb_metadata.get("artist", artist)
             mb_title = mb_metadata.get("title", title)
             tag_title = forced_track_title or mb_title
             tag_album = forced_album_name or mb_metadata.get("album", "")
@@ -5836,6 +5868,7 @@ def process_download(job_id: str, video_id: str, convert_audio: bool = True, sou
                 audio_file, mb_artist, tag_title,
                 pl_album or tag_album,
                 forced_album_year or mb_metadata.get("year"),
+                disc_number=album_ctx.get("disc_number"), disc_total=album_ctx.get("disc_total"),
                 track_number=tag_track_num,
                 track_total=tag_track_total,
                 album_art_bytes=album_art_bytes,
@@ -5873,6 +5906,7 @@ def process_download(job_id: str, video_id: str, convert_audio: bool = True, sou
                 tag_title,
                 pl_album or forced_album_name or "",
                 year=forced_album_year,
+                disc_number=album_ctx.get("disc_number"), disc_total=album_ctx.get("disc_total"),
                 track_number=tag_track_num,
                 track_total=tag_track_total,
                 album_art_bytes=album_art_bytes,
@@ -5889,6 +5923,7 @@ def process_download(job_id: str, video_id: str, convert_audio: bool = True, sou
             tag_track_num, tag_track_total, user_id=user_id,
             # Album-routed playlist tracks sit in Artist/Album/ so no artist prefix needed.
             playlist_routed=bool(playlists_dir) and not playlist_album_routed,
+            disc_number=album_ctx.get("disc_number"), disc_total=album_ctx.get("disc_total"),
         )
 
         # Fetch and save lyrics

@@ -28,10 +28,10 @@ MusicGrabber is intentionally narrow. It is **not**:
 - **Monochrome source:** searches Deezer metadata, keeps only results Monochrome's own tracks API actually stocks (matched by ISRC), and downloads the FLAC from it, with a Deezer ISRC rescue and a self-hosted Tidal stream as fallbacks. If Deezer is down, the tracks API is searched directly. Monochrome downloads are 16-bit/44.1kHz FLAC. No account or API key is required. Enabled by default and configurable in Search Sources
 - **JioSaavn source:** India's biggest streaming service, asked directly, with no account, token or proxy. Most tracks are 320 kbps AAC (saved as `.m4a`), a few only 160, and results say which before you download. Superb for Bollywood, Punjabi and other Indian music, and decent for Western music too. JioSaavn filters search by country, so MusicGrabber's searches present an Indian address to see the full catalogue; downloads come straight off its CDN, which does not filter. If JioSaavn stops honouring that, the source's health check goes red. Enabled by default and configurable in Search Sources
 - **Watched playlists:** monitor Spotify, YouTube (including Mixes), Amazon Music, Apple Music, SoundCloud, Tidal, Beatport, Monochrome, and ListenBrainz playlists; auto-downloads new tracks and grabs the best match available. Per-playlist sync mode: Append (M3U grows as tracks arrive) or Mirror (M3U stays in sync with the upstream; removed tracks drop out). Each card shows live refresh state and stage. "Missing" button shows tracks that never made it; Retry and Search buttons to fix them. M3U updates immediately as each track finishes
-- **Artists tab:** follow an artist on MusicBrainz and new singles are downloaded automatically as they appear. Search by name, pick from up to five candidates, set a from-date (defaults to today so your back-catalogue stays put). Singles come first: remixes, live cuts, soundtracks, and compilations are filtered out at the MusicBrainz level. Albums sit underneath for browsing and picking off individually, with an optional "automatically add new albums" toggle that marks everything already released as seen, so ticking it never starts a back-catalogue download. A transient failure while handing a new album to the queue is recorded and retried once on the next artist check rather than making the release permanently “known but abandoned”. Tracks already on disk are recognised immediately, and followed-album labels are derived from the current import and actual audio count rather than preserving “Queued” until the sun burns out. Per-artist check interval, Keep source/Convert to control, pause/resume, missing and track list panels. You can also browse any artist's albums without following them at all
+- **Artists tab:** follow an artist on MusicBrainz and new singles are downloaded automatically as they appear. Search by name, pick from up to five candidates, set a from-date (defaults to today so your back-catalogue stays put). Following uses release-level artist credits, including shared and featured credits; track-only guest appearances and remixer relationships are excluded. MusicBrainz release types filter out remixes, live cuts, soundtracks and compilations; an untyped remix can still appear. The expandable credit rules in the Artists tab and [the full rules below](#watched-artist-credit-rules) explain the boundaries. Albums sit underneath for browsing and picking off individually, with an optional "automatically add new albums" toggle that marks everything already released as seen, so ticking it never starts a back-catalogue download. A transient failure while handing a new album to the queue is recorded and retried once on the next artist check rather than making the release permanently “known but abandoned”. Tracks already on disk are recognised immediately, and followed-album labels are derived from the current import and actual audio count rather than preserving “Queued” until the sun burns out. Per-artist check interval, Keep source/Convert to control, pause/resume, missing and track list panels. You can also browse any artist's albums without following them at all
 - **Playlist routing:** pick any watched playlist or existing `.m3u` file from the selector below the search bar; downloads land there instead of Singles
 - **Playlist housekeeping:** find audio left behind by mirror-mode playlist removals and move it safely into Singles; optionally stamp watched-playlist names into audio Comment tags for macOS Music smart playlists
-- **Album mode:** browse MusicBrainz artists from either the Artists tab or Bulk Import, pick a release, download the full album into `Albums/Artist/Album/`, tag tracks with album context, write cover files, and optionally generate an album-local M3U. Equivalent folders and numbered/fuzzy track names inside the configured Albums tree are reused rather than downloaded again. Multi-disc and Various Artists groups choose the most complete official release and keep the canonical release-group credit/title
+- **Album mode:** browse MusicBrainz artists from either the Artists tab or Bulk Import, pick a release, download the full album into `Albums/Artist/Album/`, tag tracks with album context, write cover files, and optionally generate an album-local M3U. Equivalent folders and numbered/fuzzy track names inside the configured Albums tree are reused rather than downloaded again. Multi-disc and Various Artists groups choose the most complete official release and keep the canonical release-group credit/title. Each track has a **Search replacement** rescue action that keeps its album folder, pressing, numbering and existing M3Us; see [repairing an album track](#repairing-an-album-track)
 - **Bulk Import takes almost anything:** playlist URLs, pasted `Artist - Title` lists, MusicBrainz release links, album URLs from Spotify, Apple Music, YouTube Music, Amazon Music, Beatport, Tidal and Monochrome, or simply an album name typed in. Anything recognised as an album is routed through the album pipeline rather than flattened into loose singles. Album search does not need an artist first, so soundtracks and various-artists compilations work; uncertain matches ask which release you meant instead of guessing
 - **Split long DJ mixes and compilation uploads into proper tracks:** paste a single YouTube video into the Bulk Import Fetch box and, if it runs over 12 minutes, MusicGrabber offers to cut it up rather than download it as one blob. It never guesses a boundary: it prefers YouTube's own chapters, then a cue sheet hunted out of the description or comments, and otherwise hands you an empty table (or a box to paste your own cue sheet into) to fill in by hand. Either way you get an editable start/end/title/artist preview before a single byte downloads; confirming it downloads the audio once, cuts each segment with ffmpeg, runs the usual integrity check, and tags directly from the table, landing the lot in `Albums/Album Artist/Video Title/` with cover art from the video thumbnail
 - **Auto-album routing:** optional setting that files singles and playlist tracks into `Albums/Artist/Album/` when MusicBrainz resolves an album, the same place a full album download goes. Playlists follow their tracks there through the M3U; a watched playlist with M3U generation off keeps its tracks in its own folder, and compilation playlists always stay together. Album downloads ignore routing altogether and land in their own album folder
@@ -358,6 +358,10 @@ bridge stays out until the report has earned trust with real libraries.
 
 3. **Access the UI** at `http://your-server:38274`
 
+Sharing a VPN container's network instead of using Docker's ordinary bridge?
+See [VPN-container networking](#vpn-container-networking); the port mapping belongs
+on the VPN container, and `LISTEN_PORT` chooses MusicGrabber's internal port.
+
 ### Option B: Unraid (Community Applications)
 
 If you're running Unraid, the easiest way is via Community Applications. Search for **MusicGrabber** and install directly from Docker Hub.
@@ -376,6 +380,10 @@ For manual setup, or if you want a reference for the XML config, here's a workin
 ```
 
 PUID `99` and PGID `100` are Unraid's standard `nobody`/`users`, these give the container correct write access to your shares. Adjust if your setup differs.
+
+For `container:<vpn-container-name>` networking, follow the
+[Unraid VPN instructions](#unraid-with-a-vpn-container) below. Changing a host port
+in MusicGrabber's template alone does not change its listening port.
 
 ### Option C: Build from Source
 
@@ -471,10 +479,98 @@ The easiest way to configure MusicGrabber is via the **Settings tab** in the UI.
 - **Blacklist**: View and manage reported tracks and blocked uploaders
 - **Security**: API key for authentication
 - **Users** (admin only): create and manage user accounts, reset passwords
+- **Server networking** (admin only): view the configured internal bind address and port, with instructions for changing `LISTEN_PORT` and sharing a VPN container's network
 
 Settings are stored in the database and persist across container restarts.
 
 **Environment variable overrides:** If you set a value via environment variable, it takes precedence over the database value and appears as "locked" in the UI.
+
+### VPN-container networking
+
+`LISTEN_PORT` sets the port MusicGrabber listens on **inside** its network
+namespace, default `8080`; use a whole number from `1` to `65535`. It is a startup
+environment variable, not a saved UI setting. Settings shows the configured bind
+under **Server networking**, and container logs print the port and mapping hints.
+After changing container environment variables, recreate the container; a plain
+`docker restart` keeps the old environment.
+
+With ordinary Docker bridge networking, `ports: ["38274:8080"]` means browser
+port `38274` reaches internal port `8080`. If you set `LISTEN_PORT=18080`, change
+the mapping to `38274:18080` as well.
+
+With `network_mode: "service:vpn"` or `"container:your-vpn-container"`,
+MusicGrabber shares the VPN container's network namespace. Publish its internal
+port on the **VPN container**, remove MusicGrabber's own `ports` and `networks`
+entries, and choose a port no other service in that namespace uses. Keep
+`LISTEN_ADDR=0.0.0.0` for access through a published port; `127.0.0.1` only accepts
+connections from within that shared namespace. Docker's
+[container networking documentation](https://docs.docker.com/engine/network/#container-networks)
+describes these restrictions.
+
+For an **existing VPN service in the same Compose file**, merge the following
+into your configuration. Keep its existing VPN image, credentials, devices and
+other settings; `vpn` is the example service name:
+
+```yaml
+services:
+  vpn:
+    # Keep the existing VPN configuration and other published ports here.
+    ports:
+      - "38274:18080/tcp"
+  music-grabber:
+    image: g33kphr33k/musicgrabber:latest
+    restart: unless-stopped
+    shm_size: '2gb'
+    network_mode: "service:vpn"
+    # No ports or networks on this service.
+    environment:
+      - LISTEN_ADDR=0.0.0.0
+      - LISTEN_PORT=18080
+      - MUSIC_DIR=/music
+      - DB_PATH=/data/music_grabber.db
+    volumes:
+      - /path/to/your/music:/music
+      - ./data:/data
+```
+
+Allow TCP `18080` through your VPN container's local input firewall, using its
+own documented setting. For Gluetun this is `FIREWALL_INPUT_PORTS=18080`, retaining
+any other ports already in that comma-separated list; see its
+[firewall options](https://github.com/qdm12/gluetun-wiki/blob/main/setup/options/firewall.md)
+and [port-mapping guide](https://github.com/qdm12/gluetun-wiki/blob/main/setup/port-mapping.md).
+This is local web access; it does not require port forwarding from your VPN provider.
+Other OpenVPN images have different firewall settings.
+
+Apply changes with `docker compose up -d vpn music-grabber`, then open
+`http://your-server:38274`. If the VPN container is recreated separately later,
+recreate MusicGrabber too so it joins the replacement namespace:
+`docker compose up -d --force-recreate music-grabber`.
+For a VPN container managed outside this Compose project, use
+`network_mode: "container:your-vpn-container"` instead and publish the port in
+that container's configuration.
+
+The image's health check follows `LISTEN_PORT` automatically. If it is healthy
+but the browser cannot connect, check the VPN container's published port and
+input firewall. An "address already in use" error means something in the shared
+namespace already listens on your chosen internal port; changing the host port
+alone will not fix that collision.
+
+#### Unraid with a VPN container
+
+1. In MusicGrabber's template, choose Network Type **Container**, then select
+   your running VPN container under **Container Network**. Remove any old
+   `--net` or `--network` override from **Extra Parameters** so there is only
+   one network choice. This uses `container:<vpn-container-name>` networking;
+   Unraid's [template editor](https://github.com/unraid/webgui/blob/master/emhttp/plugins/dynamix.docker.manager/include/CreateDocker.php)
+   provides these selectors.
+2. Add a **Variable** with Key `LISTEN_PORT` and Value `18080` to MusicGrabber.
+   Keep `LISTEN_ADDR` unset or set it to `0.0.0.0`. Remove MusicGrabber's own Port
+   entries; they cannot publish ports in this network mode.
+3. On the **VPN container**, add a TCP Port entry mapping Host Port `38274` to
+   Container Port `18080`, and allow `18080` in that image's local input firewall.
+4. Apply both templates so the containers are recreated. Set MusicGrabber's
+   WebUI URL to `http://[IP]:38274/` and open `http://your-unraid-server:38274`.
+   Recreate MusicGrabber after replacing the VPN container later too.
 
 ### Environment Variables
 
@@ -483,7 +579,7 @@ Settings are stored in the database and persist across container restarts.
 | `PUID` | `0` | User ID for file ownership (like *arr stack); low NAS service IDs such as TrueNAS `568` are supported |
 | `PGID` | `0` | Group ID for file ownership (like *arr stack); low NAS service IDs such as TrueNAS `568` are supported |
 | `LISTEN_ADDR` | `0.0.0.0` | Bind address for the web service (set `::` for IPv6 environments) |
-| `LISTEN_PORT` | `8080` | Bind port for the web service inside the container |
+| `LISTEN_PORT` | `8080` | Internal web bind port, `1` to `65535`; recreate the container after changing it. With shared VPN networking, publish it on the VPN container. See [VPN-container networking](#vpn-container-networking) |
 | `MUSIC_DIR` | `/music` | Music library root inside container |
 | `DB_PATH` | `/data/music_grabber.db` | SQLite database path |
 | `ROOT_PATH` | *(empty)* | URL prefix when serving behind a reverse proxy subpath, e.g. `/musicgrabber`. Your proxy should strip this prefix before forwarding to MusicGrabber |
@@ -1177,7 +1273,7 @@ music.yourdomain.com {
 |--------|----------|-------------|
 | `GET` | `/` | Web UI |
 | `GET` | `/favicon.ico` | Favicon |
-| `GET` | `/api/config` | Get server config (version, defaults, auth_required) |
+| `GET` | `/api/config` | Get server config (version, defaults, auth_required, configured `listen_addr` and integer `listen_port`) |
 | `GET` | `/api/update-check` | Running version, latest release on GitLab, and whether an update is available. Cached for 12 hours; never contacts GitLab when the update check is off |
 | `GET` | `/api/music-dirs` | List subdirectories of `MUSIC_DIR` (for download path picker; `?recursive=true` for nested) |
 | `GET` | `/api/playlists` | List watched playlists and `.m3u` files (for playlist routing selector) |
@@ -1241,7 +1337,7 @@ music.yourdomain.com {
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `POST` | `/api/download` | Queue download (`{"video_id": "...", "title": "...", "source": "youtube/soundcloud/zvu4no/freemp3cloud/jiosaavn/monochrome/soulseek", "download_type": "single/playlist"}`). The Tracks UI also returns its valid `search_token` and numeric `selected_duration_secs`; together they enable manual-result completeness checking |
+| `POST` | `/api/download` | Queue download (`{"video_id": "...", "title": "...", "source": "youtube/soundcloud/zvu4no/freemp3cloud/jiosaavn/monochrome/soulseek", "download_type": "single/playlist"}`). The Tracks UI also returns its valid `search_token` and numeric `selected_duration_secs`; together they enable manual-result completeness checking. For an album replacement, include the `album_repair` selection returned by `/api/albums/repair-track`; the server validates and preserves its destination and metadata |
 | `GET` | `/api/jobs` | List recent jobs, including metadata provenance plus persistent acquisition cycle/attempt summaries and the latest 20 attempt records for linked tracks. `q` searches artist, title, album or playlist name before applying `limit` (default 20). `?import_id=...` instead returns every job belonging to one bulk import, in input order and unlimited; it can be combined with `q`. `status` keeps one exact job status (for example `failed`), also before `limit`, and combines with `q`. Results respect user visibility. `queue_totals` counts all visible jobs by status regardless of the search, status filter or limit, and is `null` when scoped to an import |
 | `GET` | `/api/jobs/downloadable` | Paginated list of completed jobs available to save to device (`?page=1&per_page=50`) |
 | `GET` | `/api/jobs/{id}` | Get job status, metadata/source provenance, and persistent acquisition attempt history |
@@ -1321,12 +1417,45 @@ music.yourdomain.com {
 
 ### Watched Artists
 
+#### Watched artist credit rules
+
+Following uses MusicBrainz's release-level artist credits, identified by artist
+MBID rather than by splitting names or guessing what "feat." means. This is
+MusicBrainz's [`artist` browse](https://musicbrainz.org/doc/MusicBrainz_API#Browse),
+without a separate `track_artist` pass for track-only appearances.
+
+| Credit or release | Followed? |
+|-------------------|-----------|
+| Single credited to `A feat. B & C` | Yes, when following A, B or C, subject to the from-date and release-type exclusions |
+| Artist credited only on a track on somebody else's release | No; the artist must also be in the release-level credit |
+| Compilation or Various Artists guest appearance | Compilations are excluded; track-only credits on a Various Artists release are not followed either |
+| Artist linked only as remixer | No; remixer relationships are not browsed |
+| Release group typed Remix, Live, Compilation or Soundtrack | No, even if the followed artist has a release-level credit |
+| Remix title on an otherwise ordinary single | Can appear; discovery does not infer release types from title text |
+| Multi-track single, including A-side and B-side | All tracks from the qualifying release are considered |
+| Album or EP | Available through album following and browsing, with the exclusions below |
+
+Singles exclude release groups with any of these secondary types: **Remix, Live,
+Compilation, Soundtrack, Interview, Spokenword, Audiobook, Audio drama, DJ-mix,
+Mixtape/Street**. Albums and EPs use the same exclusions plus **Demo**.
+These rules depend on how contributors have catalogued the release in MusicBrainz.
+A remix track on a qualifying single can therefore appear even when a separately
+typed Remix release would be skipped. Recording artist credits are kept in full,
+including join phrases and credited aliases, falling back to the release credit
+when the recording has none. Duplicate detection may recognise featured-credit
+variants as the same track; it does not rewrite the displayed credit.
+
+The singles from-date defaults to today. Automatic future albums marks the current
+catalogue as seen when enabled, so following does not fetch old albums unless you
+select them yourself. Expand **What does following an artist include?** in the
+Artists tab to see these boundaries before following or changing an existing follow.
+
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET` | `/api/watched-artists/search` | Search MusicBrainz for an artist (`?q=Artist+Name`); returns up to 5 candidates |
 | `GET` | `/api/watched-artists` | List all watched artists with track counts |
-| `POST` | `/api/watched-artists` | Add an artist to watch (`{mbid, name, from_date, refresh_interval_hours, convert_audio, auto_add_albums}`) |
-| `PUT` | `/api/watched-artists/{id}` | Update artist settings (`enabled`, `refresh_interval_hours`, `convert_audio`, `from_date`, `auto_add_albums`) |
+| `POST` | `/api/watched-artists` | Add an artist to watch (`{mbid, name, from_date, refresh_interval_hours, convert_audio, watch_singles, auto_add_albums}`); `watch_singles` defaults to `true` |
+| `PUT` | `/api/watched-artists/{id}` | Update artist settings (`enabled`, `refresh_interval_hours`, `convert_audio`, `from_date`, `watch_singles`, `auto_add_albums`) |
 | `GET` | `/api/watched-artists/{id}/albums` | List known albums for a followed artist with historical status plus current `display_status`, import state, actual audio count, and expected track count |
 | `DELETE` | `/api/watched-artists/{id}` | Stop watching an artist (downloaded tracks kept) |
 | `POST` | `/api/watched-artists/{id}/refresh` | Manually trigger a singles check for one artist |
@@ -1360,6 +1489,31 @@ These endpoints are unavailable to peon accounts. All filters are optional:
 | `GET` | `/api/audio-audit/files` | List evidence rows (`?page=1&per_page=25` plus optional filters) |
 | `GET` | `/api/audio-audit/export` | Download the filtered dry-run report (`?format=csv|json`) |
 
+### Repairing an album track
+
+Open the album track list in **Artists** or **Bulk Import**, then choose **Search
+replacement** beside the wrong or missing track. If a copy is present, confirm
+moving it to **Trash** first. MusicGrabber searches using that track's credited
+performer and title, then shows an album repair banner in **Tracks**. Preview the
+results and download the correct recording there.
+
+The repair keeps the actual album folder, including an equivalent folder already
+on disk, and uses the pressing saved in its `.albuminfo` sidecar. The album artist,
+title, year, per-disc track number and disc number come from that album context,
+even if the source or a fresh metadata lookup suggests a single instead. The
+context also survives Queue retries. Multi-disc replacements use a `disc-track`
+filename prefix to distinguish repeated titles on different discs. Existing
+album-local M3Us are refreshed after trashing and after the replacement lands,
+ordered by disc and track; restoring the old copy refreshes them too. No new M3U
+is created just because you repaired a track.
+
+**Cancel** clears the repair destination for subsequent downloads. It does not
+restore the old copy: use **Queue, Trash** to restore it if you abandon the repair.
+A failed search or download leaves that copy in Trash. Repair refuses ambiguous
+local matches, an album with active downloads, a stale track selection, and paths
+outside the configured Albums tree. It also refuses to overwrite an earlier copy
+already in Trash. MusicBrainz must be reachable to validate the selected pressing.
+
 ### Album Downloads
 
 | Method | Endpoint | Description |
@@ -1368,7 +1522,8 @@ These endpoints are unavailable to peon accounts. All filters are optional:
 | `GET` | `/api/albums/artist/{mbid}/albums` | Fetch studio albums for a MusicBrainz artist MBID |
 | `GET` | `/api/albums/release/{release_mbid}/tracks` | Fetch tracklist for a MusicBrainz release |
 | `POST` | `/api/albums/release/{release_mbid}/match-track` | Match a candidate song to a specific album track |
-| `GET` | `/api/albums/release/{release_mbid}/missing` | Check which tracks are already on disk for an album |
+| `GET` | `/api/albums/release/{release_mbid}/missing` | Check which tracks are already on disk; returns the actual `album_dir`, stored `release_mbid`, and tracks with disc/track context |
+| `POST` | `/api/albums/repair-track` | Prepare replacement (`{artist, album_title, release_mbid, track_index, album_dir?, track_title?, disc_number?, track_number?, trash_existing?}`). `track_index` is zero-based in the flattened release tracklist. Moving a present copy to Trash requires `trash_existing: true`. Returns validated `selection`, `context` and `trashed`; pass `selection` as `album_repair` to `/api/download` |
 | `GET` | `/api/albums/dirs` | List artist folders under the Albums directory |
 | `GET` | `/api/albums/dirs/{artist}` | List album folders within an artist directory |
 | `GET` | `/api/albums/dirs/{artist}/{album}/info` | Read `.albuminfo` sidecar and return MB tracklist |
