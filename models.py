@@ -476,3 +476,27 @@ class SetUserRoleRequest(BaseModel):
 
 class DownloadTokenRequest(BaseModel):
     job_id: str
+
+
+class M3uEntryPick(BaseModel):
+    """One row of an edited playlist: an existing entry by position, or a library file."""
+    index: Optional[int] = None
+    file: Optional[str] = None
+
+
+class M3uSaveRequest(BaseModel):
+    path: str
+    mtime_ns: str
+    entries: list[M3uEntryPick]
+
+
+class M3uCreateRequest(BaseModel):
+    name: str
+    copy_from: Optional[str] = None
+    mtime_ns: Optional[str] = None
+    entries: Optional[list[M3uEntryPick]] = None
+
+
+class LibraryMatchRequest(BaseModel):
+    """Absolute path of a library file chosen to stand in for a missing watched track."""
+    path: str

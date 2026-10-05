@@ -493,6 +493,102 @@ def known_artists(root: Path | str) -> set[str] | None:
         return None
 
 
+def _like_escape(text: str) -> str:
+    return text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+def search_files(root: Path | str, query: str, limit: int = 50) -> list[dict] | None:
+    """Library files whose tags or path contain every word of `query`, or None.
+
+    The library-file picker's engine: the M3U editor's "add a track" and the
+    missing-track "I already have this one" both ask it. Every word has to turn
+    up somewhere among artist, title, album and path, so "bowie heroes" finds
+    the song without you having to remember which of the three it was filed by.
+    A LIKE scan over one root is a few milliseconds on twenty thousand rows,
+    which is not worth an FTS table to beat. Callers vet paths before use.
+    """
+    words = [w for w in (query or "").split() if w][:8]
+    if not words:
+        return []
+    if not init_index():
+        return None
+    try:
+        target = str(root)
+        if target not in _indexed_roots_ready():
+            return None
+        clauses = []
+        params: list = [target]
+        for word in words:
+            pattern = f"%{_like_escape(word)}%"
+            clauses.append(
+                "(artist LIKE ? ESCAPE '\\' OR title LIKE ? ESCAPE '\\' "
+                "OR album LIKE ? ESCAPE '\\' OR relative_path LIKE ? ESCAPE '\\')"
+            )
+            params.extend([pattern] * 4)
+        params.append(int(limit))
+        with index_conn(read_only=True) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute(
+                f"""SELECT relative_path, artist, title, album, codec, duration
+                    FROM library_files
+                    WHERE root_path = ? AND {' AND '.join(clauses)}
+                    ORDER BY artist COLLATE NOCASE, album COLLATE NOCASE, title COLLATE NOCASE
+                    LIMIT ?""",
+                params,
+            ).fetchall()
+        return [{
+            "path": str(Path(target) / row["relative_path"]),
+            "relative_path": row["relative_path"],
+            "artist": row["artist"],
+            "title": row["title"],
+            "album": row["album"],
+            "codec": row["codec"],
+            "duration": float(row["duration"] or 0.0),
+        } for row in rows]
+    except Exception as exc:
+        print(f"Library index search failed: {exc}")
+        return None
+
+
+def describe_files(paths) -> dict[str, dict]:
+    """Artist, title, album and duration for each path the index holds.
+
+    Keyed by the path string given. Display only, so unlike `probe_hints` it
+    does not insist the file is unchanged since it was read: a playlist row
+    showing last week's tags beats one showing a bare filename. Paths the index
+    has never seen are simply absent, and an unavailable index is an empty dict.
+    """
+    found: dict[str, dict] = {}
+    try:
+        if not init_index():
+            return found
+        roots = _indexed_roots_ready()
+        if not roots:
+            return found
+        with index_conn(read_only=True) as conn:
+            conn.row_factory = sqlite3.Row
+            for path in paths:
+                owner = _owning_root(roots, str(path))
+                rel = _relative_to(owner, path) if owner else None
+                if rel is None:
+                    continue
+                row = conn.execute(
+                    "SELECT artist, title, album, duration FROM library_files "
+                    "WHERE root_path = ? AND relative_path = ?",
+                    (owner, rel),
+                ).fetchone()
+                if row:
+                    found[str(path)] = {
+                        "artist": row["artist"],
+                        "title": row["title"],
+                        "album": row["album"],
+                        "duration": float(row["duration"] or 0.0),
+                    }
+    except Exception as exc:
+        print(f"Library index could not describe playlist files: {exc}")
+    return found
+
+
 def _probe_shaped(row) -> dict:
     """One indexed row wearing `probe_file`'s clothes.
 

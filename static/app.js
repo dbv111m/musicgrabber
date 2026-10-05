@@ -140,6 +140,9 @@
             return APP_ROOT_PATH ? `${APP_ROOT_PATH}/${value.replace(/^\/+/, '')}` : `/${value.replace(/^\/+/, '')}`;
         }
 
+        // Which Watched tab pill is showing (playlists, upgrades, audit or m3u).
+        let watchedMode = 'playlists';
+
         const missingTrackVersionsState = {
             mode: 'watched',
             jobId: '',
@@ -1577,10 +1580,10 @@
                 }
 
                 if (currentTab === 'watched') {
-                    loadWatchedPlaylists();
-                    loadWatchedUpgrades();
-                    loadAudioAudit();
-                    populateSourceChips();
+                    // Measured now rather than at start-up: a hidden tab has no
+                    // width, and the indicator would slide in at zero pixels.
+                    initPillGroup(document.getElementById('watchedModePills'));
+                    loadWatchedMode(watchedMode);
                 } else if (watchedRefreshPollInterval) {
                     clearInterval(watchedRefreshPollInterval);
                     watchedRefreshPollInterval = null;
@@ -3163,6 +3166,8 @@
             initPillGroup(artistsModePills);
             artistsModePills.addEventListener('pillchange', (e) => setArtistsMode(e.detail.value));
         }
+        document.getElementById('watchedModePills')
+            ?.addEventListener('pillchange', (e) => setWatchedMode(e.detail.value));
 
         document.getElementById('discoverSimilarBtn')?.addEventListener('click', discoverManualSearch);
         document.getElementById('discoverSimilarInput')?.addEventListener('keydown', (e) => {
@@ -6641,6 +6646,17 @@
                 return;
             }
 
+            if (action === 'match-missing-track-library') {
+                matchMissingTrackFromLibrary(
+                    btn.dataset.playlistId || '',
+                    btn.dataset.trackHash || '',
+                    btn.dataset.artist || '',
+                    btn.dataset.title || '',
+                    btn.dataset.rowId || ''
+                );
+                return;
+            }
+
             if (action === 'find-missing-track-versions') {
                 openMissingTrackVersionsModal(
                     btn.dataset.playlistId || '',
@@ -8546,6 +8562,15 @@
                                 data-title="${escapeAttr(t.title)}"
                                 style="padding: 3px 8px; font-size: 11px; font-family: inherit; background: var(--bg-tertiary); color: var(--text-secondary); border: 1px solid var(--border); border-radius: 4px; cursor: pointer; white-space: nowrap;"
                                 title="Search manually and pick a result">Search</button>
+                            <button type="button"
+                                data-action="match-missing-track-library"
+                                data-playlist-id="${escapeAttr(playlistId)}"
+                                data-track-hash="${escapeAttr(t.track_hash)}"
+                                data-artist="${escapeAttr(t.artist)}"
+                                data-title="${escapeAttr(t.title)}"
+                                data-row-id="${escapeAttr(trackId)}"
+                                style="padding: 3px 8px; font-size: 11px; font-family: inherit; background: var(--bg-tertiary); color: var(--text-secondary); border: 1px solid var(--border); border-radius: 4px; cursor: pointer; white-space: nowrap;"
+                                title="Already own it? Pick the file from your library">From Library</button>
                         </div>
                     </div>`;
                 }).join('');
@@ -8740,7 +8765,15 @@
                              data-playlist-name="${escapeAttr(data.playlist_name)}"
                              data-artist="${escapeAttr(t.artist)}"
                              data-title="${escapeAttr(t.title)}"
-                             class="track-action-btn" title="Search manually">Search</button>`
+                             class="track-action-btn" title="Search manually">Search</button>
+                         <button type="button"
+                             data-action="match-missing-track-library"
+                             data-playlist-id="${escapeAttr(playlistId)}"
+                             data-track-hash="${escapeAttr(t.track_hash)}"
+                             data-artist="${escapeAttr(t.artist)}"
+                             data-title="${escapeAttr(t.title)}"
+                             data-row-id="${escapeAttr(rowId)}"
+                             class="track-action-btn" title="Already own it? Pick the file from your library">From Library</button>`
                     )).join('');
                 }
 
@@ -8815,7 +8848,15 @@
                                 data-playlist-name="${escapeAttr(playlistName)}"
                                 data-artist="${escapeAttr(artist)}"
                                 data-title="${escapeAttr(title)}"
-                                class="track-action-btn">Search</button>`;
+                                class="track-action-btn">Search</button>
+                            <button type="button"
+                                data-action="match-missing-track-library"
+                                data-playlist-id="${escapeAttr(playlistId)}"
+                                data-track-hash="${escapeAttr(trackHash)}"
+                                data-artist="${escapeAttr(artist)}"
+                                data-title="${escapeAttr(title)}"
+                                data-row-id="${escapeAttr(rowId)}"
+                                class="track-action-btn">From Library</button>`;
                     }
                 }
 
@@ -10256,7 +10297,7 @@
                     }
                 }
 
-                if (status.running && currentTab === 'watched') {
+                if (status.running && currentTab === 'watched' && watchedMode === 'audit') {
                     audioAuditPollTimer = setTimeout(() => loadAudioAudit(false), 2000);
                 }
             } catch (error) {
@@ -12508,6 +12549,561 @@
         // through setAudioFormat() - no direct sync needed here.
 
         // =============================================================================
+        // Watched tab pills: Playlists / Upgrades / Audit / M3U Files
+        //
+        // Same switch as the Artists tab. Each panel loads when you look at it
+        // rather than all three firing every time the tab opens, which mattered
+        // little until one of them was a census of the entire music library.
+        // =============================================================================
+
+        function loadWatchedMode(mode) {
+            if (mode === 'playlists') {
+                loadWatchedPlaylists();
+                populateSourceChips();
+            } else if (mode === 'upgrades') {
+                loadWatchedUpgrades();
+            } else if (mode === 'audit') {
+                loadAudioAudit();
+            } else if (mode === 'm3u') {
+                loadM3uFiles();
+            }
+        }
+
+        function setWatchedMode(mode) {
+            watchedMode = mode;
+            document.querySelectorAll('#watchedTabContainer .watched-mode-panel, #watchedTabContainer .watched-mode-actions')
+                .forEach(el => el.classList.toggle('watched-mode-hidden', el.dataset.mode !== mode));
+            if (mode !== 'audit' && audioAuditPollTimer) {
+                clearTimeout(audioAuditPollTimer);
+                audioAuditPollTimer = null;
+            }
+            loadWatchedMode(mode);
+        }
+
+        async function _responseDetail(resp) {
+            const body = await resp.json().catch(() => null);
+            return body?.detail || `HTTP ${resp.status}`;
+        }
+
+        function _formatTrackLength(seconds) {
+            const s = Math.round(Number(seconds) || 0);
+            if (!s) return '';
+            return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+        }
+
+        // -----------------------------------------------------------------------
+        // M3U Files pill: the list
+        // -----------------------------------------------------------------------
+
+        let m3uFiles = [];
+
+        async function loadM3uFiles() {
+            const list = document.getElementById('m3uFilesList');
+            if (!list) return;
+            if (!m3uFiles.length) list.innerHTML = '<p class="watched-empty-text">Loading&hellip;</p>';
+            try {
+                const resp = await apiFetch('/api/m3u');
+                if (!resp.ok) throw new Error(await _responseDetail(resp));
+                const data = await resp.json();
+                m3uFiles = data.playlists || [];
+                const info = document.getElementById('m3uFolderInfo');
+                if (info) info.textContent = `New playlists are saved in ${data.default_dir}`;
+                renderM3uFiles();
+            } catch (e) {
+                list.innerHTML = `<p class="watched-empty-text">Could not load playlist files: ${escapeHtml(e.message || 'unknown error')}</p>`;
+            }
+        }
+
+        function renderM3uFiles() {
+            const list = document.getElementById('m3uFilesList');
+            if (!list) return;
+            if (!m3uFiles.length) {
+                list.innerHTML = '<p class="watched-empty-text">No M3U files yet. Name one above, or switch on Generate M3U for a watched playlist.</p>';
+                return;
+            }
+            list.innerHTML = m3uFiles.map((f, i) => `
+                <button type="button" class="m3u-file-row" data-index="${i}">
+                    <span class="m3u-file-icon"><i class="fa-solid fa-list-ol"></i></span>
+                    <span class="m3u-file-info">
+                        <span class="m3u-file-name">${escapeHtml(f.name)}${f.watched ? ' <span class="m3u-badge" title="A watched playlist rebuilds this file on every refresh">watched</span>' : ''}</span>
+                        <span class="m3u-file-meta">${escapeHtml(f.folder)} &middot; ${f.entries} track${f.entries === 1 ? '' : 's'}${f.missing ? ` &middot; <span class="m3u-missing-count">${f.missing} missing</span>` : ''}</span>
+                    </span>
+                    <span class="m3u-file-open">${f.watched ? 'View' : 'Edit'}</span>
+                </button>`).join('');
+        }
+
+        document.getElementById('m3uFilesList')?.addEventListener('click', (e) => {
+            const row = e.target.closest('.m3u-file-row');
+            const file = row && m3uFiles[Number(row.dataset.index)];
+            if (file) openM3uEditor(file.path);
+        });
+
+        document.getElementById('m3uNewNameInput')?.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') createM3uFile();
+        });
+
+        async function createM3uFile() {
+            const input = document.getElementById('m3uNewNameInput');
+            const name = (input?.value || '').trim();
+            if (!name) {
+                input?.focus();
+                showToast('Give the playlist a name first', true);
+                return;
+            }
+            try {
+                const resp = await apiFetch('/api/m3u', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name }),
+                });
+                if (!resp.ok) throw new Error(await _responseDetail(resp));
+                const data = await resp.json();
+                input.value = '';
+                showToast(`Created ${data.name}. Now give it some tracks.`);
+                await loadM3uFiles();
+                openM3uEditor(data.path);
+            } catch (e) {
+                showToast(`Could not create the playlist: ${e.message}`, true);
+            }
+        }
+
+        // -----------------------------------------------------------------------
+        // M3U editor
+        //
+        // Rows remember where they came from: `index` for an entry already in
+        // the file, `file` for one added from the library. Only those go back to
+        // the server, which copies kept entries out of the file byte for byte,
+        // so nothing we cannot display gets mangled on the round trip.
+        // -----------------------------------------------------------------------
+
+        const m3uEditor = { path: '', name: '', watched: false, mtime: '', rows: [], dirty: false, nextKey: 0 };
+
+        async function openM3uEditor(path) {
+            try {
+                const resp = await apiFetch(`/api/m3u/file?path=${encodeURIComponent(path)}`);
+                if (!resp.ok) throw new Error(await _responseDetail(resp));
+                const data = await resp.json();
+                Object.assign(m3uEditor, {
+                    path: data.path,
+                    name: data.name,
+                    watched: !!data.watched,
+                    mtime: data.mtime_ns,
+                    dirty: false,
+                    rows: data.entries.map(e => ({ ...e, key: m3uEditor.nextKey++ })),
+                });
+            } catch (e) {
+                showToast(`Could not open the playlist: ${e.message}`, true);
+                return;
+            }
+            const ro = m3uEditor.watched;
+            document.getElementById('m3uEditorTitle').textContent = m3uEditor.name;
+            const notice = document.getElementById('m3uEditorNotice');
+            notice.style.display = ro ? '' : 'none';
+            notice.textContent = ro
+                ? 'A watched playlist rebuilds this file on every refresh, so any edit here would be quietly undone. Save as Copy gives you one of your own.'
+                : '';
+            ['m3uAddBtn', 'm3uPruneBtn', 'm3uDeleteBtn', 'm3uSaveBtn'].forEach(id => {
+                document.getElementById(id).style.display = ro ? 'none' : '';
+            });
+            _setM3uError('');
+            renderM3uEditor();
+            document.getElementById('m3uEditorOverlay').style.display = 'flex';
+            document.getElementById('m3uEditorList').scrollTop = 0;
+        }
+
+        function closeM3uEditor(force = false) {
+            if (!force && m3uEditor.dirty && !confirm('Discard your changes to this playlist?')) return;
+            m3uEditor.dirty = false;
+            document.getElementById('m3uEditorOverlay').style.display = 'none';
+        }
+
+        function _setM3uError(message) {
+            const el = document.getElementById('m3uEditorError');
+            el.textContent = message;
+            el.style.display = message ? '' : 'none';
+        }
+
+        function _markM3uDirty() {
+            m3uEditor.dirty = true;
+            document.getElementById('m3uSaveBtn').disabled = false;
+        }
+
+        function renderM3uEditor() {
+            const ro = m3uEditor.watched;
+            const rows = m3uEditor.rows;
+            const missing = rows.filter(r => r.state === 'missing').length;
+            const folder = m3uEditor.path.includes('/') ? m3uEditor.path.slice(0, m3uEditor.path.lastIndexOf('/')) : '';
+            document.getElementById('m3uEditorMeta').innerHTML =
+                `${escapeHtml(folder)} &middot; ${rows.length} track${rows.length === 1 ? '' : 's'}` +
+                (missing ? ` &middot; <span class="m3u-missing-count">${missing} missing</span>` : '');
+            document.getElementById('m3uPruneBtn').disabled = !missing;
+            document.getElementById('m3uSaveBtn').disabled = !m3uEditor.dirty;
+
+            const list = document.getElementById('m3uEditorList');
+            if (!rows.length) {
+                list.innerHTML = `<div class="m3u-editor-empty">${ro ? 'This playlist is empty.' : 'Empty. Add Tracks to fill it from your library.'}</div>`;
+                return;
+            }
+            list.innerHTML = rows.map((r, i) => {
+                const heading = r.title || r.label;
+                const sub = [r.artist, r.album].filter(Boolean).join(' · ');
+                const stateNote = r.state === 'missing'
+                    ? '<span class="m3u-row-flag m3u-row-flag-missing">missing</span>'
+                    : r.state === 'external'
+                        ? '<span class="m3u-row-flag" title="Points outside your music folder (Navidrome or Lidarr wrote it), so it cannot be checked from here">not checked</span>'
+                        : r.isNew ? '<span class="m3u-row-flag m3u-row-flag-new">new</span>' : '';
+                return `<div class="m3u-row m3u-row-${r.state}" data-key="${r.key}" title="${escapeHtml(r.line || r.path || '').replace(/"/g, '&quot;')}">
+                    ${ro ? '' : '<span class="m3u-drag-handle" title="Drag to reorder"><i class="fa-solid fa-grip-vertical"></i></span>'}
+                    <span class="m3u-row-num">${i + 1}</span>
+                    <span class="m3u-row-text">
+                        <span class="m3u-row-title">${escapeHtml(heading)} ${stateNote}</span>
+                        ${sub ? `<span class="m3u-row-sub">${escapeHtml(sub)}</span>` : ''}
+                    </span>
+                    <span class="m3u-row-duration">${_formatTrackLength(r.duration)}</span>
+                    ${ro ? '' : `<span class="m3u-row-actions">
+                        <button type="button" class="m3u-row-btn" data-act="up" title="Move up" ${i === 0 ? 'disabled' : ''}><i class="fa-solid fa-chevron-up"></i></button>
+                        <button type="button" class="m3u-row-btn" data-act="down" title="Move down" ${i === rows.length - 1 ? 'disabled' : ''}><i class="fa-solid fa-chevron-down"></i></button>
+                        <button type="button" class="m3u-row-btn m3u-row-remove" data-act="remove" title="Remove from playlist (the file stays put)"><i class="fa-solid fa-xmark"></i></button>
+                    </span>`}
+                </div>`;
+            }).join('');
+        }
+
+        function _m3uRowIndex(key) {
+            return m3uEditor.rows.findIndex(r => String(r.key) === String(key));
+        }
+
+        document.getElementById('m3uEditorList')?.addEventListener('click', (e) => {
+            const btn = e.target.closest('.m3u-row-btn');
+            if (!btn || m3uEditor.watched) return;
+            const i = _m3uRowIndex(btn.closest('.m3u-row').dataset.key);
+            if (i < 0) return;
+            const rows = m3uEditor.rows;
+            const act = btn.dataset.act;
+            if (act === 'remove') {
+                rows.splice(i, 1);
+            } else {
+                const j = act === 'up' ? i - 1 : i + 1;
+                if (j < 0 || j >= rows.length) return;
+                [rows[i], rows[j]] = [rows[j], rows[i]];
+            }
+            _markM3uDirty();
+            renderM3uEditor();
+            // Keep the keyboard where it was so you can keep nudging the same row.
+            if (act !== 'remove') {
+                document.querySelector(`#m3uEditorList .m3u-row[data-key="${rows[act === 'up' ? i - 1 : i + 1].key}"] [data-act="${act}"]`)?.focus();
+            }
+        });
+
+        // Drag to reorder. Pointer events, so a finger works as well as a mouse;
+        // the handle has touch-action: none, the rest of the row still scrolls.
+        (function initM3uDrag() {
+            const list = document.getElementById('m3uEditorList');
+            if (!list) return;
+            let dragged = null;
+            let scrollTimer = null;
+            let lastY = 0;
+
+            function placeAt(y) {
+                const others = [...list.querySelectorAll('.m3u-row:not(.m3u-row-dragging)')];
+                const before = others.find(r => {
+                    const box = r.getBoundingClientRect();
+                    return y < box.top + box.height / 2;
+                });
+                if (before) {
+                    if (dragged.nextElementSibling !== before) list.insertBefore(dragged, before);
+                } else if (list.lastElementChild !== dragged) {
+                    list.appendChild(dragged);
+                }
+            }
+
+            function autoScroll() {
+                const box = list.getBoundingClientRect();
+                const edge = 40;
+                let step = 0;
+                if (lastY < box.top + edge) step = -Math.ceil((box.top + edge - lastY) / 4);
+                else if (lastY > box.bottom - edge) step = Math.ceil((lastY - box.bottom + edge) / 4);
+                if (step) {
+                    list.scrollTop += step;
+                    placeAt(lastY);
+                }
+            }
+
+            list.addEventListener('pointerdown', (e) => {
+                const handle = e.target.closest('.m3u-drag-handle');
+                if (!handle || m3uEditor.watched) return;
+                e.preventDefault();
+                dragged = handle.closest('.m3u-row');
+                dragged.classList.add('m3u-row-dragging');
+                handle.setPointerCapture(e.pointerId);
+                lastY = e.clientY;
+                scrollTimer = setInterval(autoScroll, 16);
+            });
+
+            list.addEventListener('pointermove', (e) => {
+                if (!dragged) return;
+                lastY = e.clientY;
+                placeAt(e.clientY);
+            });
+
+            function finish() {
+                if (!dragged) return;
+                clearInterval(scrollTimer);
+                dragged.classList.remove('m3u-row-dragging');
+                dragged = null;
+                const order = [...list.querySelectorAll('.m3u-row')].map(r => r.dataset.key);
+                const before = m3uEditor.rows.map(r => String(r.key)).join(',');
+                if (order.join(',') !== before) {
+                    const byKey = new Map(m3uEditor.rows.map(r => [String(r.key), r]));
+                    m3uEditor.rows = order.map(k => byKey.get(k));
+                    _markM3uDirty();
+                }
+                renderM3uEditor();
+            }
+            list.addEventListener('pointerup', finish);
+            list.addEventListener('pointercancel', finish);
+        })();
+
+        function removeMissingM3uEntries() {
+            const before = m3uEditor.rows.length;
+            m3uEditor.rows = m3uEditor.rows.filter(r => r.state !== 'missing');
+            const removed = before - m3uEditor.rows.length;
+            if (!removed) return;
+            _markM3uDirty();
+            renderM3uEditor();
+            showToast(`Removed ${removed} dead entr${removed === 1 ? 'y' : 'ies'}. Save to make it stick.`);
+        }
+
+        function addM3uEntryFromLibrary(result) {
+            m3uEditor.rows.push({
+                key: m3uEditor.nextKey++,
+                file: result.path,
+                path: result.path,
+                state: 'ok',
+                isNew: true,
+                title: result.title || '',
+                artist: result.artist || '',
+                album: result.album || '',
+                duration: result.duration || 0,
+                label: result.relative_path.split('/').pop(),
+            });
+            _markM3uDirty();
+            renderM3uEditor();
+            const list = document.getElementById('m3uEditorList');
+            list.scrollTop = list.scrollHeight;
+            return true;
+        }
+
+        function _m3uEntryPicks() {
+            return m3uEditor.rows.map(r => (r.file ? { file: r.file } : { index: r.index }));
+        }
+
+        async function saveM3uFile() {
+            const btn = document.getElementById('m3uSaveBtn');
+            btn.disabled = true;
+            _setM3uError('');
+            try {
+                const resp = await apiFetch('/api/m3u/file', {
+                    method: 'PUT',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ path: m3uEditor.path, mtime_ns: m3uEditor.mtime, entries: _m3uEntryPicks() }),
+                });
+                if (!resp.ok) throw new Error(await _responseDetail(resp));
+                showToast(`Saved ${m3uEditor.name}`);
+                closeM3uEditor(true);
+                loadM3uFiles();
+            } catch (e) {
+                _setM3uError(e.message);
+                btn.disabled = false;
+            }
+        }
+
+        async function saveM3uAsCopy() {
+            const name = prompt('Name for the copy:', `${m3uEditor.name} (copy)`);
+            if (!name || !name.trim()) return;
+            _setM3uError('');
+            try {
+                const resp = await apiFetch('/api/m3u', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        name: name.trim(),
+                        copy_from: m3uEditor.path,
+                        mtime_ns: m3uEditor.mtime,
+                        entries: _m3uEntryPicks(),
+                    }),
+                });
+                if (!resp.ok) throw new Error(await _responseDetail(resp));
+                const data = await resp.json();
+                showToast(`Saved a copy as ${data.name}`);
+                m3uEditor.dirty = false;
+                loadM3uFiles();
+                openM3uEditor(data.path);
+            } catch (e) {
+                _setM3uError(e.message);
+            }
+        }
+
+        async function deleteM3uFile() {
+            if (!confirm(`Move the playlist "${m3uEditor.name}" to the trash? Only the playlist file goes; every track it lists stays exactly where it is.`)) return;
+            try {
+                const resp = await apiFetch(`/api/m3u/file?path=${encodeURIComponent(m3uEditor.path)}`, { method: 'DELETE' });
+                if (!resp.ok) throw new Error(await _responseDetail(resp));
+                showToast(`${m3uEditor.name} is in the trash. Restore it from Queue if you change your mind.`);
+                closeM3uEditor(true);
+                loadM3uFiles();
+            } catch (e) {
+                _setM3uError(e.message);
+            }
+        }
+
+        // -----------------------------------------------------------------------
+        // Library picker: find a file you already own
+        //
+        // Shared by the M3U editor (add tracks, picker stays open) and by
+        // missing watched tracks (match one, picker closes). onPick returns
+        // false to keep the picker open, for "are you sure?" moments.
+        // -----------------------------------------------------------------------
+
+        const libraryPicker = { onPick: null, keepOpen: false, timer: null, seq: 0, results: [] };
+
+        function openLibraryPicker({ onPick, keepOpen = false, query = '', title = 'Pick from Your Library', meta = '' }) {
+            Object.assign(libraryPicker, { onPick, keepOpen, results: [] });
+            document.getElementById('libraryPickerTitle').textContent = title;
+            document.getElementById('libraryPickerMeta').textContent = meta;
+            const input = document.getElementById('libraryPickerInput');
+            input.value = query;
+            document.getElementById('libraryPickerOverlay').style.display = 'flex';
+            input.focus();
+            input.select();
+            searchLibraryPicker(query);
+        }
+
+        function closeLibraryPicker() {
+            clearTimeout(libraryPicker.timer);
+            libraryPicker.seq++;
+            document.getElementById('libraryPickerOverlay').style.display = 'none';
+        }
+
+        async function searchLibraryPicker(query) {
+            const box = document.getElementById('libraryPickerResults');
+            const seq = ++libraryPicker.seq;
+            if (query.trim().length < 2) {
+                libraryPicker.results = [];
+                box.innerHTML = '<div class="m3u-editor-empty">Type a couple of letters: artist, title, album, or folder. Every word has to match somewhere.</div>';
+                return;
+            }
+            try {
+                const resp = await apiFetch(`/api/library/search?q=${encodeURIComponent(query)}`);
+                if (!resp.ok) throw new Error(await _responseDetail(resp));
+                const data = await resp.json();
+                if (seq !== libraryPicker.seq) return;
+                libraryPicker.results = data.results || [];
+                if (!data.index_ready) {
+                    box.innerHTML = '<div class="m3u-editor-empty">The library index is still being built. Give it a few minutes and try again.</div>';
+                    return;
+                }
+                if (!libraryPicker.results.length) {
+                    box.innerHTML = '<div class="m3u-editor-empty">Nothing in your library matches that.</div>';
+                    return;
+                }
+                box.innerHTML = libraryPicker.results.map((r, i) => {
+                    const name = r.relative_path.split('/').pop();
+                    const sub = [r.artist, r.album, (r.codec || '').toUpperCase(), _formatTrackLength(r.duration)].filter(Boolean).join(' · ');
+                    return `<button type="button" class="library-picker-row" data-index="${i}">
+                        <span class="library-picker-title">${escapeHtml(r.title || name)}</span>
+                        ${sub ? `<span class="library-picker-sub">${escapeHtml(sub)}</span>` : ''}
+                        <span class="library-picker-path">${escapeHtml(r.relative_path)}</span>
+                    </button>`;
+                }).join('');
+            } catch (e) {
+                if (seq === libraryPicker.seq) {
+                    box.innerHTML = `<div class="m3u-editor-empty">Search failed: ${escapeHtml(e.message)}</div>`;
+                }
+            }
+        }
+
+        async function _pickLibraryResult(index, row) {
+            const result = libraryPicker.results[index];
+            if (!result || !libraryPicker.onPick) return;
+            const keep = await libraryPicker.onPick(result);
+            if (keep === false) return;
+            if (libraryPicker.keepOpen) {
+                row?.classList.add('library-picker-picked');
+            } else {
+                closeLibraryPicker();
+            }
+        }
+
+        document.getElementById('libraryPickerInput')?.addEventListener('input', (e) => {
+            clearTimeout(libraryPicker.timer);
+            libraryPicker.timer = setTimeout(() => searchLibraryPicker(e.target.value), 200);
+        });
+
+        document.getElementById('libraryPickerInput')?.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                closeLibraryPicker();
+            } else if (e.key === 'Enter' && libraryPicker.results.length) {
+                _pickLibraryResult(0, document.querySelector('#libraryPickerResults .library-picker-row'));
+            }
+        });
+
+        document.getElementById('libraryPickerResults')?.addEventListener('click', (e) => {
+            const row = e.target.closest('.library-picker-row');
+            if (row) _pickLibraryResult(Number(row.dataset.index), row);
+        });
+
+        // -----------------------------------------------------------------------
+        // Missing watched track -> a file you already have
+        // -----------------------------------------------------------------------
+
+        function _looseKey(text) {
+            return String(text || '').toLowerCase().replace(/\(.*?\)|\[.*?\]/g, '').replace(/[^\p{L}\p{N}]+/gu, '');
+        }
+
+        function _looselySame(a, b) {
+            const x = _looseKey(a);
+            const y = _looseKey(b);
+            return !x || !y || x.includes(y) || y.includes(x);
+        }
+
+        function matchMissingTrackFromLibrary(playlistId, trackHash, artist, title, rowId) {
+            // Brackets and featured credits make the every-word search too picky
+            // to be a helpful starting point, so they are left off the prefill.
+            const clean = (s) => String(s || '').replace(/\(.*?\)|\[.*?\]/g, ' ').replace(/\b(feat|ft|featuring)\b.*$/i, ' ').trim();
+            openLibraryPicker({
+                title: 'Match from Your Library',
+                meta: `Missing: ${artist} – ${title}`,
+                query: `${clean(artist)} ${clean(title)}`.replace(/\s+/g, ' ').trim(),
+                onPick: async (result) => {
+                    if ((result.title && !_looselySame(result.title, title)) || (result.artist && !_looselySame(result.artist, artist))) {
+                        const tagged = `${result.artist || '?'} - ${result.title || '?'}`;
+                        if (!confirm(`That file is tagged "${tagged}", not "${artist} - ${title}". Use it for this playlist anyway?`)) return false;
+                    }
+                    try {
+                        const resp = await apiFetch(
+                            `/api/watched-playlists/${encodeURIComponent(playlistId)}/tracks/${encodeURIComponent(trackHash)}/match`,
+                            {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ path: result.path }),
+                            }
+                        );
+                        if (!resp.ok) throw new Error(await _responseDetail(resp));
+                    } catch (e) {
+                        showToast(`Could not match it: ${e.message}`, true);
+                        return false;
+                    }
+                    showToast(`Matched ${artist} – ${title} to a file you already had`);
+                    const row = document.getElementById(rowId);
+                    const actions = row?.querySelector('.track-list-actions') || row?.lastElementChild;
+                    if (actions) actions.innerHTML = '<span class="track-status-chip track-status-ok">&#10003; matched</span>';
+                    return true;
+                },
+            });
+        }
+
+        // =============================================================================
         // Multi-User UI
         // =============================================================================
 
@@ -12531,6 +13127,9 @@
                 if (activeTab && activeTab.classList.contains('peon-hide')) {
                     const resultsTabBtn = document.querySelector('.tab[data-tab="results"]');
                     if (resultsTabBtn) resultsTabBtn.click();
+                }
+                if (document.querySelector(`#watchedModePills .pill.peon-hide[data-value="${watchedMode}"]`)) {
+                    document.querySelector('#watchedModePills .pill[data-value="playlists"]')?.click();
                 }
                 // Pin the convert-to-format checkboxes to whatever the admin set
                 // globally. The server overrides these on submit either way, but

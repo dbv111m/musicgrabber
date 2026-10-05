@@ -27,9 +27,10 @@ MusicGrabber is intentionally narrow. It is **not**:
 - **Live search progress:** results stream in as each source answers, with live status for completed, slow, parked, or unavailable sources; repeated timeouts automatically bench an unhealthy source until a background probe clears it. yt-dlp searches and metadata lookups share a bounded retry policy for throttling, timeouts, gateway failures, and reduced format manifests, while genuinely private/deleted media fails immediately
 - **Monochrome source:** searches Deezer metadata, keeps only results Monochrome's own tracks API actually stocks (matched by ISRC), and downloads the FLAC from it, with a Deezer ISRC rescue and a self-hosted Tidal stream as fallbacks. If Deezer is down, the tracks API is searched directly. Monochrome downloads are 16-bit/44.1kHz FLAC. No account or API key is required. Enabled by default and configurable in Search Sources
 - **JioSaavn source:** India's biggest streaming service, asked directly, with no account, token or proxy. Most tracks are 320 kbps AAC (saved as `.m4a`), a few only 160, and results say which before you download. Superb for Bollywood, Punjabi and other Indian music, and decent for Western music too. JioSaavn filters search by country, so MusicGrabber's searches present an Indian address to see the full catalogue; downloads come straight off its CDN, which does not filter. If JioSaavn stops honouring that, the source's health check goes red. Enabled by default and configurable in Search Sources
-- **Watched playlists:** monitor Spotify, YouTube (including Mixes), Amazon Music, Apple Music, SoundCloud, Tidal, Beatport, Monochrome, and ListenBrainz playlists; auto-downloads new tracks and grabs the best match available. Per-playlist sync mode: Append (M3U grows as tracks arrive) or Mirror (M3U stays in sync with the upstream; removed tracks drop out). Each card shows live refresh state and stage. "Missing" button shows tracks that never made it; Retry and Search buttons to fix them. M3U updates immediately as each track finishes
+- **Watched playlists:** monitor Spotify, YouTube (including Mixes), Amazon Music, Apple Music, SoundCloud, Tidal, Beatport, Monochrome, and ListenBrainz playlists; auto-downloads new tracks and grabs the best match available. Per-playlist sync mode: Append (M3U grows as tracks arrive) or Mirror (M3U stays in sync with the upstream; removed tracks drop out). Each card shows live refresh state and stage. "Missing" button shows tracks that never made it; Retry and Search buttons to fix them, or From Library to point one at a file you already own. M3U updates immediately as each track finishes
 - **Artists tab:** follow an artist on MusicBrainz and new singles are downloaded automatically as they appear. Search by name, pick from up to five candidates, set a from-date (defaults to today so your back-catalogue stays put). Following uses release-level artist credits, including shared and featured credits; track-only guest appearances and remixer relationships are excluded. MusicBrainz release types filter out remixes, live cuts, soundtracks and compilations; an untyped remix can still appear. The expandable credit rules in the Artists tab and [the full rules below](#watched-artist-credit-rules) explain the boundaries. Albums sit underneath for browsing and picking off individually, with an optional "automatically add new albums" toggle that marks everything already released as seen, so ticking it never starts a back-catalogue download. A transient failure while handing a new album to the queue is recorded and retried once on the next artist check rather than making the release permanently “known but abandoned”. Tracks already on disk are recognised immediately, and followed-album labels are derived from the current import and actual audio count rather than preserving “Queued” until the sun burns out. Per-artist check interval, Keep source/Convert to control, pause/resume, missing and track list panels. You can also browse any artist's albums without following them at all
 - **Playlist routing:** pick any watched playlist or existing `.m3u` file from the selector below the search bar; downloads land there instead of Singles
+- **M3U editor:** the Watched tab's M3U Files pill lists your playlist files and lets you reorder, remove and add tracks from your library, prune dead entries, start new playlists and bin old ones; see [editing M3U files](#editing-m3u-files)
 - **Playlist housekeeping:** find audio left behind by mirror-mode playlist removals and move it safely into Singles; optionally stamp watched-playlist names into audio Comment tags for macOS Music smart playlists
 - **Album mode:** browse MusicBrainz artists from either the Artists tab or Bulk Import, pick a release, download the full album into `Albums/Artist/Album/`, tag tracks with album context, write cover files, and optionally generate an album-local M3U. Equivalent folders and numbered/fuzzy track names inside the configured Albums tree are reused rather than downloaded again. Multi-disc and Various Artists groups choose the most complete official release and keep the canonical release-group credit/title. Each track has a **Search replacement** rescue action that keeps its album folder, pressing, numbering and existing M3Us; see [repairing an album track](#repairing-an-album-track)
 - **Bulk Import takes almost anything:** playlist URLs, pasted `Artist - Title` lists, MusicBrainz release links, album URLs from Spotify, Apple Music, YouTube Music, Amazon Music, Beatport, Tidal and Monochrome, or simply an album name typed in. Anything recognised as an album is routed through the album pipeline rather than flattened into loose singles. Album search does not need an artist first, so soundtracks and various-artists compilations work; uncertain matches ask which release you meant instead of guessing
@@ -224,7 +225,7 @@ with 1,287 file reads replaced by index lookups.
 
 ## Audio Provenance Audit
 
-Open **Watched → Audio Provenance Audit** and choose **Run Audit**. The scan
+Open **Watched → Audit** and choose **Run Audit**. The scan
 walks every supported audio file beneath the configured music directory,
 including Singles, Playlists, Albums, and older files MusicGrabber did not
 download. Symlinks and known trash, upgrade-quarantine, and acquisition-staging
@@ -998,6 +999,7 @@ Each watched playlist can also:
 - Choose a preferred source as a same-quality tie-breaker. It never moves a lossy result ahead of an allowed, confident lossless candidate; if lossless sources are disabled or excluded, acquisition naturally starts at the best remaining lossy tier
 - Route downloads into the standard Playlists directory or a custom subfolder under your music root
 - Show missing tracks, candidate search results, and manual retry controls when the automatic match is not good enough
+- Match a missing track to a file already in your library with **From Library**. The chosen file is recorded as the track's file, exactly as a download would be, so it joins the M3U and later refreshes leave it alone. If its tags disagree with the playlist you are asked to confirm, not refused
 
 Artist guest lists are not required to agree word-for-word across Spotify, Navidrome, Lidarr, and the file on disk. MusicGrabber tries the complete credit first, then falls back to the primary artist when a service has written `Primary Artist, Guest` or `Primary Artist feat. Guest`. If a manual Search download discovers that the primary-artist copy already exists, the watched row is reconciled too: it leaves Missing, gains the reusable path where available, and joins the next M3U rebuild. The guest artist has not been erased from history; the databases have merely stopped arguing over the seating plan.
 
@@ -1028,6 +1030,21 @@ For external automation, you can also trigger checks via API:
 ```bash
 curl -X POST http://localhost:38274/api/watched-playlists/check-all
 ```
+
+### Editing M3U Files
+
+**Watched → M3U Files** lists every `.m3u` in your Playlists folder (any depth), or at the top of Singles if no Playlists folder is set, which is where MusicGrabber files playlists itself. Each shows its track count and how many entries point at a file that is not there. Admins and normal users only; peons do not see it.
+
+Open one to:
+
+- **Reorder** by dragging the handle (touch works), or with the up and down buttons
+- **Remove** tracks, or **Remove Missing** to drop every entry whose file has gone. Entries pointing outside your music folder, which is how Navidrome and Lidarr write paths, are marked "not checked" and left alone, since MusicGrabber cannot see them to judge
+- **Add Tracks** from your library, searched by artist, title, album or folder through the [library index](#persistent-library-index). New entries are written relative to the M3U, the same way downloads write them
+- **Delete Playlist**, which moves the M3U to Trash (restorable from Queue) and never touches the audio
+
+**New Playlist** creates an empty one in the Playlists folder (or Singles). Saving writes a temporary file and renames it over the original, and entries you did not touch go back exactly as they were, `#EXTINF` lines and odd character sets included. If something else changed the file while you were editing, usually a download appending a track, the save is refused; reopen it and redo the edit.
+
+M3Us that a watched playlist with **Generate M3U** switched on writes are rebuilt from the database on every refresh, so they open **read-only**. **Save as Copy** makes an editable copy beside the original. To stop MusicGrabber writing the original at all, switch off Generate M3U on the watched playlist. Album-local M3Us and `.m3u8` files are not listed.
 
 ### Reverse Proxy (Caddy example)
 
@@ -1412,8 +1429,22 @@ music.yourdomain.com {
 | `GET` | `/api/watched-playlists/{id}/track-candidates` | Search top candidate matches for a missing watched-playlist track (`?artist=...&title=...&limit=4`) |
 | `POST` | `/api/watched-playlists/{id}/queue-track-candidate` | Queue a specific watched-playlist candidate (`{artist, title, video_id, source, source_url?, slskd_username?, slskd_filename?}`) |
 | `POST` | `/api/watched-playlists/{id}/retry-track` | Retry a specific missing track with the automatic watched-playlist search (`{artist, title}`) |
+| `POST` | `/api/watched-playlists/{id}/tracks/{track_hash}/match` | Use a file already in the library for a missing watched track (`{path}`, absolute); rebuilds the M3U |
 | `POST` | `/api/watched-playlists/check-all` | Check all watched playlists |
 | `POST` | `/api/watched-playlists/tag-all-playlists-comment` | Backfill watched-playlist Comment tags across existing files |
+
+### M3U Files
+
+Paths are relative to the music folder, for example `Playlists/Road Trip.m3u`. Not available to peons.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/m3u` | List playlist files with entry count, missing count, `watched` flag and `mtime_ns` |
+| `POST` | `/api/m3u` | Create an empty playlist (`{name}`), or copy one (`{name, copy_from, mtime_ns?, entries?}`) |
+| `GET` | `/api/m3u/file?path=...` | One playlist's entries: `index`, resolved `path`, `state` (`ok`, `missing`, `external`), and tags from the library index |
+| `PUT` | `/api/m3u/file` | Save (`{path, mtime_ns, entries}`), where each entry is `{index}` to keep an existing line or `{file}` to add a library file. 409 if the file changed since `mtime_ns`, 403 for a watched playlist's M3U |
+| `DELETE` | `/api/m3u/file?path=...` | Move the M3U to Trash; the audio stays put |
+| `GET` | `/api/library/search?q=...` | Library files whose artist, title, album or path contain every word (`limit` up to 100); `index_ready` is false until the library index has finished its first scan |
 
 ### Watched Artists
 

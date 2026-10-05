@@ -538,9 +538,32 @@
 
         <div id="watchedTabContainer" class="tab-panel">
             <div class="queue-header">
-                <h2 class="queue-section-heading">Watched Playlists / <a href="#watchedUpgrades" title="Jump to Watched Upgrades">Watched Upgrades &#8595;</a><span class="peon-hide"> / <a href="#audioAudit" title="Jump to Audio Provenance Audit">Audio Audit &#8595;</a></span></h2>
-                <button class="btn accent-btn" id="refreshAllWatchedBtn">Check All Now</button>
+                <div class="pill-group" id="watchedModePills">
+                    <button type="button" class="pill active" data-value="playlists">Playlists</button>
+                    <button type="button" class="pill" data-value="upgrades">Upgrades</button>
+                    <button type="button" class="pill peon-hide" data-value="audit">Audit</button>
+                    <button type="button" class="pill peon-hide" data-value="m3u">M3U Files</button>
+                    <span class="pill-indicator"></span>
+                </div>
+                <div class="watched-mode-actions" data-mode="playlists">
+                    <button class="btn accent-btn" id="refreshAllWatchedBtn">Check All Now</button>
+                </div>
+                <div class="upgrade-header-actions watched-mode-actions watched-mode-hidden" data-mode="upgrades">
+                    <button class="btn btn-ghost" id="upgradeAllBtn" onclick="upgradeAll()" title="Best-effort: download and swap in every proposed upgrade">Upgrade All</button>
+                    <button class="btn btn-ghost" id="quarantineToggleBtn" title="Files an upgrade swapped out: restore or delete them">Quarantine</button>
+                    <button class="btn accent-btn" id="rescanUpgradesBtn">Rescan Library</button>
+                </div>
+                <div class="audio-audit-header-actions watched-mode-actions watched-mode-hidden" data-mode="audit">
+                    <button class="btn btn-ghost" id="audioAuditExportCsvBtn" onclick="exportAudioAudit('csv')">Export CSV</button>
+                    <button class="btn btn-ghost" id="audioAuditExportJsonBtn" onclick="exportAudioAudit('json')">Export JSON</button>
+                    <button class="btn accent-btn" id="runAudioAuditBtn" onclick="runAudioAudit()">Run Audit</button>
+                </div>
+                <div class="watched-mode-actions watched-mode-hidden" data-mode="m3u">
+                    <button class="btn accent-btn" id="m3uRefreshBtn" onclick="loadM3uFiles()">Refresh</button>
+                </div>
             </div>
+
+            <div id="watchedPlaylistsPanel" class="watched-mode-panel" data-mode="playlists">
             <div class="watched-add-panel">
                 <p class="watched-panel-text">
                     Add a Spotify, YouTube, Apple Music, Amazon Music, SoundCloud, or ListenBrainz playlist to automatically download new tracks when they're added.
@@ -660,16 +683,10 @@
             </div>
 
             <!-- Watched Artists has moved to the Artists tab. -->
-
-            <!-- Watched Upgrades section -->
-            <div id="watchedUpgrades" class="queue-header section-with-top-margin">
-                <h2 class="queue-section-heading">Watched Upgrades</h2>
-                <div class="upgrade-header-actions">
-                    <button class="btn btn-ghost" id="upgradeAllBtn" onclick="upgradeAll()" title="Best-effort: download and swap in every proposed upgrade">Upgrade All</button>
-                    <button class="btn btn-ghost" id="quarantineToggleBtn" title="Files an upgrade swapped out: restore or delete them">Quarantine</button>
-                    <button class="btn accent-btn" id="rescanUpgradesBtn">Rescan Library</button>
-                </div>
             </div>
+
+            <!-- Watched Upgrades -->
+            <div id="watchedUpgrades" class="watched-mode-panel watched-mode-hidden" data-mode="upgrades">
             <div class="watched-add-panel">
                 <p class="watched-panel-text">
                     Files MusicGrabber downloaded that are sitting below the quality you currently download at. Each proposal shows the downloaded source quality, then the format MusicGrabber will actually store after conversion. A lossless source converted to Opus, MP3, or AAC remains a lossy output. Hover a proposed upgrade to preview it before you commit. Your Albums are never touched, only Singles and playlist tracks.
@@ -693,15 +710,10 @@
                 <div id="quarantineList" class="results"><p class="watched-empty-text">Loading&hellip;</p></div>
             </div>
 
-            <!-- Read-only Audio Provenance Audit -->
-            <div id="audioAudit" class="queue-header section-with-top-margin peon-hide">
-                <h2 class="queue-section-heading">Audio Provenance Audit</h2>
-                <div class="audio-audit-header-actions">
-                    <button class="btn btn-ghost" id="audioAuditExportCsvBtn" onclick="exportAudioAudit('csv')">Export CSV</button>
-                    <button class="btn btn-ghost" id="audioAuditExportJsonBtn" onclick="exportAudioAudit('json')">Export JSON</button>
-                    <button class="btn accent-btn" id="runAudioAuditBtn" onclick="runAudioAudit()">Run Audit</button>
-                </div>
             </div>
+
+            <!-- Read-only Audio Provenance Audit -->
+            <div id="audioAudit" class="watched-mode-panel watched-mode-hidden" data-mode="audit">
             <div class="watched-add-panel peon-hide">
                 <p class="watched-panel-text">
                     A read-only census of every supported audio file under your music directory, including Albums and historical files. It reports observed storage and recorded acquisition evidence; it does not pretend a large bitrate and a confident waistcoat can prove genuine lossless audio.
@@ -756,6 +768,22 @@
                 <button class="btn btn-ghost" id="audioAuditPrevBtn" onclick="changeAudioAuditPage(-1)">&#8592; Prev</button>
                 <span id="audioAuditPageInfo" class="upgrades-page-info"></span>
                 <button class="btn btn-ghost" id="audioAuditNextBtn" onclick="changeAudioAuditPage(1)">Next &#8594;</button>
+            </div>
+            </div>
+
+            <!-- M3U Files: the playlist files on disk, and the editor for them -->
+            <div id="m3uFilesPanel" class="watched-mode-panel watched-mode-hidden" data-mode="m3u">
+                <div class="watched-add-panel">
+                    <p class="watched-panel-text">
+                        The playlist files sitting in your Playlists folder (or the top of Singles, if you have no Playlists folder). Reorder them, prune the dead entries, or add tracks you already own. Files a watched playlist writes are rebuilt on every refresh, so those open read-only; Save as copy gives you one of your own to fiddle with.
+                    </p>
+                    <div class="input-action">
+                        <input type="text" id="m3uNewNameInput" class="panel-text-input" placeholder="New playlist name" autocomplete="off">
+                        <button class="btn btn-primary input-action-btn panel-action-btn" id="m3uCreateBtn" onclick="createM3uFile()">New Playlist</button>
+                    </div>
+                    <p id="m3uFolderInfo" class="watched-schedule-info"></p>
+                </div>
+                <div id="m3uFilesList" class="results"></div>
             </div>
         </div>
 
@@ -1773,6 +1801,49 @@
             </div>
 
             <div id="missingTrackVersionsBody" class="missing-track-modal-body"></div>
+        </div>
+    </div>
+
+    <!-- M3U editor: one playlist file, reorder / remove / add -->
+    <div id="m3uEditorOverlay" style="display:none;" class="modal-overlay" onclick="closeM3uEditor()">
+        <div class="m3u-editor-card" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <div>
+                    <h3 id="m3uEditorTitle" class="modal-title">Edit Playlist</h3>
+                    <div id="m3uEditorMeta" class="tag-editor-meta"></div>
+                </div>
+                <button onclick="closeM3uEditor()" class="modal-close-btn" title="Close">&#x2715;</button>
+            </div>
+            <div id="m3uEditorNotice" class="m3u-editor-notice" style="display:none;"></div>
+            <div id="m3uEditorList" class="m3u-editor-list"></div>
+            <div id="m3uEditorError" class="tag-editor-error" style="display:none;"></div>
+            <div class="tag-editor-actions">
+                <div class="tag-editor-actions-left">
+                    <button type="button" id="m3uAddBtn" class="btn btn-ghost tag-editor-secondary-btn" onclick="openLibraryPicker({ onPick: addM3uEntryFromLibrary, keepOpen: true })"><i class="fa-solid fa-plus"></i> Add Tracks</button>
+                    <button type="button" id="m3uPruneBtn" class="btn btn-ghost tag-editor-secondary-btn" onclick="removeMissingM3uEntries()">Remove Missing</button>
+                    <button type="button" id="m3uDeleteBtn" class="btn btn-ghost tag-editor-secondary-btn m3u-delete-btn" onclick="deleteM3uFile()">Delete Playlist</button>
+                </div>
+                <div class="tag-editor-actions-right">
+                    <button type="button" onclick="closeM3uEditor()" class="btn btn-ghost tag-editor-secondary-btn">Cancel</button>
+                    <button type="button" id="m3uCopyBtn" class="btn btn-ghost tag-editor-secondary-btn" onclick="saveM3uAsCopy()">Save as Copy</button>
+                    <button type="button" id="m3uSaveBtn" class="btn btn-primary tag-editor-primary-btn" onclick="saveM3uFile()" disabled>Save</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Library picker: find a file you already own. Used by the M3U editor and missing-track matching. -->
+    <div id="libraryPickerOverlay" style="display:none;" class="modal-overlay" onclick="closeLibraryPicker()">
+        <div class="library-picker-card" onclick="event.stopPropagation()">
+            <div class="modal-header">
+                <div>
+                    <h3 id="libraryPickerTitle" class="modal-title">Pick from Your Library</h3>
+                    <div id="libraryPickerMeta" class="tag-editor-meta"></div>
+                </div>
+                <button onclick="closeLibraryPicker()" class="modal-close-btn" title="Close">&#x2715;</button>
+            </div>
+            <input type="search" id="libraryPickerInput" class="tag-editor-input" placeholder="Artist, title, album or folder" autocomplete="off">
+            <div id="libraryPickerResults" class="library-picker-results"></div>
         </div>
     </div>
 

@@ -41,6 +41,13 @@ class LibrarySnapshots:
             state = "refreshing" if entry["running"] else "error" if entry["error"] else "ready"
             return entry["value"], state
 
+    def forget(self, key):
+        """Mark a scope stale so its next get() rescans instead of waiting out the TTL."""
+        with self.lock:
+            entry = self.entries.get(key)
+            if entry and not entry["running"]:
+                entry["finished"] = 0
+
 
 snapshots = LibrarySnapshots()
 

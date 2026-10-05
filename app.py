@@ -61,6 +61,7 @@ from models import (
     SetUserPasswordRequest, SetUserRoleRequest,
     DownloadTokenRequest,
     LongformDetectRequest, LongformSplitRequest,
+    M3uSaveRequest, M3uCreateRequest, LibraryMatchRequest,
 )
 from middleware import AuthMiddleware, invalidate_users_cache
 from auth import (
@@ -114,6 +115,7 @@ from watched_playlists import (
 from watched_artists import refresh_watched_artist, start_artist_scheduler, wake_artist_scheduler, seed_artist_albums
 import discovery
 import library_index
+import playlist_files
 from library_index import start_library_index_scheduler
 from upgrades import (
     start_upgrade_scheduler, run_scan_all,
@@ -491,6 +493,74 @@ def list_playlists(http_request: Request):
 
     return {"playlists": sorted(results.values(), key=lambda p: p["name"].casefold()),
             "scan_state": scan_state, "scan_ready": physical is not None}
+
+
+# =============================================================================
+# M3U playlist files (the editor on the Watched tab's M3U Files pill)
+# =============================================================================
+
+def _m3u_call(fn, *args, **kwargs):
+    try:
+        return fn(*args, **kwargs)
+    except playlist_files.PlaylistFileError as e:
+        raise HTTPException(status_code=e.status, detail=e.detail)
+
+
+def _no_peons(http_request: Request):
+    # The Playlists folder is often shared, and a peon is not trusted with
+    # anybody else's playlist, so the editor stays behind the same rope as Audit.
+    if _is_peon(http_request):
+        raise HTTPException(status_code=403, detail="Playlist editing is not available to this account")
+
+
+@app.get("/api/m3u")
+def list_m3u_files(http_request: Request):
+    """Every M3U in the Playlists folder (or Singles root), with entry and missing counts."""
+    _no_peons(http_request)
+    user_id = http_request.state.user_id
+    return {
+        "playlists": _m3u_call(playlist_files.list_playlists, user_id),
+        "default_dir": str(playlist_files.default_dir(user_id)),
+    }
+
+
+@app.get("/api/m3u/file")
+def read_m3u_file(http_request: Request, path: str = ""):
+    _no_peons(http_request)
+    return _m3u_call(playlist_files.read_playlist, http_request.state.user_id, path)
+
+
+@app.put("/api/m3u/file")
+def save_m3u_file(body: M3uSaveRequest, http_request: Request):
+    _no_peons(http_request)
+    return _m3u_call(
+        playlist_files.save_playlist, http_request.state.user_id, body.path, body.mtime_ns,
+        [e.model_dump() for e in body.entries],
+    )
+
+
+@app.post("/api/m3u")
+def create_m3u_file(body: M3uCreateRequest, http_request: Request):
+    """A new empty playlist, or Save as copy when copy_from is given."""
+    _no_peons(http_request)
+    return _m3u_call(
+        playlist_files.create_playlist, http_request.state.user_id, body.name,
+        copy_from=body.copy_from, mtime_ns=body.mtime_ns,
+        entries=[e.model_dump() for e in body.entries] if body.entries is not None else None,
+    )
+
+
+@app.delete("/api/m3u/file")
+def delete_m3u_file(http_request: Request, path: str = ""):
+    """Bin the M3U. The tracks it lists stay exactly where they are."""
+    _no_peons(http_request)
+    return _m3u_call(playlist_files.delete_playlist, http_request.state.user_id, path)
+
+
+@app.get("/api/library/search")
+def search_library_files(http_request: Request, q: str = "", limit: int = 50):
+    """The library-file picker: indexed files whose tags or path contain every word."""
+    return playlist_files.search_library(http_request.state.user_id, q, limit=max(1, min(limit, 100)))
 
 
 # =============================================================================
@@ -5045,7 +5115,7 @@ def get_missing_watched_tracks(playlist_id: str, http_request: Request):
             if (playlist["sync_mode"] or "append") == "mirror" else ""
         )
         rows = conn.execute(
-            f"""SELECT wpt.artist, wpt.title, wpt.first_seen, wpt.removed_at, j.status as job_status
+            f"""SELECT wpt.track_hash, wpt.artist, wpt.title, wpt.first_seen, wpt.removed_at, j.status as job_status
                FROM watched_playlist_tracks wpt
                LEFT JOIN jobs j ON wpt.job_id = j.id
                WHERE wpt.playlist_id = ?
@@ -5208,6 +5278,64 @@ def delete_watched_playlist_track_file(
         "track_hash": track_hash,
         "trashed": bool(trashed_files),
     }
+
+
+@app.post("/api/watched-playlists/{playlist_id}/tracks/{track_hash}/match")
+def match_watched_track_to_library_file(
+    playlist_id: str,
+    track_hash: str,
+    body: LibraryMatchRequest,
+    http_request: Request,
+):
+    """Point a missing watched track at a file already in the library.
+
+    For when the automatic match is wrong or absent and you know perfectly well
+    you own the thing. The file must be a real audio file inside your music
+    folder; whether it is the right song is your call, which is the point. It is
+    recorded as the track's resolved path exactly as a download would be, so the
+    M3U rebuild picks it up and the next refresh leaves it alone.
+    """
+    user_id = http_request.state.user_id
+    is_admin = http_request.state.is_admin
+    with db_conn() as conn:
+        conn.row_factory = sqlite3.Row
+        _scope_frag, _scope_params = _user_scope(user_id, is_admin)
+        track = conn.execute(
+            f"""SELECT wp.id, wp.name, wp.make_m3u, wp.use_playlists_dir,
+                       wp.sync_mode, wp.custom_subdir, wp.user_id
+                FROM watched_playlist_tracks wpt
+                JOIN watched_playlists wp ON wp.id = wpt.playlist_id
+                WHERE wpt.playlist_id = ? AND wpt.track_hash = ?
+                  AND {_scope_frag}""",
+            (playlist_id, track_hash, *_scope_params),
+        ).fetchone()
+
+    if not track:
+        raise HTTPException(status_code=404, detail="Watched playlist track not found")
+
+    audio = authoritative_audio_file(body.path, track["user_id"])
+    if audio is None:
+        raise HTTPException(status_code=400, detail="That is not an audio file in your music library")
+
+    with db_conn() as conn:
+        conn.execute(
+            """UPDATE watched_playlist_tracks
+               SET downloaded_at = datetime('now'), resolved_path = ?
+               WHERE playlist_id = ? AND track_hash = ?""",
+            (str(audio), playlist_id, track_hash),
+        )
+        conn.commit()
+
+    if track["make_m3u"]:
+        rebuild_watched_playlist_m3u(
+            track["id"], track["name"],
+            use_playlists_dir=bool(track["use_playlists_dir"]),
+            sync_mode=track["sync_mode"] or "append",
+            user_id=track["user_id"],
+            custom_subdir=track["custom_subdir"] or None,
+        )
+
+    return {"playlist_id": playlist_id, "track_hash": track_hash, "path": str(audio)}
 
 
 @app.post("/api/watched-playlists/{playlist_id}/retry-track")

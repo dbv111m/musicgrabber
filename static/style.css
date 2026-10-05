@@ -5950,6 +5950,368 @@ h1 {
 }
 
 /* --------------------------------------------------------------------------
+   Watched tab pills
+   Panels and their header buttons switch by class, not inline display,
+   because applyUserRoleToUI clears inline display on every .peon-hide and
+   would otherwise reveal whichever panel it pleased.
+   -------------------------------------------------------------------------- */
+
+.watched-mode-hidden {
+    display: none !important;
+}
+
+.watched-mode-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+}
+
+/* --------------------------------------------------------------------------
+   M3U Files pill, M3U editor and library picker
+   -------------------------------------------------------------------------- */
+
+#m3uFilesList {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+}
+
+.m3u-file-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    width: 100%;
+    padding: var(--space-3) var(--space-4);
+    font-family: inherit;
+    text-align: left;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    color: var(--text-primary);
+    cursor: pointer;
+    transition: border-color 0.15s, transform 0.15s;
+}
+
+.m3u-file-row:hover {
+    border-color: var(--accent);
+    transform: translateY(-1px);
+}
+
+.m3u-file-icon {
+    color: var(--text-secondary);
+}
+
+.m3u-file-info {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-0-5);
+    flex: 1;
+    min-width: 0;
+}
+
+.m3u-file-name {
+    font-size: 14px;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.m3u-file-meta {
+    font-size: 12px;
+    color: var(--text-secondary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.m3u-file-open {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--accent);
+}
+
+.m3u-badge {
+    display: inline-block;
+    margin-left: var(--space-1);
+    padding: 0 var(--space-1-5);
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-pill);
+    vertical-align: middle;
+}
+
+.m3u-missing-count {
+    color: var(--error);
+}
+
+.m3u-editor-card,
+.library-picker-card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: var(--space-5);
+    width: min(760px, 94vw);
+    max-height: 85vh;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+}
+
+.library-picker-card {
+    width: min(620px, 94vw);
+    max-height: 80vh;
+}
+
+/* Opened on top of the M3U editor, so it has to sit above it. */
+#libraryPickerOverlay {
+    z-index: 1010;
+}
+
+.m3u-editor-notice {
+    padding: var(--space-2-5) var(--space-3);
+    font-size: 12px;
+    color: var(--text-secondary);
+    background: var(--bg-tertiary);
+    border-left: 3px solid var(--warning);
+    border-radius: var(--radius-sm);
+}
+
+.m3u-editor-list {
+    flex: 1;
+    min-height: 200px;
+    overflow-y: auto;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+}
+
+.m3u-row {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-1-5) var(--space-2);
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border);
+    transition: background 0.15s, box-shadow 0.15s;
+}
+
+.m3u-row:last-child {
+    border-bottom: none;
+}
+
+.m3u-row:hover {
+    background: var(--bg-tertiary);
+}
+
+.m3u-row-dragging {
+    z-index: 1;
+    background: var(--bg-tertiary);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35), inset 0 0 0 1px var(--accent);
+}
+
+.m3u-drag-handle {
+    padding: var(--space-1) var(--space-1-5);
+    color: var(--text-secondary);
+    cursor: grab;
+    touch-action: none;
+}
+
+.m3u-row-dragging .m3u-drag-handle {
+    cursor: grabbing;
+    color: var(--accent);
+}
+
+.m3u-row-num {
+    min-width: 28px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+.m3u-row-text {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-width: 0;
+}
+
+.m3u-row-title,
+.m3u-row-sub {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.m3u-row-title {
+    font-size: 13px;
+    color: var(--text-primary);
+}
+
+.m3u-row-sub {
+    font-size: 11px;
+    color: var(--text-secondary);
+}
+
+.m3u-row-missing .m3u-row-title {
+    color: var(--text-secondary);
+    text-decoration: line-through;
+}
+
+.m3u-row-flag {
+    margin-left: var(--space-1);
+    padding: 0 var(--space-1);
+    font-size: 10px;
+    color: var(--text-secondary);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    text-decoration: none;
+    display: inline-block;
+}
+
+.m3u-row-flag-missing {
+    color: var(--error);
+    border-color: var(--error);
+}
+
+.m3u-row-flag-new {
+    color: var(--accent);
+    border-color: var(--accent);
+}
+
+.m3u-row-duration {
+    font-size: 12px;
+    color: var(--text-secondary);
+    font-variant-numeric: tabular-nums;
+}
+
+.m3u-row-actions {
+    display: flex;
+    gap: var(--space-0-5);
+}
+
+.m3u-row-btn {
+    width: 28px;
+    height: 28px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s;
+}
+
+.m3u-row-btn:hover:not(:disabled),
+.m3u-row-btn:focus-visible {
+    color: var(--accent);
+    border-color: var(--border);
+}
+
+.m3u-row-btn:disabled {
+    opacity: 0.3;
+    cursor: default;
+}
+
+.m3u-row-remove:hover:not(:disabled) {
+    color: var(--error);
+}
+
+.btn.m3u-delete-btn:hover {
+    color: var(--error);
+    border-color: var(--error);
+}
+
+.m3u-editor-empty {
+    padding: var(--space-5) var(--space-4);
+    font-size: 13px;
+    color: var(--text-secondary);
+    text-align: center;
+}
+
+.library-picker-results {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1-5);
+    min-height: 160px;
+    overflow-y: auto;
+}
+
+.library-picker-row {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-0-5);
+    padding: var(--space-2) var(--space-3);
+    font-family: inherit;
+    text-align: left;
+    background: var(--bg-tertiary);
+    border: 1px solid transparent;
+    border-radius: var(--radius-md);
+    color: var(--text-primary);
+    cursor: pointer;
+    transition: border-color 0.15s, opacity 0.15s;
+}
+
+.library-picker-row:hover,
+.library-picker-row:focus-visible {
+    border-color: var(--accent);
+}
+
+.library-picker-picked {
+    opacity: 0.55;
+    border-color: var(--accent);
+}
+
+.library-picker-picked::after {
+    content: "\2713  added";
+    position: absolute;
+    top: var(--space-2);
+    right: var(--space-3);
+    font-size: 11px;
+    color: var(--accent);
+}
+
+.library-picker-title {
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.library-picker-sub,
+.library-picker-path {
+    font-size: 11px;
+    color: var(--text-secondary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.library-picker-path {
+    font-family: var(--font-mono);
+    opacity: 0.8;
+}
+
+@media (max-width: 640px) {
+    .m3u-editor-card,
+    .library-picker-card {
+        width: calc(100vw - 20px);
+        max-height: 92vh;
+        padding: var(--space-4);
+    }
+
+    .m3u-row-num,
+    .m3u-row-duration {
+        display: none;
+    }
+}
+
+/* --------------------------------------------------------------------------
    Find New Artists (Artists tab -> "Find New Artists" pill)
    Horizontal rows of artist cards, seeded from listening/library/download
    history, a manual "recommend based on" box, and the rabbit hole (click a

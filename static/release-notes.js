@@ -11,6 +11,15 @@ const RELEASE_NOTES = {
         title: "What's New in v4.3.1",
         sections: [
             {
+                heading: "Your playlists, editable at last",
+                items: [
+                    "The Watched tab now has pills along the top: Playlists, Upgrades, Audit and the new M3U Files. Less scrolling, more doing.",
+                    "M3U Files lists your playlist files. Open one to drag tracks into order, remove the ones you've gone off, clear out entries pointing at files that no longer exist, or add songs you already own. You can start a fresh playlist there too.",
+                    "Playlists that a watched playlist keeps up to date open read-only, since your edits would be undone on the next refresh. Save as Copy gives you one of your own to play with.",
+                    "A watched playlist says a track is missing but you know it's in your library? Press From Library beside it and point at the file. Done, and it's in the playlist.",
+                ]
+            },
+            {
                 heading: "Put that album track back where it belongs",
                 items: [
                     "Wrong recording in an album? Choose Search replacement beside its track in Artists or Bulk Import, confirm moving the old copy to Trash, then pick the right result. The replacement keeps the album folder, pressing, disc and track numbers, and updates its existing M3U. No accidental promotion to a solo career in Singles.",
