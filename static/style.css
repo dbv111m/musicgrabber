@@ -1983,6 +1983,41 @@ h1 {
     color: var(--text-primary);
 }
 
+.queue-search-status-action {
+    margin-left: var(--space-1);
+    padding: 0;
+    border: none;
+    background: none;
+    color: var(--accent);
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.queue-search-status-action:hover,
+.queue-search-status-action:focus-visible {
+    text-decoration: underline;
+}
+
+/* The Stats Failed card, when there is something to go and look at. */
+.stats-card-link {
+    padding: var(--space-3);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    text-align: center;
+    font: inherit;
+    color: inherit;
+    cursor: pointer;
+    transition: border-color 0.15s ease, transform 0.15s ease;
+}
+
+.stats-card-link:hover,
+.stats-card-link:focus-visible {
+    border-color: var(--error);
+    transform: translateY(-1px);
+}
+
 @media (max-width: 768px) {
     .queue-search-input {
         width: 100%;

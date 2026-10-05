@@ -1193,6 +1193,12 @@
         let queueHistorySortMode = 'recent';
         let queueSearchTerm = '';
         let queueSearchDebounce = null;
+        // One exact job status, filtered server-side. Only Stats sets it, so it
+        // only ever says 'failed' for now, and the status line offers the way out.
+        let queueStatusFilter = '';
+        // What Stats counted when it sent us here. Stats sees every account; the
+        // Queue sees yours, and a mismatch deserves a sentence, not a shrug.
+        let queueStatsFailedCount = null;
         // Whole-queue status counts from the server, so the live summary keeps
         // telling the truth while a search has the visible list down to one card.
         let queueTotals = null;
@@ -3832,7 +3838,7 @@
             // undercounts the moment a search is on, or the queue outgrows the window.
             const fromTotals = activeCountFromTotals();
             if (fromTotals !== null) return fromTotals;
-            const jobs = allQueueJobs.length > 0 && !queueSearchTerm ? allQueueJobs : await (async () => {
+            const jobs = allQueueJobs.length > 0 && !queueSearchTerm && !queueStatusFilter ? allQueueJobs : await (async () => {
                 try {
                     const response = await apiFetch('/api/jobs?limit=250');
                     if (!response.ok) return [];
@@ -3877,6 +3883,8 @@
             if (queueLoadInFlight) return;
             queueLoadInFlight = true;
             const requestedTerm = queueSearchTerm;
+            const requestedStatus = queueStatusFilter;
+            const isOutdated = () => requestedTerm !== queueSearchTerm || requestedStatus !== queueStatusFilter;
             if (showLoading) {
                 queueTab.innerHTML = `
                     <div class="loading loading-with-copy" role="status">
@@ -3887,14 +3895,14 @@
             }
 
             try {
-                const url = requestedTerm
-                    ? `/api/jobs?limit=${QUEUE_SEARCH_LIMIT}&q=${encodeURIComponent(requestedTerm)}`
-                    : `/api/jobs?limit=${QUEUE_SEARCH_LIMIT}`;
+                let url = `/api/jobs?limit=${QUEUE_SEARCH_LIMIT}`;
+                if (requestedTerm) url += `&q=${encodeURIComponent(requestedTerm)}`;
+                if (requestedStatus) url += `&status=${encodeURIComponent(requestedStatus)}`;
                 const response = await apiFetch(url);
                 if (!response.ok) throw new Error('Failed to load jobs');
 
                 const data = await response.json();
-                if (requestedTerm !== queueSearchTerm) return;
+                if (isOutdated()) return;
                 allQueueJobs = data.jobs;
                 queueTotals = data.queue_totals || null;
                 queueLastUpdatedAt = Date.now();
@@ -3904,7 +3912,7 @@
                 renderQueueSummary();
                 renderQueuePage();
             } catch (error) {
-                if (showLoading && requestedTerm === queueSearchTerm) {
+                if (showLoading && !isOutdated()) {
                     queueTab.innerHTML = `
                         <div class="empty-state">
                             <div class="empty-state-icon"><i class="fa-solid fa-circle-exclamation"></i></div>
@@ -3914,9 +3922,9 @@
                 }
             } finally {
                 queueLoadInFlight = false;
-                // A search changed while we waited; fetch it now, however long
-                // the previous request took to make up its mind.
-                if (requestedTerm !== queueSearchTerm) await loadJobs(false);
+                // A search or filter changed while we waited; fetch it now, however
+                // long the previous request took to make up its mind.
+                if (isOutdated()) await loadJobs(false);
             }
         }
 
@@ -4020,7 +4028,7 @@
             const nextBtn = document.getElementById('queueNextBtn');
             if (allQueueJobs.length > 1) {
                 pagerEl.style.display = 'flex';
-                const noun = queueSearchTerm ? 'matches' : 'jobs';
+                const noun = queueSearchTerm || queueStatusFilter ? 'matches' : 'jobs';
                 infoEl.textContent = `Page ${queuePage} of ${totalPages} (${allQueueJobs.length} ${noun})`;
                 prevBtn.disabled = queuePage <= 1;
                 nextBtn.disabled = queuePage >= totalPages;
@@ -4034,6 +4042,11 @@
         function renderQueueSearchStatus() {
             const statusEl = document.getElementById('queueSearchStatus');
             if (!statusEl) return;
+            if (queueStatusFilter) {
+                statusEl.innerHTML = queueFailedFilterStatus();
+                statusEl.style.display = 'block';
+                return;
+            }
             if (!queueSearchTerm) {
                 statusEl.style.display = 'none';
                 statusEl.innerHTML = '';
@@ -4051,6 +4064,38 @@
                 statusEl.innerHTML = `<strong>${count}</strong> match${count === 1 ? '' : 'es'} for &ldquo;${term}&rdquo; across the whole queue.`;
             }
             statusEl.style.display = 'block';
+        }
+
+        function queueFailedFilterStatus() {
+            const count = allQueueJobs.length;
+            const forTerm = queueSearchTerm ? ` matching &ldquo;${escapeHtml(queueSearchTerm)}&rdquo;` : '';
+            let text;
+            if (!count) {
+                text = `No failed downloads${forTerm}.`;
+            } else if (count >= QUEUE_SEARCH_LIMIT) {
+                text = `Showing the newest <strong>${QUEUE_SEARCH_LIMIT}</strong> failed downloads${forTerm}. Search to narrow it down.`;
+            } else {
+                text = `<strong>${count}</strong> failed download${count === 1 ? '' : 's'}${forTerm} across your whole queue.`;
+            }
+            const yours = queueTotals ? (queueTotals.failed || 0) : null;
+            if (queueStatsFailedCount !== null && yours !== null && queueStatsFailedCount > yours) {
+                text += " Stats counts every account's failures; this list only holds yours.";
+            }
+            return `${text} <button type="button" class="queue-search-status-action" data-queue-clear-status>Show everything</button>`;
+        }
+
+        function showQueueFailures(statsCount) {
+            queueStatusFilter = 'failed';
+            queueStatsFailedCount = Number.isFinite(statsCount) ? statsCount : null;
+            queuePage = 1;
+            document.querySelector('[data-tab="queue"]')?.click();
+        }
+
+        function clearQueueStatusFilter() {
+            queueStatusFilter = '';
+            queueStatsFailedCount = null;
+            queuePage = 1;
+            loadJobs(false);
         }
 
         function getSortedQueueJobs() {
@@ -4098,6 +4143,16 @@
                 if (container === queueTab) expandedJobIds.clear();
                 // A search that found nothing is not an empty queue, and saying so
                 // has sent more than one person hunting for a bug that isn't there.
+                if (container === queueTab && queueStatusFilter) {
+                    container.innerHTML = `
+                        <div class="empty-state">
+                            <div class="empty-state-icon"><i class="fa-solid fa-circle-check"></i></div>
+                            <p>No failed downloads${queueSearchTerm ? ` matching &ldquo;${escapeHtml(queueSearchTerm)}&rdquo;` : ''}</p>
+                            <small>Either everything worked or somebody tidied up. Both are fine.</small>
+                        </div>
+                    `;
+                    return;
+                }
                 if (container === queueTab && queueSearchTerm) {
                     container.innerHTML = `
                         <div class="empty-state">
@@ -6737,6 +6792,12 @@
                 });
             }
         }
+
+        // The status line's "Show everything" drops the failed filter but leaves
+        // any search alone, since that was typed on purpose.
+        document.getElementById('queueSearchStatus')?.addEventListener('click', (event) => {
+            if (event.target.closest('[data-queue-clear-status]')) clearQueueStatusFilter();
+        });
 
         // Minimum-quality filter: remembered between searches, since somebody who
         // only wants lossless generally still only wants lossless five minutes later.
@@ -10970,10 +11031,15 @@
                         <div style="font-size: 22px; font-weight: 600;">${data.completed}</div>
                         <div style="font-size: 11px; color: var(--text-secondary);">Completed</div>
                     </div>
-                    <div style="padding: 14px; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 12px; text-align: center;" title="Downloads that failed  -  check the Queue tab for error details">
+                    ${data.failed > 0 ? `
+                    <button type="button" class="stats-card-link" onclick="showQueueFailures(${Number(data.failed)})" title="Open the Queue showing only failed downloads, with their error details">
                         <div style="font-size: 22px; font-weight: 600; color: var(--error);">${data.failed}</div>
+                        <div style="font-size: 11px; color: var(--text-secondary);">Failed <i class="fa-solid fa-arrow-right" aria-hidden="true"></i></div>
+                    </button>` : `
+                    <div style="padding: 14px; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 12px; text-align: center;" title="Downloads that failed. None, at the moment.">
+                        <div style="font-size: 22px; font-weight: 600; color: var(--error);">0</div>
                         <div style="font-size: 11px; color: var(--text-secondary);">Failed</div>
-                    </div>
+                    </div>`}
                     <div style="padding: 14px; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 12px; text-align: center;" title="Percentage of all download attempts that completed successfully">
                         <div style="font-size: 22px; font-weight: 600;">${successRate}%</div>
                         <div style="font-size: 11px; color: var(--text-secondary);">Success rate</div>

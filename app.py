@@ -2651,7 +2651,7 @@ def _attach_acquisition_summaries(conn, jobs: list[dict]) -> None:
 
 @app.get("/api/jobs")
 def get_jobs(limit: int = 20, import_id: str | None = None, q: str | None = None,
-             http_request: Request = None):
+             status: str | None = None, http_request: Request = None):
     """Get recent jobs.
 
     import_id scopes the result to one bulk import's tracks instead of the
@@ -2664,6 +2664,10 @@ def get_jobs(limit: int = 20, import_id: str | None = None, q: str | None = None
     not just the newest `limit` rows the Queue tab normally shows. Somebody who
     imported a 900-track playlist and now wants to fix the one track that came
     back as a Minecraft parody should not have to page through 89 other ones.
+
+    status narrows to one exact job status, also across the whole table, which
+    is how the Stats tab's Failed count lands on the failures themselves rather
+    than on whichever few happen to be among the newest 250.
     """
     from pathlib import Path as _Path
     user_id = http_request.state.user_id if http_request else None
@@ -2683,6 +2687,9 @@ def get_jobs(limit: int = 20, import_id: str | None = None, q: str | None = None
             " OR COALESCE(j.playlist_name, '') LIKE ? ESCAPE '\\')"
         )
         search_params = (pattern, pattern, pattern, pattern)
+    if status:
+        search_frag += " AND j.status = ?"
+        search_params += (status,)
 
     with db_conn() as conn:
         conn.row_factory = sqlite3.Row
@@ -2752,7 +2759,7 @@ def get_jobs(limit: int = 20, import_id: str | None = None, q: str | None = None
 
         _attach_acquisition_summaries(conn, jobs)
 
-        # Live counts for the whole queue, never narrowed by q or by the newest-N
+        # Live counts for the whole queue, never narrowed by q, status, or the newest-N
         # window. The tab's "3 on the workbench" banner and the queue-size guard
         # both read these, so searching for one track does not convince the UI
         # that the other 800 have quietly emigrated.

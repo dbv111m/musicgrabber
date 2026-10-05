@@ -158,3 +158,39 @@ def test_search_within_bulk_import_uses_job_fields_and_user_scope(fresh_db, term
                           http_request=_request(is_admin=False))
     assert _ids(result) == {"mine"}
     assert result["queue_totals"] is None
+
+
+# ---------------------------------------------------------------------------
+# Status filter: the Stats tab's Failed count, clicked
+# ---------------------------------------------------------------------------
+
+def test_failed_filter_reaches_failures_the_window_would_never_show(fresh_db):
+    """Stats counts every failure, so the Queue must be able to find every one."""
+    import app
+
+    for n in range(30):
+        _add_job(fresh_db, f"fine-{n:02d}", artist="Fine Band", title=f"Fine {n}",
+                 created_at=f"2026-09-02 12:{n:02d}:00")
+    _add_job(fresh_db, "old-failure", artist="Ancient", title="Broken",
+             status="failed", created_at="2026-07-01 09:00:00")
+    _add_job(fresh_db, "nearly-failed", artist="Close", title="Call",
+             status="completed_with_errors", created_at="2026-07-01 09:00:00")
+
+    result = app.get_jobs(limit=20, status="failed", http_request=_request())
+    assert _ids(result) == {"old-failure"}
+    # The workbench banner must still see the whole queue.
+    assert result["queue_totals"] == {"completed": 30, "failed": 1, "completed_with_errors": 1}
+
+
+def test_failed_filter_keeps_the_search_and_the_scope(fresh_db):
+    import app
+
+    _add_job(fresh_db, "mine", artist="Boards of Canada", title="Roygbiv", status="failed")
+    _add_job(fresh_db, "mine-other", artist="Someone", title="Else", status="failed")
+    _add_job(fresh_db, "mine-done", artist="Boards of Canada", title="Dayvan Cowboy")
+    _add_job(fresh_db, "theirs", artist="Boards of Canada", title="Roygbiv",
+             status="failed", user_id="bob")
+
+    result = app.get_jobs(limit=20, q="boards", status="failed",
+                          http_request=_request(user_id="alice", is_admin=True))
+    assert _ids(result) == {"mine"}
