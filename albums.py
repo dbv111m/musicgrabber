@@ -481,6 +481,23 @@ def queue_album_download(
     # "Various Artists - Song" finds precisely nothing.
     track_pairs = [(t.get("artist") or artist, t["title"]) for t in missing_tracks]
     track_isrcs = [t.get("isrc") for t in missing_tracks]
+    # Each track's place on the release, so a top-up tags track 7 as 7 rather
+    # than as the third thing it happened to queue. Vinyl positions ("A1") have
+    # no number in them, so those count along their disc instead.
+    disc_counts: Counter = Counter()
+    for t in status["tracks"]:
+        disc_counts[t["disc_number"]] += 1
+        position = str(t.get("position") or "")
+        t["track_number"] = int(position) if position.isdigit() else disc_counts[t["disc_number"]]
+    track_positions = [
+        {
+            "track_number": t["track_number"],
+            "track_total": t.get("track_total"),
+            "disc_number": t["disc_number"],
+            "disc_total": t["disc_total"],
+        }
+        for t in missing_tracks
+    ]
 
     if not track_pairs:
         updated_m3u = None
@@ -503,6 +520,7 @@ def queue_album_download(
         import_id = start_bulk_import_for_tracks(
             tracks=track_pairs,
             track_isrcs=track_isrcs,
+            track_positions=track_positions,
             convert_audio=convert_audio,
             user_id=user_id,
             override_dir=str(album_dir),

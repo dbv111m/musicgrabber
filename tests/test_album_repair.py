@@ -368,3 +368,65 @@ def test_unique_title_repair_can_remove_a_copy_with_wrong_number_tags(repair_lib
     assert prepared["context"]["track_number"] == 2
     assert prepared["context"]["disc_number"] == 1
     assert not bad.exists()
+
+
+def test_missing_only_album_import_keeps_release_positions(repair_library, monkeypatch, make_audio):
+    """A top-up of a double album must tag and name each track by its place on
+    the release, not by the order it happened to be queued in."""
+    import bulk_import
+    folder, _selection = repair_library
+    monkeypatch.setattr(bulk_import, "spawn_daemon_thread", lambda *args, **kwargs: None)
+    # Disc 1 track 1 is already on disk, so only two of the three are queued.
+    existing = make_audio(folder / "Guest One - Same Song.flac")
+    tags = MutagenFile(str(existing), easy=True)
+    tags["tracknumber"], tags["discnumber"] = "1", "1"
+    tags.save()
+
+    result = albums.queue_album_download("Various Artists", "Record", RELEASE, convert_audio=False)
+
+    with db.db_conn() as conn:
+        rows = conn.execute(
+            """SELECT line_num, artist, song, album_track_number, album_track_total,
+                      album_disc_number, album_disc_total
+               FROM bulk_import_tracks WHERE import_id = ? ORDER BY line_num""",
+            (result["import_id"],),
+        ).fetchall()
+        for line_num, job_id in ((1, "job-a"), (2, "job-b")):
+            conn.execute(
+                "UPDATE bulk_import_tracks SET job_id = ? WHERE import_id = ? AND line_num = ?",
+                (job_id, result["import_id"], line_num),
+            )
+        conn.commit()
+    assert [tuple(r) for r in rows] == [
+        (1, "Guest One", "Second Song", 2, 2, 1, 2),
+        (2, "Guest Two", "Same Song", 1, 1, 2, 2),
+    ]
+
+    second = downloads._get_job_album_context("job-a")
+    assert (second["track_number"], second["track_total"], second["disc_number"], second["disc_total"]) == (2, 2, 1, 2)
+    assert downloads._get_album_track_tag_context("job-a") == (2, 2)
+    repeat = downloads._get_job_album_context("job-b")
+    assert (repeat["track_artist"], repeat["track_title"], repeat["disc_number"]) == ("Guest Two", "Same Song", 2)
+    # Disc 2's "Same Song" no longer lands on top of disc 1's.
+    assert downloads._album_repair_output_stem(repeat, "job-b", None) == "02-01 - Same Song"
+
+
+def test_old_album_import_rows_still_fall_back_to_their_line(repair_library):
+    """Rows queued before positions were stored keep the old behaviour."""
+    folder, _selection = repair_library
+    with db.db_conn() as conn:
+        conn.execute(
+            """INSERT INTO bulk_imports (id, status, total_tracks, convert_audio, override_dir,
+                                         album_release_mbid, album_total_tracks, album_year)
+               VALUES ('old-imp', 'completed', 3, 0, ?, ?, 3, '2005')""",
+            (str(folder), RELEASE),
+        )
+        conn.execute(
+            """INSERT INTO bulk_import_tracks (import_id, line_num, artist, song, status, job_id)
+               VALUES ('old-imp', 3, 'Guest Two', 'Same Song', 'completed', 'old-job')"""
+        )
+        conn.commit()
+
+    context = downloads._get_job_album_context("old-job")
+    assert (context["track_number"], context["track_total"], context["disc_number"]) == (3, 3, None)
+    assert downloads._album_repair_output_stem(context, "old-job", None) is None

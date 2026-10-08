@@ -709,7 +709,9 @@ def _setup_job_album_context_db(monkeypatch, downloads):
                                     total_tracks INTEGER, album_total_tracks INTEGER,
                                     album_year TEXT);
         CREATE TABLE bulk_import_tracks (id INTEGER PRIMARY KEY AUTOINCREMENT, import_id TEXT,
-                                          job_id TEXT, song TEXT, line_num INTEGER);
+                                          job_id TEXT, artist TEXT, song TEXT, line_num INTEGER,
+                                          album_track_number INTEGER, album_track_total INTEGER,
+                                          album_disc_number INTEGER, album_disc_total INTEGER);
     """)
 
     @contextmanager

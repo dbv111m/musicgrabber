@@ -427,6 +427,13 @@ def init_db():
             conn.execute("ALTER TABLE bulk_import_tracks ADD COLUMN original_youtube_video_id TEXT")
         except sqlite3.OperationalError:
             pass
+        # Where an album track sits on the release. line_num is only its place in
+        # the import, which for a missing-only top-up of a double album is fiction.
+        for column in ("album_track_number", "album_track_total", "album_disc_number", "album_disc_total"):
+            try:
+                conn.execute(f"ALTER TABLE bulk_import_tracks ADD COLUMN {column} INTEGER")
+            except sqlite3.OperationalError:
+                pass
 
         # Long-form YouTube splitting: one master video cut into many tracks via
         # ffmpeg, rather than N independent per-line searches, so it gets its own

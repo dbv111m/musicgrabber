@@ -281,21 +281,68 @@ def _rename_with_track_number_if_enabled(
     return new_path
 
 
+def _derive_names_from_override_dir(override_dir: str | None) -> tuple[str | None, str | None]:
+    if not override_dir:
+        return None, None
+    try:
+        p = Path(override_dir)
+        album_name = p.name.strip() if p.name else None
+        album_artist = p.parent.name.strip() if p.parent and p.parent.name else None
+        return album_artist or None, album_name or None
+    except Exception:
+        return None, None
+
+
+def _bulk_album_context(job_id: str) -> dict:
+    """Album context for a job queued by an Albums-tab bulk import, or {}.
+
+    Prefers the track's place on the release, stored since v4.3.1. Older rows
+    only know their line in the import, which is right for a full single-disc
+    album and wrong for anything else, but it is all they have.
+    """
+    with db_conn() as conn:
+        conn.row_factory = sqlite3.Row
+        bi_row = conn.execute(
+            """
+            SELECT bi.override_dir, bi.album_release_mbid, bi.total_tracks,
+                   bi.album_total_tracks, bi.album_year,
+                   bit.artist AS track_artist, bit.song AS track_title, bit.line_num,
+                   bit.album_track_number, bit.album_track_total,
+                   bit.album_disc_number, bit.album_disc_total
+            FROM bulk_import_tracks bit
+            JOIN bulk_imports bi ON bi.id = bit.import_id
+            WHERE bit.job_id = ?
+              AND bi.override_dir IS NOT NULL
+              AND bi.override_dir != ''
+            LIMIT 1
+            """,
+            (job_id,),
+        ).fetchone()
+    if not bi_row:
+        return {}
+    override_dir = (bi_row["override_dir"] or "").strip() or None
+    album_artist, album_name = _derive_names_from_override_dir(override_dir)
+    track_number = bi_row["album_track_number"] or bi_row["line_num"]
+    track_total = bi_row["album_track_total"] or bi_row["album_total_tracks"] or bi_row["total_tracks"]
+    return {
+        "override_dir": override_dir,
+        "release_mbid": (bi_row["album_release_mbid"] or "").strip() or None,
+        "album_artist": album_artist,
+        "album_name": album_name or None,
+        "track_artist": (bi_row["track_artist"] or "").strip() or album_artist,
+        "track_title": (bi_row["track_title"] or "").strip() or None,
+        "track_number": int(track_number) if track_number else None,
+        "track_total": int(track_total) if track_total else None,
+        "disc_number": bi_row["album_disc_number"],
+        "disc_total": bi_row["album_disc_total"],
+        "year": (bi_row["album_year"] or "").strip() or None,
+    }
+
+
 def _get_job_album_context(job_id: str) -> dict:
     """Return album-routing context stored on a single download job."""
     if not job_id:
         return {}
-
-    def _derive_names_from_override_dir(override_dir: str | None) -> tuple[str | None, str | None]:
-        if not override_dir:
-            return None, None
-        try:
-            p = Path(override_dir)
-            album_name = p.name.strip() if p.name else None
-            album_artist = p.parent.name.strip() if p.parent and p.parent.name else None
-            return album_artist or None, album_name or None
-        except Exception:
-            return None, None
 
     def _year_from_albuminfo(override_dir: str | None) -> str | None:
         """Read the album year out of the folder's .albuminfo sidecar.
@@ -338,36 +385,7 @@ def _get_job_album_context(job_id: str) -> dict:
         if row and "album_context" in row.keys() and row["album_context"]:
             return json.loads(row["album_context"])
         if not row:
-            with db_conn() as conn:
-                conn.row_factory = sqlite3.Row
-                bi_row = conn.execute(
-                    """
-                    SELECT bi.override_dir, bi.album_release_mbid, bi.total_tracks,
-                           bi.album_total_tracks, bi.album_year,
-                           bit.song AS track_title, bit.line_num AS track_number
-                    FROM bulk_import_tracks bit
-                    JOIN bulk_imports bi ON bi.id = bit.import_id
-                    WHERE bit.job_id = ?
-                      AND bi.override_dir IS NOT NULL
-                      AND bi.override_dir != ''
-                    LIMIT 1
-                    """,
-                    (job_id,),
-                ).fetchone()
-            if not bi_row:
-                return {}
-            album_artist, album_name = _derive_names_from_override_dir((bi_row["override_dir"] or "").strip() or None)
-            _track_total_raw = bi_row["album_total_tracks"] or bi_row["total_tracks"]
-            return {
-                "override_dir": (bi_row["override_dir"] or "").strip() or None,
-                "release_mbid": (bi_row["album_release_mbid"] or "").strip() or None,
-                "album_artist": album_artist,
-                "album_name": album_name,
-                "track_title": (bi_row["track_title"] or "").strip() or None,
-                "track_number": int(bi_row["track_number"]) if bi_row["track_number"] else None,
-                "track_total": int(_track_total_raw) if _track_total_raw else None,
-                "year": (bi_row["album_year"] or "").strip() or None,
-            }
+            return _bulk_album_context(job_id)
 
         override_dir = (row["override_dir"] or "").strip() or None
         release_mbid = (row["album_release_mbid"] or "").strip() or None
@@ -377,35 +395,9 @@ def _get_job_album_context(job_id: str) -> dict:
         track_total = int(row["album_track_total"]) if row["album_track_total"] else None
 
         if not any([override_dir, release_mbid, album_name, track_title, track_number, track_total]):
-            with db_conn() as conn:
-                conn.row_factory = sqlite3.Row
-                bi_row = conn.execute(
-                    """
-                    SELECT bi.override_dir, bi.album_release_mbid, bi.total_tracks,
-                           bi.album_total_tracks, bi.album_year,
-                           bit.song AS track_title, bit.line_num AS track_number
-                    FROM bulk_import_tracks bit
-                    JOIN bulk_imports bi ON bi.id = bit.import_id
-                    WHERE bit.job_id = ?
-                      AND bi.override_dir IS NOT NULL
-                      AND bi.override_dir != ''
-                    LIMIT 1
-                    """,
-                    (job_id,),
-                ).fetchone()
-            if bi_row:
-                album_artist, album_name_from_dir = _derive_names_from_override_dir((bi_row["override_dir"] or "").strip() or None)
-                _track_total_raw = bi_row["album_total_tracks"] or bi_row["total_tracks"]
-                return {
-                    "override_dir": (bi_row["override_dir"] or "").strip() or None,
-                    "release_mbid": (bi_row["album_release_mbid"] or "").strip() or None,
-                    "album_artist": album_artist,
-                    "album_name": album_name_from_dir or None,
-                    "track_title": (bi_row["track_title"] or "").strip() or None,
-                    "track_number": int(bi_row["track_number"]) if bi_row["track_number"] else None,
-                    "track_total": int(_track_total_raw) if _track_total_raw else None,
-                    "year": (bi_row["album_year"] or "").strip() or None,
-                }
+            bulk_context = _bulk_album_context(job_id)
+            if bulk_context:
+                return bulk_context
 
         album_artist, album_name_from_dir = _derive_names_from_override_dir(override_dir)
         return {

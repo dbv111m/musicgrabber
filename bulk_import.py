@@ -309,6 +309,7 @@ def start_bulk_import_for_tracks(
     *,
     track_isrcs: Optional[list[str | None]] = None,
     original_youtube_video_ids: Optional[list[str | None]] = None,
+    track_positions: Optional[list[dict | None]] = None,
 ) -> str:
     """Create a bulk import job from a list of (artist, title) tuples.
 
@@ -320,6 +321,10 @@ def start_bulk_import_for_tracks(
     a precise ISRC-first lookup before falling back to free-text search. Only
     the Albums tab passes this; every other caller leaves it None and each row
     gets a NULL isrc, behaving exactly as before.
+
+    track_positions, likewise Albums-tab only and aligned the same way, holds
+    each track's place on the release ({track_number, track_total, disc_number,
+    disc_total}), so tags and filenames follow the record, not the import order.
     """
     import_id = str(uuid.uuid4())[:8]
 
@@ -355,6 +360,11 @@ def start_bulk_import_for_tracks(
                 if original_youtube_video_ids and line_num - 1 < len(original_youtube_video_ids)
                 else None
             )
+            _position = (
+                track_positions[line_num - 1]
+                if track_positions and line_num - 1 < len(track_positions)
+                else None
+            ) or {}
             track_hash = hash_track(artist, song)
             if watch_playlist_id:
                 owner_type = "watched_playlist"
@@ -392,9 +402,12 @@ def start_bulk_import_for_tracks(
             conn.execute(
                 """INSERT INTO bulk_import_tracks
                    (import_id, line_num, artist, song, status, isrc,
-                    original_youtube_video_id, acquisition_target_id)
-                   VALUES (?, ?, ?, ?, 'pending', ?, ?, ?)""",
-                (import_id, line_num, artist, song, _isrc, _original_video_id, target_id)
+                    original_youtube_video_id, acquisition_target_id,
+                    album_track_number, album_track_total, album_disc_number, album_disc_total)
+                   VALUES (?, ?, ?, ?, 'pending', ?, ?, ?, ?, ?, ?, ?)""",
+                (import_id, line_num, artist, song, _isrc, _original_video_id, target_id,
+                 _position.get("track_number"), _position.get("track_total"),
+                 _position.get("disc_number"), _position.get("disc_total"))
             )
 
         conn.commit()
