@@ -24,6 +24,13 @@ def _import_monochrome_or_skip():
     return monochrome
 
 
+@pytest.fixture(autouse=True)
+def _monochrome_switched_on(monkeypatch):
+    """Every test here assumes the source is enabled unless it says otherwise."""
+    monochrome = _import_monochrome_or_skip()
+    monkeypatch.setattr(monochrome, "monochrome_enabled", lambda: True)
+
+
 # A well-formed ISRC: Radiohead - Creep, reliably in the catalogue.
 _VALID_ISRC = "GBAYE9200070"
 
@@ -141,7 +148,24 @@ def test_transport_failure_returns_none():
 
 
 # ---------------------------------------------------------------------------
-# 6. The real lookup: a missing title means nothing to search by
+# 6. Monochrome switched off in Settings -> None, catalogue never asked
+# ---------------------------------------------------------------------------
+
+def test_disabled_source_returns_none_without_lookup(monkeypatch):
+    """Album imports went to Monochrome with it disabled, through this door."""
+    monochrome = _import_monochrome_or_skip()
+    monkeypatch.setattr(monochrome, "monochrome_enabled", lambda: False)
+
+    with patch.object(monochrome, "_tracks_isrc_lookup",
+                      return_value=(_tracks_item(), False)) as mock_lookup:
+        result = monochrome.resolve_by_isrc(_VALID_ISRC, "Radiohead", "Creep")
+
+    assert result is None
+    mock_lookup.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# 7. The real lookup: a missing title means nothing to search by
 # ---------------------------------------------------------------------------
 
 def test_no_title_is_a_clean_miss_without_a_search(monkeypatch):

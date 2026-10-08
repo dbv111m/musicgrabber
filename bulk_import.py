@@ -237,7 +237,14 @@ def _candidate_channel_matches_expected_artist(candidate: dict, expected_artist:
     if not expected_norm:
         return False
 
-    channel_norm = _normalise_candidate_match_text(candidate.get("channel", ""))
+    # A Soulseek "channel" is whoever happens to be sharing the file, and
+    # "xX_flacgoblin_Xx" is rarely Radiohead. The artist read out of their
+    # folder path is the honest equivalent.
+    if candidate.get("source") == "soulseek":
+        channel = candidate.get("artist", "")
+    else:
+        channel = candidate.get("channel", "")
+    channel_norm = _normalise_candidate_match_text(channel)
     if not channel_norm:
         return False
 

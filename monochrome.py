@@ -303,7 +303,12 @@ def resolve_by_isrc(isrc: str, artist: str = "", title: str = "") -> dict | None
     is safer than blindly queueing a recording we could not confirm exists. This
     differs on purpose from _deezer_search_leg's optimistic "label it and hope"
     behaviour; here we have a clean fallback waiting, so we use it.
+
+    A disabled source is a None too. The callers skip the search fan-out on a
+    hit, so this is the only place the switch in Settings gets a say.
     """
+    if not monochrome_enabled():
+        return None
     isrc = (isrc or "").strip().upper()
     if not _isrc_valid(isrc):
         return None

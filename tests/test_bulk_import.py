@@ -30,6 +30,19 @@ def test_single_import_download_capacity_is_two():
     assert bulk_import.TRACKS_PER_IMPORT == 2
 
 
+def test_album_strict_match_reads_soulseek_artist_not_username():
+    """Album mode rejected every Soulseek result, because the 'channel' is the peer."""
+    from bulk_import import _candidate_channel_matches_expected_artist as matches
+
+    sharer = {"source": "soulseek", "channel": "flacgoblin", "artist": "Radiohead"}
+    namesake = {"source": "soulseek", "channel": "Radiohead", "artist": "Radiohead Tribute Band"}
+    assert matches(sharer, "Radiohead")
+    assert not matches(namesake, "Radiohead")
+    # YouTube still goes by the channel, Topic suffix and all.
+    assert matches({"source": "youtube", "channel": "Radiohead - Topic"}, "Radiohead")
+    assert not matches({"source": "youtube", "channel": "flacgoblin", "artist": "Radiohead"}, "Radiohead")
+
+
 def test_bulk_imports_list(api, base_url):
     r = api.get(f"{base_url}/api/bulk-imports", timeout=10)
     assert r.status_code == 200
