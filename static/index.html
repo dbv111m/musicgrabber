@@ -852,7 +852,7 @@
         <div id="statsTabContainer" class="tab-panel">
             <div class="queue-header">
                 <h2 class="queue-section-heading">Statistics</h2>
-                <button class="btn warning-btn" id="resetStatsBtn">Reset Stats</button>
+                <button class="btn warning-btn admin-only" id="resetStatsBtn">Reset Stats</button>
             </div>
             <div id="statsContent" class="results"></div>
             <div id="mismatchSection" style="display:none;">
@@ -1152,6 +1152,14 @@
                             <span class="toggle-slider"></span>
                         </div>
                         <span class="settings-hint settings-hint-full">When on, singles and playlist tracks with a MusicBrainz album match are filed in <code>Albums/Artist/Album/Track.ext</code> with track number tags, the same place a full album download goes. Playlists keep track of theirs through the M3U. A watched playlist with Create M3U off keeps its tracks in its own folder instead, since without an M3U that folder is the playlist, and compilation playlists (below) always stay together. Unrecognised tracks stay where they landed.</span>
+                    </label>
+                    <label class="settings-label settings-label-wrap">
+                        <span>Year on album folders</span>
+                        <div class="toggle-switch">
+                            <input type="checkbox" id="settingAlbumFolderYear">
+                            <span class="toggle-slider"></span>
+                        </div>
+                        <span class="settings-hint settings-hint-full">When on, new album folders get the release year, <code>Albums/Artist/Album (2004)/</code>, the way Lidarr lays them out. An album that already has a folder keeps using it, year or no year, so switching this never splits a record in two. Tags are not affected.</span>
                     </label>
                     <label class="settings-label settings-label-wrap">
                         <span>Group playlists as one compilation</span>

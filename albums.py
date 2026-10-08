@@ -24,7 +24,7 @@ from pathlib import Path
 
 from constants import AUDIO_EXTENSIONS
 from db import db_conn
-from downloads import rebuild_album_m3u
+from downloads import album_folder_name, rebuild_album_m3u
 from metadata import fetch_album_release
 from settings import get_albums_dir, get_setting_bool
 from utils import clean_title, sanitize_filename, sanitize_playlist_name, set_file_permissions
@@ -242,9 +242,17 @@ def watched_album_display_state(
     }
 
 
-def album_track_status(artist: str, album_title: str, tracks: list[dict], user_id: str | None = None) -> dict:
-    """Return existing/missing status for tracklist against the target album directory."""
-    target_dir = get_albums_dir(user_id=user_id) / sanitize_filename(artist) / sanitize_filename(album_title)
+def album_track_status(
+    artist: str, album_title: str, tracks: list[dict], user_id: str | None = None, year: str | None = None,
+) -> dict:
+    """Return existing/missing status for tracklist against the target album directory.
+
+    year names a brand-new folder when album_folder_year is on. An existing one
+    is reused either way: folder matching ignores brackets, "(2004)" included.
+    """
+    target_dir = get_albums_dir(user_id=user_id) / sanitize_filename(artist) / album_folder_name(
+        album_title, year, user_id=user_id
+    )
     matched_dirs = _matching_album_dirs(artist, album_title, user_id=user_id)
     # Continue an equivalent existing folder rather than creating e.g.
     # "Lost Souls" beside "Lost Souls EP" and splitting the record in two.
@@ -426,7 +434,7 @@ def queue_album_download(
     if not tracks:
         raise AlbumTracklistUnavailable("Could not fetch tracklist from MusicBrainz")
 
-    status = album_track_status(artist, album_title, tracks, user_id=user_id)
+    status = album_track_status(artist, album_title, tracks, user_id=user_id, year=album_year)
     album_dir = status["album_dir"]
     missing_tracks = status["missing_tracks"]
     album_dir.mkdir(parents=True, exist_ok=True)

@@ -206,7 +206,7 @@ def test_stats_releases_database_and_returns_while_storage_is_blocked(tmp_path):
     route = load_route('get_stats', {
         'db_conn': connection, 'sqlite3': sqlite3, 'snapshots': cache,
         'get_singles_dir': lambda: tmp_path, 'get_playlists_dir': lambda: None,
-        'scan_storage': storage,
+        'scan_storage': storage, '_is_peon': lambda request: False,
     })
     request = SimpleNamespace(state=SimpleNamespace(is_admin=True))
     try:
@@ -219,6 +219,73 @@ def test_stats_releases_database_and_returns_while_storage_is_blocked(tmp_path):
         release.set()
     wait_until(lambda: all(not entry['running'] for entry in cache.entries.values()))
     assert route(request)['storage_bytes'] == 123
+    conn.close()
+
+
+def test_stats_shows_users_their_own_and_admins_everything():
+    """A standard user's Stats match their own Queue; an admin's cover every
+    account, legacy single-user rows included; a peon gets none at all."""
+    import sqlite3
+    from contextlib import contextmanager
+    from types import SimpleNamespace
+
+    import pytest
+
+    conn = sqlite3.connect(':memory:')
+    conn.executescript('''
+        CREATE TABLE jobs (status TEXT, source TEXT, completed_at TEXT, artist TEXT, title TEXT,
+                           search_token TEXT, user_id TEXT);
+        CREATE TABLE search_logs (result_count INTEGER, artist TEXT, search_token TEXT, user_id TEXT);
+        INSERT INTO jobs VALUES ('completed', 'youtube', datetime('now'), 'Blur', 'Song 2', 'a1', 'alice');
+        INSERT INTO jobs VALUES ('failed', 'youtube', NULL, 'Blur', 'Beetlebum', NULL, 'alice');
+        INSERT INTO jobs VALUES ('completed', 'monochrome', datetime('now'), 'Oasis', 'Wonderwall', 'b1', 'bob');
+        INSERT INTO jobs VALUES ('completed', 'soulseek', datetime('now'), 'Pulp', 'Disco 2000', NULL, NULL);
+        INSERT INTO search_logs VALUES (3, 'Blur', 'a1', 'alice');
+        INSERT INTO search_logs VALUES (0, 'Oasis', 'b0', 'bob');
+        INSERT INTO search_logs VALUES (2, 'Oasis', 'b1', 'bob');
+    ''')
+
+    @contextmanager
+    def connection():
+        yield conn
+
+    class Refused(Exception):
+        pass
+
+    scans = []
+
+    def scan(directories):
+        scans.append(directories)
+        return {'storage_bytes': 0, 'file_count': 0}
+
+    route = load_route('get_stats', {
+        'db_conn': connection, 'sqlite3': sqlite3, 'snapshots': library_scans.LibrarySnapshots(),
+        'get_singles_dir': lambda: None, 'get_playlists_dir': lambda: None,
+        'scan_storage': scan, 'HTTPException': lambda status_code, detail: Refused(status_code),
+        '_is_peon': lambda request: request.state.role == 'peon',
+    })
+
+    def stats(user_id, is_admin=False, role='user'):
+        return route(SimpleNamespace(state=SimpleNamespace(user_id=user_id, is_admin=is_admin, role=role)))
+
+    alice = stats('alice')
+    assert (alice['scope'], alice['completed'], alice['failed'], alice['total_jobs']) == ('own', 1, 1, 2)
+    assert alice['sources'] == {'youtube': 1}
+    assert [a['artist'] for a in alice['top_artists']] == ['Blur']
+    assert [r['title'] for r in alice['recent']] == ['Song 2']
+    assert (alice['total_searches'], alice['converted_searches']) == (1, 1)
+    assert [a['artist'] for a in alice['top_searched_artists']] == ['Blur']
+    assert alice['storage_bytes'] is None and alice['storage_scan_state'] is None
+
+    bob = stats('bob')
+    assert (bob['completed'], bob['failed'], bob['total_searches'], bob['converted_searches']) == (1, 0, 2, 1)
+    assert scans == [], "a user's Stats must not scan the shared library"
+
+    admin = stats('alice', is_admin=True, role='admin')
+    assert (admin['scope'], admin['completed'], admin['failed'], admin['total_searches']) == ('all', 3, 1, 3)
+
+    with pytest.raises(Refused):
+        stats('carol', role='peon')
     conn.close()
 
 

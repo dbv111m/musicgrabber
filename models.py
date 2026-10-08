@@ -222,6 +222,7 @@ class SettingsUpdate(BaseModel):
     organise_by_artist: Optional[bool] = None
     include_track_number_in_filename: Optional[bool] = None
     auto_album_singles: Optional[bool] = None
+    album_folder_year: Optional[bool] = None
     playlist_album_as_name: Optional[bool] = None
     singles_only_mode: Optional[bool] = None
     file_permissions: Optional[str] = None

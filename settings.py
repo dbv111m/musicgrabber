@@ -148,7 +148,7 @@ SENSITIVE_SETTINGS = {
 
 # Settings that belong to each user (stored in user_settings table)
 USER_SETTINGS_KEYS = {
-    "singles_subdir", "playlists_subdir", "albums_subdir", "organise_by_artist", "include_track_number_in_filename", "auto_album_singles", "playlist_album_as_name",
+    "singles_subdir", "playlists_subdir", "albums_subdir", "organise_by_artist", "include_track_number_in_filename", "auto_album_singles", "album_folder_year", "playlist_album_as_name",
     "audio_format", "mp3_bitrate", "opus_bitrate", "alac_bitrate", "convert_lossless_only", "normalise_lossy_audio", "auto_import_dir",
     "enable_replaygain", "replaygain_replace_existing",
     "navidrome_url", "navidrome_user", "navidrome_pass", "navidrome_dupe_check",
@@ -238,6 +238,7 @@ SETTINGS_SCHEMA = {
     "organise_by_artist": {"type": "bool", "default": True, "env": "ORGANISE_BY_ARTIST"},
     "include_track_number_in_filename": {"type": "bool", "default": False, "env": "INCLUDE_TRACK_NUMBER_IN_FILENAME"},
     "auto_album_singles": {"type": "bool", "default": False, "env": "AUTO_ALBUM_SINGLES"},
+    "album_folder_year": {"type": "bool", "default": False, "env": "ALBUM_FOLDER_YEAR"},
     "playlist_album_as_name": {"type": "bool", "default": False, "env": "PLAYLIST_ALBUM_AS_NAME"},
     "singles_only_mode": {"type": "bool", "default": False, "env": "SINGLES_ONLY_MODE"},
     "file_permissions": {"type": "str", "default": "666", "env": "FILE_PERMISSIONS"},

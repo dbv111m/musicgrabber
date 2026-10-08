@@ -281,6 +281,38 @@ def _rename_with_track_number_if_enabled(
     return new_path
 
 
+def album_folder_name(album: str, year: str | None, user_id: str | None = None) -> str:
+    """Folder name for a new album: "Album", or "Album (2004)" with album_folder_year on.
+
+    Lidarr's default layout carries the year, and without it a library Lidarr
+    organised grows a second, yearless copy of every album we touch.
+    """
+    name = sanitize_filename(album)
+    year = str(year or "").strip()[:4]
+    if len(year) == 4 and year.isdigit() and get_setting_bool("album_folder_year", False, user_id=user_id):
+        return f"{name} ({year})"
+    return name
+
+
+def existing_album_folder(artist_dir: Path, album: str) -> Path | None:
+    """An album folder already in artist_dir, with or without a "(Year)" on the end.
+
+    Plain name first, then any year, so switching the setting either way keeps
+    using the folder you already have rather than starting a twin beside it.
+    """
+    name = sanitize_filename(album)
+    plain = artist_dir / name
+    if plain.is_dir():
+        return plain
+    if not artist_dir.is_dir():
+        return None
+    with_year = re.compile(rf"^{re.escape(name)} \(\d{{4}}\)$")
+    return next(
+        (d for d in sorted(artist_dir.iterdir()) if d.is_dir() and with_year.match(d.name)),
+        None,
+    )
+
+
 def _derive_names_from_override_dir(override_dir: str | None) -> tuple[str | None, str | None]:
     if not override_dir:
         return None, None
@@ -322,6 +354,14 @@ def _bulk_album_context(job_id: str) -> dict:
         return {}
     override_dir = (bi_row["override_dir"] or "").strip() or None
     album_artist, album_name = _derive_names_from_override_dir(override_dir)
+    # The folder may be "Album (2004)", ours or Lidarr's, and the year is no
+    # part of the album's name. The sidecar written at queue time knows better.
+    try:
+        info = json.loads((Path(override_dir) / ".albuminfo").read_text(encoding="utf-8")) if override_dir else {}
+    except (OSError, ValueError):
+        info = {}
+    album_artist = (info.get("artist") or "").strip() or album_artist
+    album_name = (info.get("album") or "").strip() or album_name
     track_number = bi_row["album_track_number"] or bi_row["line_num"]
     track_total = bi_row["album_track_total"] or bi_row["album_total_tracks"] or bi_row["total_tracks"]
     return {
@@ -2626,9 +2666,10 @@ def _auto_route_to_album(
         return audio_file, False
 
     album_artist = (mb_metadata.get("album_artist") or artist or "").strip()
-    safe_artist = sanitize_filename(album_artist)
-    safe_album  = sanitize_filename(album)
-    album_dir = get_albums_dir(user_id=user_id) / safe_artist / safe_album
+    artist_dir = get_albums_dir(user_id=user_id) / sanitize_filename(album_artist)
+    album_dir = existing_album_folder(artist_dir, album) or artist_dir / album_folder_name(
+        album, mb_metadata.get("year"), user_id=user_id
+    )
 
     if audio_file.parent == album_dir:
         return audio_file, True
@@ -2673,7 +2714,7 @@ def _auto_route_to_album(
         pass
 
     _update_job(job_id, override_dir=str(album_dir))
-    print(f"Auto-album routing: {artist} - {title} → {safe_artist}/{safe_album}/")
+    print(f"Auto-album routing: {artist} - {title} → {album_dir.parent.name}/{album_dir.name}/")
     return new_path, True
 
 

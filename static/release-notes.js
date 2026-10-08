@@ -56,6 +56,8 @@ const RELEASE_NOTES = {
                     "Click the Failed number on Stats and you're taken straight to those failed downloads in the Queue, old ones included. Show everything puts the rest back.",
                     "No more \"failed\" notifications for songs that turned up anyway. If one source falls over and another delivers, you won't hear about it; you'll only get a ping when every source has let you down.",
                     "When Monochrome's downloads stall, it now gets benched straight away instead of making every song wait for it to fail first.",
+                    "Not an admin? Stats now shows your own downloads and searches, instead of an error.",
+                    "New setting: Year on album folders. Turn it on and new albums land in \"Album (2004)\" folders, like Lidarr does. Albums you already have keep their folders.",
                     "Grabbing just the missing tracks from an album now gives them their proper track numbers, and double albums get their disc numbers too. No more two \"Intro\" tracks fighting over one file.",
                     "Links copied from monochrome.st now work in Bulk Import and Watched, albums and playlists alike.",
                     "Songs and artists with quotes or apostrophes in their names (Weird \"Al\", Guns N' Roses, Don't Stop Me Now) no longer break the buttons next to them.",

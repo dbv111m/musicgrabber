@@ -587,7 +587,7 @@ def test_maybe_mark_monochrome_unhealthy_fails_open_when_probe_errors(monkeypatc
     assert calls == []
 
 
-def _album_routing_on(monkeypatch, downloads, tmp_path, m3u_disabled=False):
+def _album_routing_on(monkeypatch, downloads, tmp_path, m3u_disabled=False, folder_year=False):
     monkeypatch.setattr(downloads, "_update_job", lambda *args, **kwargs: None)
     monkeypatch.setattr(downloads, "set_file_permissions", lambda *args, **kwargs: None)
     monkeypatch.setattr(downloads, "get_singles_dir", lambda user_id=None: tmp_path / "Singles")
@@ -600,6 +600,7 @@ def _album_routing_on(monkeypatch, downloads, tmp_path, m3u_disabled=False):
         lambda key, default=False, user_id=None: {
             "auto_album_singles": True,
             "organise_by_artist": False,
+            "album_folder_year": folder_year,
         }.get(key, default),
     )
 
@@ -626,6 +627,41 @@ def test_auto_route_single_goes_to_albums_under_the_album_artist(tmp_path, monke
     assert routed == tmp_path / "Albums" / "Luis Fonsi" / "Vida" / "Luis Fonsi - Despacito (Remix).flac"
     assert routed.exists()
     assert not source_dir.exists()  # the emptied artist folder is tidied away
+
+
+@pytest.mark.parametrize("folder_year,existing,expected", [
+    (True, None, "Vida (2019)"),            # new folder, year on
+    (False, None, "Vida"),                  # new folder, year off
+    (False, "Vida (2019)", "Vida (2019)"),  # Lidarr's folder reused with the setting off
+    (True, "Vida", "Vida"),                 # an older yearless folder reused with it on
+    (True, "Vida (2017)", "Vida (2017)"),   # a different year is still the same album folder
+])
+def test_auto_route_names_and_reuses_year_folders(tmp_path, monkeypatch, folder_year, existing, expected):
+    downloads = _import_downloads_or_skip()
+    _album_routing_on(monkeypatch, downloads, tmp_path, folder_year=folder_year)
+    if existing:
+        (tmp_path / "Albums" / "Luis Fonsi" / existing).mkdir(parents=True)
+    source_dir = tmp_path / "Singles" / "Luis Fonsi"
+    source_dir.mkdir(parents=True)
+    audio_file = source_dir / "Despacito.flac"
+    audio_file.write_bytes(b"not real audio")
+
+    routed, did_route = downloads._auto_route_to_album(
+        audio_file, "Luis Fonsi", "Despacito",
+        {"album": "Vida", "album_artist": "Luis Fonsi", "year": "2019-02-01"}, "job-id", None,
+    )
+
+    assert did_route is True
+    assert routed.parent == tmp_path / "Albums" / "Luis Fonsi" / expected
+    assert sorted(p.name for p in (tmp_path / "Albums" / "Luis Fonsi").iterdir()) == [expected]
+
+
+@pytest.mark.parametrize("year", [None, "", "19", "unknown"])
+def test_album_folder_name_ignores_a_missing_or_odd_year(monkeypatch, year):
+    downloads = _import_downloads_or_skip()
+    monkeypatch.setattr(downloads, "get_setting_bool", lambda key, default=False, user_id=None: True)
+    assert downloads.album_folder_name("Vida", year) == "Vida"
+    assert downloads.album_folder_name("Vida", "2019") == "Vida (2019)"
 
 
 def test_auto_route_playlist_track_goes_to_albums_not_the_playlist_folder(tmp_path, monkeypatch):

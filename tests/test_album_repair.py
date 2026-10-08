@@ -430,3 +430,26 @@ def test_old_album_import_rows_still_fall_back_to_their_line(repair_library):
     context = downloads._get_job_album_context("old-job")
     assert (context["track_number"], context["track_total"], context["disc_number"]) == (3, 3, None)
     assert downloads._album_repair_output_stem(context, "old-job", None) is None
+
+
+@pytest.mark.parametrize("sidecar,expected", [(None, "Record"), ({"album": "Record Proper"}, "Record Proper")])
+def test_add_to_album_keeps_the_folder_year_out_of_the_album_tag(repair_library, monkeypatch, sidecar, expected):
+    """"Add to album..." names the folder it picked; with a "(2004)" folder that
+    used to become the ALBUM tag too."""
+    folder, _selection = repair_library
+    target = folder.parent.parent / "Someone Else" / "Record (2004)"
+    target.mkdir(parents=True)
+    if sidecar:
+        (target / ".albuminfo").write_text(json.dumps(sidecar))
+    monkeypatch.setattr(app, "spawn_daemon_thread", lambda *args, **kwargs: None)
+
+    result = app.download(DownloadRequest(
+        video_id="abcdefghijk", title="Song", artist="Someone Else",
+        album_artist="Someone Else", album_name="Record (2004)",
+    ), REQUEST)
+
+    with db.db_conn() as conn:
+        override_dir, album_name = conn.execute(
+            "SELECT override_dir, album_name FROM jobs WHERE id = ?", (result["job_id"],)
+        ).fetchone()
+    assert (override_dir, album_name) == (str(target), expected)

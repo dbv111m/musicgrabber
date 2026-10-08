@@ -1680,15 +1680,26 @@ def _search_duplicate_notice(query: str, user_id: str | None = None) -> dict | N
 @app.get("/api/stats")
 @prioritise_over_audio_audit
 def get_stats(http_request: Request):
-    """Return download statistics for the dashboard."""
-    if not http_request.state.is_admin:
-        raise HTTPException(status_code=403, detail="Admin access required")
+    """Return download statistics for the dashboard.
+
+    Admins see every account, legacy single-user rows included. A standard user
+    sees only their own jobs and searches; the legacy rows are the admin's
+    history, not theirs. Peons get no Stats tab, so no Stats either.
+    """
+    is_admin = bool(http_request.state.is_admin)
+    if _is_peon(http_request):
+        raise HTTPException(status_code=403, detail="Stats are not available to this account")
+    # "AND 1" rather than an empty string keeps every query below one shape.
+    if is_admin:
+        mine, mine_s, params = "1", "1", ()
+    else:
+        mine, mine_s, params = "user_id = ?", "s.user_id = ?", (http_request.state.user_id,)
     with db_conn() as conn:
         conn.row_factory = sqlite3.Row
 
         # Overall counts by status
         rows = conn.execute(
-            "SELECT status, COUNT(*) as count FROM jobs GROUP BY status"
+            f"SELECT status, COUNT(*) as count FROM jobs WHERE {mine} GROUP BY status", params
         ).fetchall()
         status_counts = {r["status"]: r["count"] for r in rows}
 
@@ -1700,8 +1711,8 @@ def get_stats(http_request: Request):
         # Source breakdown (youtube vs soulseek)
         source_rows = conn.execute(
             "SELECT COALESCE(source, 'youtube') as source, COUNT(*) as count "
-            "FROM jobs WHERE status IN ('completed', 'completed_with_errors') "
-            "GROUP BY source"
+            f"FROM jobs WHERE status IN ('completed', 'completed_with_errors') AND {mine} "
+            "GROUP BY source", params
         ).fetchall()
         sources = {r["source"]: r["count"] for r in source_rows}
 
@@ -1711,7 +1722,8 @@ def get_stats(http_request: Request):
             "FROM jobs WHERE status IN ('completed', 'completed_with_errors') "
             "AND completed_at IS NOT NULL "
             "AND completed_at >= DATE('now', '-30 days') "
-            "GROUP BY day ORDER BY day"
+            f"AND {mine} "
+            "GROUP BY day ORDER BY day", params
         ).fetchall()
         daily = [{"day": r["day"], "count": r["count"]} for r in daily_rows]
 
@@ -1725,17 +1737,18 @@ def get_stats(http_request: Request):
             "  FROM jobs "
             "  WHERE status IN ('completed', 'completed_with_errors') "
             "  AND artist IS NOT NULL AND artist != '' "
+            f"  AND {mine} "
             "  GROUP BY artist"
             ") WHERE rn = 1 "
-            "ORDER BY count DESC LIMIT 10"
+            "ORDER BY count DESC LIMIT 10", params
         ).fetchall()
         top_artists = [{"artist": r["artist"], "count": r["count"]} for r in artist_rows]
 
         # Recent downloads (last 10 completed)
         recent_rows = conn.execute(
             "SELECT title, artist, source, completed_at "
-            "FROM jobs WHERE status IN ('completed', 'completed_with_errors') "
-            "ORDER BY completed_at DESC LIMIT 10"
+            f"FROM jobs WHERE status IN ('completed', 'completed_with_errors') AND {mine} "
+            "ORDER BY completed_at DESC LIMIT 10", params
         ).fetchall()
         recent = [
             {"title": r["title"], "artist": r["artist"], "source": r["source"], "completed_at": r["completed_at"]}
@@ -1746,7 +1759,7 @@ def get_stats(http_request: Request):
         search_summary = conn.execute(
             "SELECT COUNT(*) as total_searches, "
             "SUM(CASE WHEN result_count > 0 THEN 1 ELSE 0 END) as successful_searches "
-            "FROM search_logs"
+            f"FROM search_logs WHERE {mine}", params
         ).fetchone()
         total_searches = int(search_summary["total_searches"] or 0)
         successful_searches = int(search_summary["successful_searches"] or 0)
@@ -1760,10 +1773,11 @@ def get_stats(http_request: Request):
             "    ROW_NUMBER() OVER (PARTITION BY LOWER(artist) ORDER BY COUNT(*) DESC) as rn "
             "  FROM search_logs "
             "  WHERE artist IS NOT NULL AND artist != '' "
+            f"  AND {mine} "
             "  GROUP BY artist"
             ") WHERE rn = 1 "
             "ORDER BY count DESC, artist ASC "
-            "LIMIT 10"
+            "LIMIT 10", params
         ).fetchall()
         top_searched_artists = [
             {
@@ -1777,21 +1791,26 @@ def get_stats(http_request: Request):
         search_to_download = conn.execute(
             "SELECT COUNT(*) as converted_searches "
             "FROM search_logs s "
-            "WHERE EXISTS ("
+            f"WHERE {mine_s} AND EXISTS ("
             "  SELECT 1 FROM jobs j "
             "  WHERE j.search_token = s.search_token "
             "  AND j.status IN ('completed', 'completed_with_errors')"
-            ")"
+            ")", params
         ).fetchone()
         converted_searches = int(search_to_download["converted_searches"] or 0)
 
-    # Release the DB connection before any filesystem work is scheduled.
-    directories = tuple(d for d in (get_singles_dir(), get_playlists_dir()) if d is not None)
-    storage, scan_state = snapshots.get(
-        ("storage", tuple(map(str, directories))), lambda: scan_storage(directories),
-    )
+    # Release the DB connection before any filesystem work is scheduled. The
+    # library on disk is everybody's, so only an admin gets its size; a user's
+    # "own" share of a folder nobody owns is not a number anyone could act on.
+    storage, scan_state = None, None
+    if is_admin:
+        directories = tuple(d for d in (get_singles_dir(), get_playlists_dir()) if d is not None)
+        storage, scan_state = snapshots.get(
+            ("storage", tuple(map(str, directories))), lambda: scan_storage(directories),
+        )
 
     return {
+        "scope": "all" if is_admin else "own",
         "total_jobs": total,
         "completed": completed,
         "failed": failed,
@@ -2481,6 +2500,14 @@ def download(body: DownloadRequest, http_request: Request):
             if not route_artist:
                 raise HTTPException(status_code=400, detail="album_artist (or artist) is required for album routing")
             override_dir = str(get_albums_dir(user_id=user_id) / sanitize_filename(route_artist) / sanitize_filename(album_name))
+            # album_name is the folder picked in "Add to album...", which may be
+            # "Album (2004)". The year belongs on the folder, not in the ALBUM tag:
+            # take the name from the sidecar, or drop a Lidarr-style year without one.
+            try:
+                info = json.loads((Path(override_dir) / ".albuminfo").read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                info = {}
+            album_name = (info.get("album") or "").strip() or re.sub(r"\s\(\d{4}\)$", "", album_name)
 
         if repair_context:
             override_dir = repair_context["override_dir"]

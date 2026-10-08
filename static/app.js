@@ -11175,10 +11175,10 @@
                         <div style="font-size: 22px; font-weight: 600;">${successRate}%</div>
                         <div style="font-size: 11px; color: var(--text-secondary);">Success rate</div>
                     </div>
-                    <div style="padding: 14px; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 12px; text-align: center;" title="Number of audio files in your library and total disk space used">
+                    ${data.scope === 'own' ? '' : `<div style="padding: 14px; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 12px; text-align: center;" title="Number of audio files in your library and total disk space used">
                         <div style="font-size: 22px; font-weight: 600;">${data.file_count == null ? (data.storage_scan_state === 'error' ? 'Unavailable' : 'Scanning…') : data.file_count}</div>
                         <div style="font-size: 11px; color: var(--text-secondary);">${data.storage_bytes == null ? (data.storage_scan_state === 'error' ? 'Scan failed; reopen Stats to retry' : 'Reading library storage') : formatBytes(data.storage_bytes)}${data.storage_bytes != null && data.storage_scan_state === 'refreshing' ? ' (refreshing)' : data.storage_bytes != null && data.storage_scan_state === 'error' ? ' (refresh failed)' : ''}</div>
-                    </div>
+                    </div>`}
                     <div style="padding: 14px; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 12px; text-align: center;" title="${searchSuccessRate}% of searches returned at least one result">
                         <div style="font-size: 22px; font-weight: 600;">${data.total_searches || 0}</div>
                         <div style="font-size: 11px; color: var(--text-secondary);">Searches</div>
@@ -11335,6 +11335,7 @@
             'organise_by_artist': 'settingOrganiseByArtist',
             'include_track_number_in_filename': 'settingIncludeTrackNumberInFilename',
             'auto_album_singles': 'settingAutoAlbumSingles',
+            'album_folder_year': 'settingAlbumFolderYear',
             'playlist_album_as_name': 'settingPlaylistAlbumAsName',
             'singles_only_mode': 'settingSinglesOnlyMode',
             'source_youtube_enabled': 'settingSourceYoutube',
