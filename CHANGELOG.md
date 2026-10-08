@@ -1,6 +1,6 @@
 # Changelog
 
-## v4.3.1 (DEV)
+## v4.3.1 (2026-10-08)
 
 Housekeeping. The backlog's to-do list, cleared in one sitting, which has never happened before and may never happen again.
 
