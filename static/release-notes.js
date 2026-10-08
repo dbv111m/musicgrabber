@@ -20,6 +20,13 @@ const RELEASE_NOTES = {
                 ]
             },
             {
+                heading: "Whole albums from Soulseek",
+                items: [
+                    "Got Soulseek switched on? Album downloads now look for one person sharing the entire album and take it all from them, so you get one consistent rip instead of a track from everyone who happened to be online.",
+                    "Lossless folders come first. If nobody has the whole thing in FLAC, Monochrome has a go, and a complete MP3 320 folder is the backup. Any track that still goes missing is found on its own, like before.",
+                ]
+            },
+            {
                 heading: "Put that album track back where it belongs",
                 items: [
                     "Wrong recording in an album? Choose Search replacement beside its track in Artists or Bulk Import, confirm moving the old copy to Trash, then pick the right result. The replacement keeps the album folder, pressing, disc and track numbers, and updates its existing M3U. No accidental promotion to a solo career in Singles.",

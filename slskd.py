@@ -16,7 +16,7 @@ from typing import Optional
 import httpx
 
 from constants import (
-    TIMEOUT_HTTP_REQUEST, TIMEOUT_SLSKD_API, TIMEOUT_SLSKD_SEARCH,
+    TIMEOUT_HTTP_REQUEST, TIMEOUT_SLSKD_API, TIMEOUT_SLSKD_SEARCH, TIMEOUT_SLSKD_ALBUM_SEARCH,
     TIMEOUT_SLSKD_DOWNLOAD, SLSKD_MAX_RESULTS, SLSKD_MIN_QUALITY_SCORE,
     SLSKD_REQUIRE_FREE_SLOT, SLSKD_MATCH_CONFIDENCE_FLOOR,
     SLSKD_HASH_CHUNK_BYTES, SLSKD_PRUNE_MAX_DEPTH, SLSKD_ARTIST_MATCH_FLOOR,
@@ -25,6 +25,7 @@ from settings import get_setting, get_setting_bool
 from matching import (
     score_track_against_filename, parse_query,
     normalise_string, is_junk_artist, similarity, split_path_segments,
+    core_string, clean_title, query_requests_variant,
 )
 
 
@@ -706,17 +707,17 @@ def extract_track_info_from_path(filepath: str) -> tuple[str, str]:
     return parsed["artist"] or "Unknown", parsed["title"]
 
 
-def search_slskd(query: str, timeout_secs: int = TIMEOUT_SLSKD_SEARCH) -> list[dict]:
-    """
-    Search slskd and return normalized results.
-    Returns list of dicts with: id, title, artist, quality, score, source, slskd_* fields
+def _run_slskd_search(query: str, timeout_secs: int) -> list[dict]:
+    """Run one slskd search and return its raw per-peer responses.
+
+    Shared by the track search and the album folder search, which read the
+    same responses very differently. Any failure is an empty list.
     """
     token = get_slskd_token()
     if not token:
         return []
 
     slskd_url = get_setting("slskd_url")
-    results = []
 
     try:
         headers = {"Authorization": f"Bearer {token}"}
@@ -781,161 +782,177 @@ def search_slskd(query: str, timeout_secs: int = TIMEOUT_SLSKD_SEARCH) -> list[d
 
             print(f"slskd: Got {len(responses)} user responses")
 
-            # Process results - pick best file from each user
-            seen_tracks = set()
-            skipped_locked = 0
-            skipped_quality = 0
-            skipped_no_slot = 0
-            skipped_low_match = 0
-
-            # Pull artist/title hints out of the query so the path-segment
-            # scorer has something to work against. Watched playlist queries
-            # come in as "Artist - Title" already; bare-text searches fall
-            # back to title-only and lean on the basename.
-            query_artist, query_title = parse_query(query)
-            if not query_title:
-                query_title = query
-
-            for response in responses:
-                username = response.get("username", "")
-                has_free_slot = response.get("hasFreeUploadSlot", False)
-                upload_speed = response.get("uploadSpeed", 0)
-                queue_length = _peer_queue_length(response)
-
-                if SLSKD_REQUIRE_FREE_SLOT and not has_free_slot:
-                    skipped_no_slot += 1
-                    continue
-
-                files = response.get("files") or response.get("fileInfos") or response.get("fileInfo") or []
-                for file_info in files:
-                    if file_info.get("isLocked", False):
-                        skipped_locked += 1
-                        continue
-
-                    filepath = file_info.get("filename", "")
-                    quality_label, quality_score = parse_slskd_quality(file_info)
-
-                    # Skip low quality
-                    if quality_score < SLSKD_MIN_QUALITY_SCORE:
-                        skipped_quality += 1
-                        continue
-
-                    parsed = parse_slskd_path(filepath, query_artist=query_artist)
-                    artist = parsed["artist"] or "Unknown"
-                    title = parsed["title"]
-
-                    # Dedupe by artist+title+quality
-                    # Keep one copy per peer, not one copy across the entire
-                    # network. Otherwise whichever peer happened to answer first
-                    # erased the less-busy alternative before ranking saw either
-                    # queue depth.
-                    track_key = f"{username.lower()}|{artist.lower()}|{title.lower()}|{quality_label}"
-                    if track_key in seen_tracks:
-                        continue
-                    seen_tracks.add(track_key)
-
-                    duration_secs = file_info.get("length")
-                    duration_secs = duration_secs if isinstance(duration_secs, (int, float)) and duration_secs > 0 else None
-
-                    # Path-aware match confidence (0.0-1.0). Splits the slskd
-                    # filename on path separators and scores artist, album,
-                    # and title against each segment independently. Stops
-                    # "muse" matching "museum" and stops Various-Artists
-                    # folders from winning the auction.
-                    confidence, match_breakdown = score_track_against_filename(
-                        expected_artist=query_artist or artist,
-                        expected_title=query_title,
-                        filename=filepath,
-                        candidate_duration_s=duration_secs,
-                        query=query,
-                    )
-
-                    if confidence < SLSKD_MATCH_CONFIDENCE_FLOOR:
-                        skipped_low_match += 1
-                        continue
-
-                    score_breakdown = list(match_breakdown)
-
-                    # Confidence is 0.0-1.0; scale to a 0-200 base so right-
-                    # title slskd matches stay competitive with the YouTube
-                    # scorer's typical 100-220 range plus its own +120 hi-res
-                    # quality bonus on Monochrome. A perfect match earns 200
-                    # of relevance before the quality and source bonuses
-                    # below stack on top.
-                    relevance_score = int(confidence * 200) + quality_score
-                    if quality_score:
-                        score_breakdown.append(f"source_quality=+{quality_score}")
-                    # Soulseek users often share properly ripped files. Give
-                    # these results a source-trust lift after title/artist
-                    # relevance, so good matches beat lossy web sources without
-                    # letting unrelated files win just because they are FLAC.
-                    relevance_score += SLSKD_SOURCE_TRUST_BONUS
-                    score_breakdown.append(f"soulseek_trust=+{SLSKD_SOURCE_TRUST_BONUS}")
-                    quality_upper = quality_label.upper()
-                    if "FLAC" in quality_upper or "WAV" in quality_upper:
-                        relevance_score += SLSKD_LOSSLESS_BONUS
-                        score_breakdown.append(f"lossless=+{SLSKD_LOSSLESS_BONUS}")
-                    if bit_depth := file_info.get("bitDepth", 0):
-                        if isinstance(bit_depth, int) and bit_depth >= 24:
-                            relevance_score += SLSKD_HIRES_BONUS
-                            score_breakdown.append(f"hires=+{SLSKD_HIRES_BONUS}")
-                    if has_free_slot:
-                        relevance_score += 10
-                        score_breakdown.append("free_slot=+10")
-                    if upload_speed > 1000000:  # > 1MB/s
-                        relevance_score += 5
-                        score_breakdown.append("fast_uploader=+5")
-                    if queue_length:
-                        queue_penalty = min(
-                            queue_length * SLSKD_QUEUE_PENALTY_PER_ITEM,
-                            SLSKD_QUEUE_PENALTY_CAP,
-                        )
-                        relevance_score -= queue_penalty
-                        score_breakdown.append(f"peer_queue=-{queue_penalty}")
-
-                    results.append({
-                        # Stable id derived from who's sharing what: the same
-                        # file gets the same id across searches, so blacklists
-                        # and already-tried lists actually stick (a random uuid
-                        # here made every retry a case of amnesia).
-                        "id": "slskd_" + hashlib.md5(f"{username}|{filepath}".encode()).hexdigest()[:12],
-                        "title": title,
-                        "artist": artist,
-                        "album": parsed["album"],
-                        "year": parsed["year"],
-                        "channel": username,  # Show username as "channel"
-                        "quality": quality_label,
-                        "relevance_score": relevance_score,
-                        "score_breakdown": score_breakdown,
-                        # 0.0-1.0 from the path scorer. The card shows it as a
-                        # percentage so a hopeful match can't pass itself off as
-                        # a certainty just because it landed at the top.
-                        "match_confidence": round(confidence, 3),
-                        "bitrate": _display_bitrate(file_info),
-                        # Peer-level wait signal from slskd. It nudges an equally
-                        # good result down the list but never removes it, because a
-                        # busy lossless peer can still be the best remaining source.
-                        "queue_length": queue_length,
-                        "source": "soulseek",
-                        "duration": str(file_info.get("length", 0)),
-                        "size": file_info.get("size", 0),
-                        "slskd_username": username,
-                        "slskd_filename": filepath,
-                        "slskd_size": file_info.get("size", 0),
-                    })
-
-            print(
-                "slskd: Skipped "
-                f"{skipped_locked} locked, {skipped_quality} low quality, "
-                f"{skipped_no_slot} no free slot, "
-                f"{skipped_low_match} low match, kept {len(results)}"
-            )
-
             # Clean up search
             try:
                 client.delete(f"{slskd_url}/api/v0/searches/{search_id}", headers=headers)
             except Exception:
                 pass
+
+            return responses
+
+    except Exception as e:
+        print(f"slskd search error: {e}")
+        return []
+
+
+def search_slskd(query: str, timeout_secs: int = TIMEOUT_SLSKD_SEARCH) -> list[dict]:
+    """
+    Search slskd and return normalized results.
+    Returns list of dicts with: id, title, artist, quality, score, source, slskd_* fields
+    """
+    responses = _run_slskd_search(query, timeout_secs)
+    results = []
+
+    try:
+        # Process results - pick best file from each user
+        seen_tracks = set()
+        skipped_locked = 0
+        skipped_quality = 0
+        skipped_no_slot = 0
+        skipped_low_match = 0
+
+        # Pull artist/title hints out of the query so the path-segment
+        # scorer has something to work against. Watched playlist queries
+        # come in as "Artist - Title" already; bare-text searches fall
+        # back to title-only and lean on the basename.
+        query_artist, query_title = parse_query(query)
+        if not query_title:
+            query_title = query
+
+        for response in responses:
+            username = response.get("username", "")
+            has_free_slot = response.get("hasFreeUploadSlot", False)
+            upload_speed = response.get("uploadSpeed", 0)
+            queue_length = _peer_queue_length(response)
+
+            if SLSKD_REQUIRE_FREE_SLOT and not has_free_slot:
+                skipped_no_slot += 1
+                continue
+
+            files = response.get("files") or response.get("fileInfos") or response.get("fileInfo") or []
+            for file_info in files:
+                if file_info.get("isLocked", False):
+                    skipped_locked += 1
+                    continue
+
+                filepath = file_info.get("filename", "")
+                quality_label, quality_score = parse_slskd_quality(file_info)
+
+                # Skip low quality
+                if quality_score < SLSKD_MIN_QUALITY_SCORE:
+                    skipped_quality += 1
+                    continue
+
+                parsed = parse_slskd_path(filepath, query_artist=query_artist)
+                artist = parsed["artist"] or "Unknown"
+                title = parsed["title"]
+
+                # Dedupe by artist+title+quality
+                # Keep one copy per peer, not one copy across the entire
+                # network. Otherwise whichever peer happened to answer first
+                # erased the less-busy alternative before ranking saw either
+                # queue depth.
+                track_key = f"{username.lower()}|{artist.lower()}|{title.lower()}|{quality_label}"
+                if track_key in seen_tracks:
+                    continue
+                seen_tracks.add(track_key)
+
+                duration_secs = file_info.get("length")
+                duration_secs = duration_secs if isinstance(duration_secs, (int, float)) and duration_secs > 0 else None
+
+                # Path-aware match confidence (0.0-1.0). Splits the slskd
+                # filename on path separators and scores artist, album,
+                # and title against each segment independently. Stops
+                # "muse" matching "museum" and stops Various-Artists
+                # folders from winning the auction.
+                confidence, match_breakdown = score_track_against_filename(
+                    expected_artist=query_artist or artist,
+                    expected_title=query_title,
+                    filename=filepath,
+                    candidate_duration_s=duration_secs,
+                    query=query,
+                )
+
+                if confidence < SLSKD_MATCH_CONFIDENCE_FLOOR:
+                    skipped_low_match += 1
+                    continue
+
+                score_breakdown = list(match_breakdown)
+
+                # Confidence is 0.0-1.0; scale to a 0-200 base so right-
+                # title slskd matches stay competitive with the YouTube
+                # scorer's typical 100-220 range plus its own +120 hi-res
+                # quality bonus on Monochrome. A perfect match earns 200
+                # of relevance before the quality and source bonuses
+                # below stack on top.
+                relevance_score = int(confidence * 200) + quality_score
+                if quality_score:
+                    score_breakdown.append(f"source_quality=+{quality_score}")
+                # Soulseek users often share properly ripped files. Give
+                # these results a source-trust lift after title/artist
+                # relevance, so good matches beat lossy web sources without
+                # letting unrelated files win just because they are FLAC.
+                relevance_score += SLSKD_SOURCE_TRUST_BONUS
+                score_breakdown.append(f"soulseek_trust=+{SLSKD_SOURCE_TRUST_BONUS}")
+                quality_upper = quality_label.upper()
+                if "FLAC" in quality_upper or "WAV" in quality_upper:
+                    relevance_score += SLSKD_LOSSLESS_BONUS
+                    score_breakdown.append(f"lossless=+{SLSKD_LOSSLESS_BONUS}")
+                if bit_depth := file_info.get("bitDepth", 0):
+                    if isinstance(bit_depth, int) and bit_depth >= 24:
+                        relevance_score += SLSKD_HIRES_BONUS
+                        score_breakdown.append(f"hires=+{SLSKD_HIRES_BONUS}")
+                if has_free_slot:
+                    relevance_score += 10
+                    score_breakdown.append("free_slot=+10")
+                if upload_speed > 1000000:  # > 1MB/s
+                    relevance_score += 5
+                    score_breakdown.append("fast_uploader=+5")
+                if queue_length:
+                    queue_penalty = min(
+                        queue_length * SLSKD_QUEUE_PENALTY_PER_ITEM,
+                        SLSKD_QUEUE_PENALTY_CAP,
+                    )
+                    relevance_score -= queue_penalty
+                    score_breakdown.append(f"peer_queue=-{queue_penalty}")
+
+                results.append({
+                    # Stable id derived from who's sharing what: the same
+                    # file gets the same id across searches, so blacklists
+                    # and already-tried lists actually stick (a random uuid
+                    # here made every retry a case of amnesia).
+                    "id": "slskd_" + hashlib.md5(f"{username}|{filepath}".encode()).hexdigest()[:12],
+                    "title": title,
+                    "artist": artist,
+                    "album": parsed["album"],
+                    "year": parsed["year"],
+                    "channel": username,  # Show username as "channel"
+                    "quality": quality_label,
+                    "relevance_score": relevance_score,
+                    "score_breakdown": score_breakdown,
+                    # 0.0-1.0 from the path scorer. The card shows it as a
+                    # percentage so a hopeful match can't pass itself off as
+                    # a certainty just because it landed at the top.
+                    "match_confidence": round(confidence, 3),
+                    "bitrate": _display_bitrate(file_info),
+                    # Peer-level wait signal from slskd. It nudges an equally
+                    # good result down the list but never removes it, because a
+                    # busy lossless peer can still be the best remaining source.
+                    "queue_length": queue_length,
+                    "source": "soulseek",
+                    "duration": str(file_info.get("length", 0)),
+                    "size": file_info.get("size", 0),
+                    "slskd_username": username,
+                    "slskd_filename": filepath,
+                    "slskd_size": file_info.get("size", 0),
+                })
+
+        print(
+            "slskd: Skipped "
+            f"{skipped_locked} locked, {skipped_quality} low quality, "
+            f"{skipped_no_slot} no free slot, "
+            f"{skipped_low_match} low match, kept {len(results)}"
+        )
 
     except Exception as e:
         print(f"slskd search error: {e}")
@@ -944,6 +961,199 @@ def search_slskd(query: str, timeout_secs: int = TIMEOUT_SLSKD_SEARCH) -> list[d
     results.sort(key=lambda x: x["relevance_score"], reverse=True)
 
     return results[:SLSKD_MAX_RESULTS]
+
+
+# How alike two track titles must be, once punctuation has failed to settle it.
+# High on purpose: inside one album folder the right file is nearly always an
+# exact match, and a near miss is far more often a different song.
+_ALBUM_FOLDER_TITLE_FLOOR = 0.9
+
+
+def _album_folder_tier(quality_label: str) -> Optional[str]:
+    """'lossless', 'mp3' for MP3 320, or None for anything an album folder may not be."""
+    upper = quality_label.upper()
+    if upper.startswith(("FLAC", "WAV")):
+        return "lossless"
+    if upper == "MP3 320":
+        return "mp3"
+    return None
+
+
+def _album_folder_key(username: str, filepath: str) -> tuple[str, ...]:
+    """One peer's album folder, with any "CD1"/"Disc 2" subfolder folded into it."""
+    folders = split_path_segments(filepath)[:-1]
+    while folders and _DISC_FOLDER_RE.match(normalise_string(folders[-1])):
+        folders = folders[:-1]
+    return (username, *folders)
+
+
+def _album_title_score(expected: str, found: str) -> float:
+    """How surely a file's title is this track; 0.0 when it plainly is not.
+
+    Exact once punctuation is gone, or very nearly the same and not a live or
+    remixed take standing in for the studio one.
+    """
+    if not (expected and found):
+        return 0.0
+    if core_string(expected) == core_string(found):
+        return 1.0
+    if query_requests_variant(found) and not query_requests_variant(expected):
+        return 0.0
+    score = similarity(clean_title(expected), clean_title(found))
+    return score if score >= _ALBUM_FOLDER_TITLE_FLOOR else 0.0
+
+
+_BRACKETED_RE = re.compile(r'\s*[\(\[\{][^\)\]\}]*[\)\]\}]')
+
+
+def _album_name_matches(expected: str, found: str) -> bool:
+    """Is this folder named after this album?
+
+    Bracketed tags ("[16-44]", "(Remastered)") are ignored, but a folder that
+    calls itself live or remixed is not the studio album, however its files
+    are named.
+    """
+    if query_requests_variant(found) and not query_requests_variant(expected):
+        return False
+    expected_bare = normalise_string(_BRACKETED_RE.sub("", expected))
+    found_bare = normalise_string(_BRACKETED_RE.sub("", found))
+    return bool(found_bare) and similarity(found_bare, expected_bare) >= SLSKD_ARTIST_MATCH_FLOOR
+
+
+def _match_album_folder(folder: dict, artist: str, album_title: str, titles: list[str]) -> Optional[dict]:
+    """Map every title onto one file in this folder, or None if it cannot.
+
+    The folder has to be this artist's copy of this album, hold every title,
+    and be one encoding throughout. Extra files (bonus tracks, artwork, a
+    second edition's leftovers) are simply ignored.
+    """
+    parsed_files = []
+    for file_info in folder["files"]:
+        label, quality_score = parse_slskd_quality(file_info)
+        parsed = parse_slskd_path(file_info.get("filename", ""), query_artist=artist)
+        parsed_files.append((file_info, parsed, label, quality_score))
+
+    # Judged once for the folder: every file in it shares the same path above.
+    first = parsed_files[0][1]
+    if similarity(normalise_string(first["artist"]), normalise_string(artist)) < SLSKD_ARTIST_MATCH_FLOOR:
+        return None
+    if not _album_name_matches(album_title, first["album"]):
+        return None
+
+    picks: dict[int, tuple[int, float]] = {}
+    used: set[int] = set()
+    for index, title in enumerate(titles):
+        options = [
+            (_album_title_score(title, parsed["title"]), quality_score, n)
+            for n, (_info, parsed, _label, quality_score) in enumerate(parsed_files)
+            if n not in used
+        ]
+        best = max(options, default=(0.0, 0, -1))
+        if best[0] <= 0.0:
+            return None
+        used.add(best[2])
+        picks[index] = (best[2], best[0])
+
+    tiers = {_album_folder_tier(parsed_files[n][2]) for n, _score in picks.values()}
+    if len(tiers) != 1 or None in tiers:
+        return None
+
+    response = folder["response"]
+    username = folder["username"]
+    results = {}
+    for index, (n, confidence) in picks.items():
+        file_info, parsed, label, quality_score = parsed_files[n]
+        filepath = file_info.get("filename", "")
+        length = file_info.get("length")
+        length = int(length) if isinstance(length, (int, float)) and length > 0 else 0
+        file_id = "slskd_" + hashlib.md5(f"{username}|{filepath}".encode()).hexdigest()[:12]
+        results[index] = {
+            "id": file_id,
+            "video_id": file_id,
+            "title": parsed["title"],
+            "artist": parsed["artist"] or artist,
+            "album": parsed["album"],
+            "year": parsed["year"],
+            "channel": username,
+            "quality": label,
+            # Identity-pinned, like Monochrome's album picks: chosen as part of
+            # a whole record, not a contender in a ranked free-text list.
+            "relevance_score": 1000 + quality_score,
+            "score_breakdown": ["via=album-folder", f"source_quality=+{quality_score}"],
+            "match_confidence": round(confidence, 3),
+            "bitrate": _display_bitrate(file_info),
+            "queue_length": _peer_queue_length(response),
+            "source": "soulseek",
+            "duration": f"{length // 60}:{length % 60:02d}" if length else "",
+            "thumbnail": "",
+            "size": file_info.get("size", 0),
+            "source_url": f"soulseek://{username}/{filepath}",
+            "slskd_username": username,
+            "slskd_filename": filepath,
+            "slskd_size": file_info.get("size", 0),
+        }
+
+    lossless = tiers == {"lossless"}
+    return {
+        "results": results,
+        "lossless": lossless,
+        "rank": (
+            lossless,
+            min(parsed_files[n][3] for n, _score in picks.values()),
+            bool(response.get("hasFreeUploadSlot", False)),
+            -(_peer_queue_length(response) or 0),
+            response.get("uploadSpeed", 0) or 0,
+        ),
+    }
+
+
+def resolve_album_folder(artist: str, album_title: str, titles: list[str]) -> Optional[tuple[dict[int, dict], bool]]:
+    """Find one peer's folder holding every one of these tracks, in one encoding.
+
+    Searching track by track takes each song from whoever answered best, so an
+    album arrives as one person's FLAC, another's MP3 and a third's remaster.
+    One folder is one rip. Only a complete folder counts, lossless throughout
+    or MP3 320 throughout; anything less is left to the per-track search.
+
+    Returns ({index into titles: result}, lossless) for the best folder, or
+    None when Soulseek is off or nobody is sharing the whole record.
+    """
+    if not (slskd_enabled() and artist and album_title and titles):
+        return None
+
+    responses = _run_slskd_search(f"{artist} {album_title}", TIMEOUT_SLSKD_ALBUM_SEARCH)
+
+    folders: dict[tuple[str, ...], dict] = {}
+    for response in responses:
+        if SLSKD_REQUIRE_FREE_SLOT and not response.get("hasFreeUploadSlot", False):
+            continue
+        username = response.get("username", "")
+        files = response.get("files") or response.get("fileInfos") or response.get("fileInfo") or []
+        for file_info in files:
+            filepath = file_info.get("filename", "")
+            if file_info.get("isLocked", False) or not _AUDIO_EXT_RE.search(filepath):
+                continue
+            folder = folders.setdefault(
+                _album_folder_key(username, filepath),
+                {"username": username, "response": response, "files": []},
+            )
+            folder["files"].append(file_info)
+
+    matches = [
+        match for folder in folders.values()
+        if (match := _match_album_folder(folder, artist, album_title, titles))
+    ]
+    if not matches:
+        print(f"slskd: no complete album folder for '{artist} - {album_title}' among {len(folders)} folders")
+        return None
+
+    best = max(matches, key=lambda m: m["rank"])
+    sample = next(iter(best["results"].values()))
+    print(
+        f"slskd: album folder from {sample['slskd_username']} has all {len(titles)} "
+        f"tracks of '{artist} - {album_title}' ({sample['quality']})"
+    )
+    return best["results"], best["lossless"]
 
 
 def download_from_slskd(username: str, filename: str, dest_dir: Path, timeout_secs: int = TIMEOUT_SLSKD_DOWNLOAD, size: int | None = None) -> Optional[Path]:

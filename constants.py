@@ -107,6 +107,7 @@ TIDAL_API_TOKEN = "TPIsV0A9lyiqKl9u"   # Public embed-player token, not a creden
 TIDAL_API_PAGE_SIZE = 100              # Tidal 400s on anything larger; it is not negotiable
 TIDAL_API_COUNTRY = "GB"               # Required param; totals are the same whichever you pick
 TIMEOUT_SLSKD_SEARCH = 12        # Soulseek search polling
+TIMEOUT_SLSKD_ALBUM_SEARCH = 30  # Album folder search: more peers worth hearing from than for one track
 SLSKD_EMPTY_RETRY_DELAY = 1      # Pause before a single retry when Soulseek comes back empty (its distributed search is moody)
 TIMEOUT_SLSKD_DOWNLOAD = 600     # Soulseek download (10 minutes)
 TIMEOUT_SLSKD_API = 30           # slskd API calls

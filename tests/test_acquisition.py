@@ -140,6 +140,88 @@ def test_exact_album_resolution_honours_monochrome_exclusion(monkeypatch):
     ) == {}
 
 
+def _album_rows(monkeypatch, titles=("One", "Two")):
+    """An album import's tracks, in an in-memory database."""
+    conn = sqlite3.connect(":memory:")
+    conn.execute("CREATE TABLE bulk_import_tracks (id INTEGER PRIMARY KEY, import_id TEXT, line_num INTEGER, artist TEXT, song TEXT)")
+    conn.executemany(
+        "INSERT INTO bulk_import_tracks (id, import_id, line_num, artist, song) VALUES (?, 'import-1', ?, 'Artist', ?)",
+        [(100 + n, n, title) for n, title in enumerate(titles, 1)],
+    )
+
+    @contextmanager
+    def fake_db_conn():
+        yield conn
+
+    monkeypatch.setattr(bulk_import, "db_conn", fake_db_conn)
+
+
+def _album_sources(monkeypatch, *, folder=None, monochrome=None):
+    """Stand in for both album resolvers, recording who was asked."""
+    import monochrome as monochrome_module
+    import slskd
+
+    asked = []
+
+    def fake_folder(artist, album, titles):
+        asked.append("soulseek")
+        return folder
+
+    def fake_monochrome(artist, album, titles):
+        asked.append("monochrome")
+        return monochrome or {}
+
+    monkeypatch.setattr(slskd, "resolve_album_folder", fake_folder)
+    monkeypatch.setattr(monochrome_module, "resolve_album_tracks", fake_monochrome)
+    return asked
+
+
+def _picks(source):
+    return {0: {"source": source, "video_id": f"{source}-0"}, 1: {"source": source, "video_id": f"{source}-1"}}
+
+
+def test_album_takes_a_complete_lossless_soulseek_folder_first(monkeypatch):
+    _album_rows(monkeypatch)
+    asked = _album_sources(monkeypatch, folder=(_picks("soulseek"), True), monochrome=_picks("monochrome"))
+
+    resolved = bulk_import._resolve_album_up_front("import-1", "/music/Albums/Artist/Album")
+
+    assert {r["source"] for r in resolved.values()} == {"soulseek"}
+    assert sorted(resolved) == [101, 102]
+    assert asked == ["soulseek"]
+
+
+def test_album_prefers_monochrome_over_an_mp3_folder(monkeypatch):
+    _album_rows(monkeypatch)
+    _album_sources(monkeypatch, folder=(_picks("soulseek"), False), monochrome={0: _picks("monochrome")[0]})
+
+    resolved = bulk_import._resolve_album_up_front("import-1", "/music/Albums/Artist/Album")
+
+    # Monochrome pinned one track; the other goes per-track, not to the MP3 folder.
+    assert resolved == {101: _picks("monochrome")[0]}
+
+
+def test_album_falls_back_to_an_mp3_folder_when_monochrome_has_nothing(monkeypatch):
+    _album_rows(monkeypatch)
+    _album_sources(monkeypatch, folder=(_picks("soulseek"), False), monochrome={})
+
+    resolved = bulk_import._resolve_album_up_front("import-1", "/music/Albums/Artist/Album")
+
+    assert {r["source"] for r in resolved.values()} == {"soulseek"}
+
+
+def test_album_folder_search_honours_a_soulseek_exclusion(monkeypatch):
+    _album_rows(monkeypatch)
+    asked = _album_sources(monkeypatch, folder=(_picks("soulseek"), True), monochrome=_picks("monochrome"))
+
+    resolved = bulk_import._resolve_album_up_front(
+        "import-1", "/music/Albums/Artist/Album", ["monochrome", "youtube"]
+    )
+
+    assert asked == ["monochrome"]
+    assert {r["source"] for r in resolved.values()} == {"monochrome"}
+
+
 def test_requested_youtube_video_fallback_is_explicit_and_respects_allowlist(monkeypatch):
     monkeypatch.setattr(
         downloads,

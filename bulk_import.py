@@ -429,12 +429,20 @@ def _resolve_album_up_front(
     free-text query to separate them. Matching the album as a whole settles that
     once, and spares us N chances of catching a provider mid-wobble.
 
+    In order: one Soulseek peer's complete lossless folder, which keeps the
+    whole album to one rip; otherwise whatever Monochrome can pin; and only if
+    Monochrome pinned nothing, a complete MP3 320 folder. A folder is all or
+    nothing, so an album never ends up half one peer's rip and half another's.
+
     Returns {bulk_import_tracks.id: result} for whatever matched. Anything absent
     takes the ordinary per-track route, so a complete miss costs only the lookup.
     """
-    # Album resolution is a Monochrome capability. A strict source selection
-    # must apply before this shortcut as well as during the ordinary search.
-    if allowed_sources is not None and "monochrome" not in allowed_sources:
+    # A strict source selection must apply before this shortcut as well as
+    # during the ordinary search.
+    def _allowed(source: str) -> bool:
+        return allowed_sources is None or source in allowed_sources
+
+    if not (_allowed("soulseek") or _allowed("monochrome")):
         return {}
 
     try:
@@ -456,12 +464,28 @@ def _resolve_album_up_front(
     if not (artist and album_title):
         return {}
 
-    try:
-        from monochrome import resolve_album_tracks
-        resolved = resolve_album_tracks(artist, album_title, [r[2] or "" for r in rows])
-    except Exception as exc:
-        print(f"Bulk import {import_id}: album resolution failed: {exc}")
-        return {}
+    titles = [r[2] or "" for r in rows]
+
+    folder = None
+    if _allowed("soulseek"):
+        try:
+            from slskd import resolve_album_folder
+            folder = resolve_album_folder(artist, album_title, titles)
+        except Exception as exc:
+            print(f"Bulk import {import_id}: Soulseek album folder search failed: {exc}")
+    folder_results, folder_lossless = folder or ({}, False)
+
+    resolved: dict[int, dict] = {}
+    if folder_lossless:
+        resolved = folder_results
+    elif _allowed("monochrome"):
+        try:
+            from monochrome import resolve_album_tracks
+            resolved = resolve_album_tracks(artist, album_title, titles)
+        except Exception as exc:
+            print(f"Bulk import {import_id}: album resolution failed: {exc}")
+    if not resolved:
+        resolved = folder_results
 
     return {rows[idx][0]: result for idx, result in resolved.items()}
 
