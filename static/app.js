@@ -1594,6 +1594,8 @@
                 }
 
                 if (currentTab === 'artists') {
+                    // Same reason as the Watched pills above: measure once visible.
+                    initPillGroup(document.getElementById('artistsModePills'));
                     loadWatchedArtists();
                 }
 
@@ -3163,7 +3165,8 @@
 
         const artistsModePills = document.getElementById('artistsModePills');
         if (artistsModePills) {
-            initPillGroup(artistsModePills);
+            // Initialised when the Artists tab is first shown, not here: a hidden
+            // tab measures zero pixels and the indicator never turns up.
             artistsModePills.addEventListener('pillchange', (e) => setArtistsMode(e.detail.value));
         }
         document.getElementById('watchedModePills')
@@ -4256,7 +4259,7 @@
                             ${journeyHtml ? `<div class="job-details-row job-journey"><span class="job-details-label">Journey:</span> ${journeyHtml}</div>` : ''}
                             ${job.acquisition_attempt_count ? `<div class="job-details-row"><span class="job-details-label">Acquisition:</span> ${escapeHtml(String(job.acquisition_cycle_count || 0))} cycle${Number(job.acquisition_cycle_count || 0) === 1 ? '' : 's'} · ${escapeHtml(String(job.acquisition_attempt_count))} source attempt${Number(job.acquisition_attempt_count) === 1 ? '' : 's'}${job.acquisition_last_attempt_at ? ` · last ${formatTime(job.acquisition_last_attempt_at)}` : ''}</div>` : ''}
                             ${attemptHistoryHtml}
-                            ${job.acquisition_superseded_by ? `<div class="job-details-row job-superseded-note"><i class="fa-solid fa-circle-check"></i> Later succeeded on retry; <a href="#" onclick="event.preventDefault(); event.stopPropagation(); jumpToJob('${escapeAttr(job.acquisition_superseded_by)}')">jump to completed entry</a></div>` : ''}
+                            ${job.acquisition_superseded_by ? `<div class="job-details-row job-superseded-note"><i class="fa-solid fa-circle-check"></i> Later succeeded on retry; <a href="#" onclick="event.preventDefault(); event.stopPropagation(); jumpToJob('${escapeJsAttr(job.acquisition_superseded_by)}')">jump to completed entry</a></div>` : ''}
                             ${job.metadata_source ? `<div class="job-details-row"><span class="job-details-label">Metadata:</span> ${escapeHtml(formatMetadataSource(job.metadata_source))}</div>` : ''}
                             ${job.requested_video_fallback ? '<div class="job-details-row"><span class="job-details-label">Fallback:</span> Used the video from the original YouTube playlist after no confident alternative succeeded.</div>' : ''}
                             ${sourceUrl ? `<div class="job-details-row"><span class="job-details-label">URL:</span> ${isClickableUrl ? `<a href="${escapeHtml(sourceUrl)}" target="_blank" rel="noopener" onclick="event.stopPropagation()">${escapeHtml(sourceUrl)}</a>` : `<span class="job-details-url">${escapeHtml(sourceUrl)}</span>`}</div>` : ''}
@@ -4265,24 +4268,24 @@
                             ${job.completed_at && job.created_at ? `<div class="job-details-row"><span class="job-details-label">Took:</span> ${formatDuration(job.created_at, job.completed_at)}</div>` : ''}
                             ${['failed', 'completed_with_errors'].includes(job.status) || (job.error || '').includes('mismatch') ? `
                             <div id="score-rationale-link-${escapeHtml(job.id || '')}" class="job-details-row" style="margin-top:4px;">
-                                <a href="#" onclick="event.preventDefault(); event.stopPropagation(); loadScoreRationale('${escapeAttr(job.id || '')}')" style="font-size:12px; color:var(--accent); text-decoration:none;">Why this result?</a>
-                                <button class="score-rationale-copy" onclick="event.stopPropagation(); copyScoreRationale('${escapeAttr(job.id || '')}')" style="margin-left:8px;" title="Copy scoring rationale to clipboard"><i class="fa-solid fa-clipboard"></i> Copy</button>
+                                <a href="#" onclick="event.preventDefault(); event.stopPropagation(); loadScoreRationale('${escapeJsAttr(job.id || '')}')" style="font-size:12px; color:var(--accent); text-decoration:none;">Why this result?</a>
+                                <button class="score-rationale-copy" onclick="event.stopPropagation(); copyScoreRationale('${escapeJsAttr(job.id || '')}')" style="margin-left:8px;" title="Copy scoring rationale to clipboard"><i class="fa-solid fa-clipboard"></i> Copy</button>
                             </div>
                             <div id="score-rationale-${escapeHtml(job.id || '')}" style="display:none;"></div>
                             ` : ''}
                             <div style="display: flex; gap: 8px; margin-top: 8px; flex-wrap: wrap;">
-                                ${job.status !== 'failed' && !fileDeleted ? `<button class="library-play-btn" aria-label="Play or pause" title="Play or pause" onclick="event.stopPropagation(); playJobAudio('${escapeAttr(job.id || '')}', this)" style="padding: 6px 12px; font-size: 11px; font-family: inherit; font-weight: 600; background: var(--bg-tertiary); color: var(--accent); border: 1px solid var(--border); border-radius: 6px; cursor: pointer;"><i class="fa-solid fa-play"></i></button>` : ''}
+                                ${job.status !== 'failed' && !fileDeleted ? `<button class="library-play-btn" aria-label="Play or pause" title="Play or pause" onclick="event.stopPropagation(); playJobAudio('${escapeJsAttr(job.id || '')}', this)" style="padding: 6px 12px; font-size: 11px; font-family: inherit; font-weight: 600; background: var(--bg-tertiary); color: var(--accent); border: 1px solid var(--border); border-radius: 6px; cursor: pointer;"><i class="fa-solid fa-play"></i></button>` : ''}
                                 ${job.status === 'failed' && job.acquisition_mode === 'automatic'
-                                    ? `<button onclick="event.stopPropagation(); retryNextJob('${escapeAttr(job.id || '')}')" style="padding: 6px 12px; font-size: 11px; font-family: inherit; font-weight: 600; background: var(--bg-tertiary); color: var(--accent); border: 1px solid var(--border); border-radius: 6px; cursor: pointer;">Retry next option</button>
-                                       <button onclick="event.stopPropagation(); openJobRescueVersions('${escapeAttr(job.id || '')}')" style="padding: 6px 12px; font-size: 11px; font-family: inherit; font-weight: 600; background: var(--bg-tertiary); color: var(--text-secondary); border: 1px solid var(--border); border-radius: 6px; cursor: pointer;">Choose version</button>`
-                                    : (job.download_type === 'upgrade' ? '' : `<button onclick="event.stopPropagation(); redownloadJob('${escapeAttr(job.id || '')}')" style="padding: 6px 12px; font-size: 11px; font-family: inherit; font-weight: 600; background: var(--bg-tertiary); color: var(--accent); border: 1px solid var(--border); border-radius: 6px; cursor: pointer;">Re-download</button>`)}
+                                    ? `<button onclick="event.stopPropagation(); retryNextJob('${escapeJsAttr(job.id || '')}')" style="padding: 6px 12px; font-size: 11px; font-family: inherit; font-weight: 600; background: var(--bg-tertiary); color: var(--accent); border: 1px solid var(--border); border-radius: 6px; cursor: pointer;">Retry next option</button>
+                                       <button onclick="event.stopPropagation(); openJobRescueVersions('${escapeJsAttr(job.id || '')}')" style="padding: 6px 12px; font-size: 11px; font-family: inherit; font-weight: 600; background: var(--bg-tertiary); color: var(--text-secondary); border: 1px solid var(--border); border-radius: 6px; cursor: pointer;">Choose version</button>`
+                                    : (job.download_type === 'upgrade' ? '' : `<button onclick="event.stopPropagation(); redownloadJob('${escapeJsAttr(job.id || '')}')" style="padding: 6px 12px; font-size: 11px; font-family: inherit; font-weight: 600; background: var(--bg-tertiary); color: var(--accent); border: 1px solid var(--border); border-radius: 6px; cursor: pointer;">Re-download</button>`)}
                                 <button class="report-btn" data-job-id="${escapeHtml(job.id || '')}" data-video-id="${escapeHtml(job.video_id || '')}" data-uploader="${escapeHtml(job.uploader || '')}" data-source="${escapeHtml(job.source || 'youtube')}" onclick="event.stopPropagation()" style="padding: 6px 12px; font-size: 11px; font-family: inherit; font-weight: 600; background: var(--bg-tertiary); color: var(--warning); border: 1px solid var(--border); border-radius: 6px; cursor: pointer;">Report</button>
                                 ${(job.error || '').includes('mismatch') ? `<button class="force-accept-btn" data-job-id="${escapeHtml(job.id || '')}" onclick="event.stopPropagation()" style="padding: 6px 12px; font-size: 11px; font-family: inherit; font-weight: 600; background: var(--bg-tertiary); color: var(--accent); border: 1px solid var(--border); border-radius: 6px; cursor: pointer;">Force Download</button>` : ''}
                                 ${(job.status === 'completed' || job.status === 'completed_with_errors') && !fileDeleted ? `<button class="edit-tags-btn" data-job-id="${escapeHtml(job.id || '')}" data-artist="${escapeAttr(job.artist || '')}" data-title="${escapeAttr(job.title || '')}" data-album="${escapeAttr(job.album_name || '')}" onclick="event.stopPropagation()" style="padding: 6px 12px; font-size: 11px; font-family: inherit; font-weight: 600; background: var(--bg-tertiary); color: var(--accent); border: 1px solid var(--border); border-radius: 6px; cursor: pointer;">Edit Tags</button>` : ''}
                                 ${job.status !== 'failed' ? (fileDeleted
                                     ? `<button disabled style="padding: 6px 12px; font-size: 11px; font-family: inherit; font-weight: 600; background: var(--bg-secondary); color: var(--text-muted); border: 1px solid var(--border); border-radius: 6px; cursor: not-allowed; opacity: 0.8;">Trashed</button>`
                                     : `<button class="delete-file-btn" data-job-id="${escapeHtml(job.id || '')}" data-track-name="${escapeHtml(job.artist ? job.artist + ' - ' + job.title : job.title)}" onclick="event.stopPropagation()" style="padding: 6px 12px; font-size: 11px; font-family: inherit; font-weight: 600; background: var(--bg-tertiary); color: var(--error); border: 1px solid var(--border); border-radius: 6px; cursor: pointer;"><i class="fa-solid fa-trash-can"></i> Trash</button>
-                                      <button onclick="event.stopPropagation(); saveJobToDevice('${escapeAttr(job.id || '')}')" style="padding: 6px 12px; font-size: 11px; font-family: inherit; font-weight: 600; background: var(--bg-tertiary); color: var(--text-secondary); border: 1px solid var(--border); border-radius: 6px; cursor: pointer;"><i class="fa-solid fa-download"></i> Save to device</button>`) : ''}
+                                      <button onclick="event.stopPropagation(); saveJobToDevice('${escapeJsAttr(job.id || '')}')" style="padding: 6px 12px; font-size: 11px; font-family: inherit; font-weight: 600; background: var(--bg-tertiary); color: var(--text-secondary); border: 1px solid var(--border); border-radius: 6px; cursor: pointer;"><i class="fa-solid fa-download"></i> Save to device</button>`) : ''}
                             </div>
                         </div>` : ''}
                     </div>
@@ -4923,9 +4926,9 @@
                                 <div class="job-meta">${escapeHtml(f.path)} &middot; ${formatFileSize(f.size)}</div>
                             </div>
                             <div style="display: flex; gap: 6px; align-items: center; flex-shrink: 0;">
-                                <button class="library-play-btn" aria-label="Play or pause" title="Play or pause" onclick="playTrashAudio('${escapeAttr(f.path)}', this)" style="padding: 6px 12px; font-size: 11px; font-family: inherit; font-weight: 600; background: var(--bg-tertiary); color: var(--accent); border: 1px solid var(--border); border-radius: 6px; cursor: pointer;"><i class="fa-solid fa-play"></i></button>
-                                <button onclick="restoreTrashFile('${escapeAttr(f.path)}')" style="padding: 6px 12px; font-size: 11px; font-family: inherit; font-weight: 600; background: var(--bg-tertiary); color: var(--accent); border: 1px solid var(--border); border-radius: 6px; cursor: pointer;">Restore</button>
-                                <button onclick="deleteTrashFile('${escapeAttr(f.path)}', '${escapeAttr(f.name)}')" style="padding: 6px 12px; font-size: 11px; font-family: inherit; font-weight: 600; background: var(--bg-tertiary); color: var(--error); border: 1px solid var(--border); border-radius: 6px; cursor: pointer;">Delete</button>
+                                <button class="library-play-btn" aria-label="Play or pause" title="Play or pause" onclick="playTrashAudio('${escapeJsAttr(f.path)}', this)" style="padding: 6px 12px; font-size: 11px; font-family: inherit; font-weight: 600; background: var(--bg-tertiary); color: var(--accent); border: 1px solid var(--border); border-radius: 6px; cursor: pointer;"><i class="fa-solid fa-play"></i></button>
+                                <button onclick="restoreTrashFile('${escapeJsAttr(f.path)}')" style="padding: 6px 12px; font-size: 11px; font-family: inherit; font-weight: 600; background: var(--bg-tertiary); color: var(--accent); border: 1px solid var(--border); border-radius: 6px; cursor: pointer;">Restore</button>
+                                <button onclick="deleteTrashFile('${escapeJsAttr(f.path)}', '${escapeJsAttr(f.name)}')" style="padding: 6px 12px; font-size: 11px; font-family: inherit; font-weight: 600; background: var(--bg-tertiary); color: var(--error); border: 1px solid var(--border); border-radius: 6px; cursor: pointer;">Delete</button>
                             </div>
                         </div>
                     `).join('')}
@@ -6468,7 +6471,7 @@
                     return `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border);font-size:13px;">
                         <span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" title="${escapeHtml(job.artist||'')} - ${escapeHtml(job.title)}">${label}</span>
                         ${date ? `<span style="font-size:11px;color:var(--text-secondary);white-space:nowrap;flex-shrink:0;">${date}</span>` : ''}
-                        <button onclick="saveJobToDevice('${escapeAttr(job.id || '')}')" style="flex-shrink:0;padding:4px 10px;font-size:11px;font-family:inherit;font-weight:600;background:var(--bg-tertiary);color:var(--text-secondary);border:1px solid var(--border);border-radius:6px;cursor:pointer;white-space:nowrap;">
+                        <button onclick="saveJobToDevice('${escapeJsAttr(job.id || '')}')" style="flex-shrink:0;padding:4px 10px;font-size:11px;font-family:inherit;font-weight:600;background:var(--bg-tertiary);color:var(--text-secondary);border:1px solid var(--border);border-radius:6px;cursor:pointer;white-space:nowrap;">
                             <i class="fa-solid fa-download"></i> Save
                         </button>
                     </div>`;
@@ -6542,14 +6545,24 @@
         }
 
         function escapeAttr(text) {
-            // Safe for use inside single-quoted JS string literals in HTML attributes
-            return escapeHtml(String(text)).replace(/'/g, '&#39;').replace(/\\/g, '\\\\');
+            // For a plain quoted attribute: data-title="${escapeAttr(val)}". The
+            // value reads back from dataset exactly as it went in. innerHTML
+            // leaves `"` alone, which is how Weird "Al" used to arrive as `Weird `.
+            return escapeHtml(String(text)).replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+        }
+
+        function escapeJsAttr(text) {
+            // For a single-quoted JS string inside an on* attribute:
+            //   onclick="fn('${escapeJsAttr(val)}')"
+            // JS-escape first, because the HTML parser decodes &#39; back into a
+            // bare ' before the JS ever sees it, and "It's" ended the string early.
+            return escapeAttr(String(text).replace(/\\/g, '\\\\').replace(/'/g, "\\'"));
         }
 
         // WARNING: jsStr is NOT safe inside double-quoted onclick attributes!
         // &quot; decoded by the HTML parser terminates the attribute boundary.
-        // For onclick handlers, use escapeAttr with single-quoted JS strings:
-        //   onclick="fn('${escapeAttr(val)}')"
+        // For onclick handlers, use escapeJsAttr with single-quoted JS strings:
+        //   onclick="fn('${escapeJsAttr(val)}')"
         function jsStr(text) {
             return escapeHtml(JSON.stringify(String(text)));
         }
@@ -7776,8 +7789,8 @@
             const isListenBrainz = isListenBrainzUrl || isBareWord;
             const isTidalAlbum = url.match(/^https?:\/\/(?:www\.)?tidal\.com\/(?:browse\/)?album\/\d+/i);
             const isTidal = isTidalAlbum || url.match(/^https?:\/\/tidal\.com\/(?:browse\/)?playlist\//i);
-            const isMonochromeAlbum = url.match(/^https?:\/\/(?:www\.)?(?:monochrome\.tf|monochrome\.samidy\.com)\/album\/\d+/i);
-            const isMonochrome = isMonochromeAlbum || url.match(/^https?:\/\/(?:www\.)?(?:monochrome\.tf|monochrome\.samidy\.com)\/playlist\//i);
+            const isMonochromeAlbum = url.match(/^https?:\/\/(?:www\.)?(?:monochrome\.tf|monochrome\.st|monochrome\.samidy\.com)\/album\/(?:(?:t|tracks|mono|monochrome)\/)?\d+/i);
+            const isMonochrome = isMonochromeAlbum || url.match(/^https?:\/\/(?:www\.)?(?:monochrome\.tf|monochrome\.st|monochrome\.samidy\.com)\/playlist\//i);
             // Beatport calls an album a "release"; charts and Top 100 are not albums.
             const isBeatportRelease = url.match(/^https?:\/\/(?:www\.)?beatport\.com\/release\/[^/?#]+\/\d+/i);
             const isBeatport = isBeatportRelease || url.match(/^https?:\/\/(?:www\.)?beatport\.com\/(top-100|genre\/[^/]+\/\d+\/top-100|chart\/[^/]+\/\d+)/i);
@@ -8725,7 +8738,7 @@
                     html += `<div class="track-list-section-header">Downloaded (${sections.downloaded.length})</div>`;
                     html += sections.downloaded.map((t, i) => trackRow(t, `d${i}`, (t, rowId) =>
                         `<span class="track-status-chip track-status-ok">&#10003;</span>
-                         ${t.job_id ? `<button onclick="saveJobToDevice('${escapeAttr(t.job_id)}')" title="Save this track to your device" class="track-action-btn">
+                         ${t.job_id ? `<button onclick="saveJobToDevice('${escapeJsAttr(t.job_id)}')" title="Save this track to your device" class="track-action-btn">
                              <i class="fa-solid fa-download"></i></button>` : ''}
                          <button type="button"
                              data-action="replace-watched-track"
@@ -9010,7 +9023,7 @@
             for (const part of parts) {
                 cumulative = cumulative ? `${cumulative}/${part}` : part;
                 const captured = cumulative;
-                html += ` <span class="dest-crumb-sep">/</span> <span class="dest-crumb" onclick="_destPickerBrowse('${escapeAttr(captured)}')">${escapeHtml(part)}</span>`;
+                html += ` <span class="dest-crumb-sep">/</span> <span class="dest-crumb" onclick="_destPickerBrowse('${escapeJsAttr(captured)}')">${escapeHtml(part)}</span>`;
             }
             el.innerHTML = html;
         }
@@ -9049,7 +9062,7 @@
             return sources.map(s => {
                 const on = active.length === 0 || active.includes(s.id);
                 return `<button type="button" class="source-chip ${on ? 'on' : 'off'}" data-source="${escapeAttr(s.id)}"
-                    onclick="toggleSourceChip(this, '${escapeAttr(playlistId)}')"
+                    onclick="toggleSourceChip(this, '${escapeJsAttr(playlistId)}')"
                     title="${escapeAttr(s.label)}">${escapeHtml(s.badge)}</button>`;
             }).join('');
         }
@@ -9338,7 +9351,7 @@
                             <span style="font-size:13px;font-weight:600;color:var(--text-primary);">${escapeHtml(a.name)}</span>
                             ${a.disambiguation ? `<span style="font-size:11px;color:var(--text-secondary);margin-left:6px;">${escapeHtml(a.disambiguation)}</span>` : ''}
                         </div>
-                        <button class="action-btn" style="padding:4px 10px;font-size:12px;" onclick="selectArtist('${escapeAttr(a.mbid)}','${escapeAttr(a.name)}')">Select</button>
+                        <button class="action-btn" style="padding:4px 10px;font-size:12px;" onclick="selectArtist('${escapeJsAttr(a.mbid)}','${escapeJsAttr(a.name)}')">Select</button>
                     </div>
                 `).join('');
             } catch (e) {
@@ -13235,8 +13248,8 @@
                         <span style="flex:1; font-weight:${u.id === currentUser?.id ? '600' : '400'};">${escapeHtml(u.username)}</span>
                         <span style="color:var(--text-secondary); font-size:13px;">${u.role}</span>
                         ${u.id !== currentUser?.id
-                            ? `<button class="user-action-btn warning" onclick="forcePasswordReset('${escapeAttr(u.id)}', '${escapeAttr(u.username)}')">Force reset</button>
-                               <button class="user-action-btn" onclick="deleteUser('${escapeAttr(u.id)}', '${escapeAttr(u.username)}')">Remove</button>`
+                            ? `<button class="user-action-btn warning" onclick="forcePasswordReset('${escapeJsAttr(u.id)}', '${escapeJsAttr(u.username)}')">Force reset</button>
+                               <button class="user-action-btn" onclick="deleteUser('${escapeJsAttr(u.id)}', '${escapeJsAttr(u.username)}')">Remove</button>`
                             : `<span style="color:var(--text-secondary); font-size:13px;">(you)</span>`}
                     </div>
                 `).join('') || '<p style="color:var(--text-secondary); font-size:13px;">No users yet.</p>';

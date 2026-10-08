@@ -56,6 +56,9 @@ const RELEASE_NOTES = {
                     "Click the Failed number on Stats and you're taken straight to those failed downloads in the Queue, old ones included. Show everything puts the rest back.",
                     "No more \"failed\" notifications for songs that turned up anyway. If one source falls over and another delivers, you won't hear about it; you'll only get a ping when every source has let you down.",
                     "When Monochrome's downloads stall, it now gets benched straight away instead of making every song wait for it to fail first.",
+                    "Links copied from monochrome.st now work in Bulk Import and Watched, albums and playlists alike.",
+                    "Songs and artists with quotes or apostrophes in their names (Weird \"Al\", Guns N' Roses, Don't Stop Me Now) no longer break the buttons next to them.",
+                    "The green highlight on the Artists tab's switch now shows up straight away, rather than waiting for you to poke it.",
                     "Album downloads now stick to the sources you've switched on. Turned Monochrome off? It stays off, albums included. And if Soulseek is all you use, album tracks from it no longer get turned away for being shared by someone not called Radiohead.",
                 ]
             },

@@ -110,6 +110,61 @@ def test_out_of_scope_and_junk_urls_are_not_recognised(url):
 
 
 # ---------------------------------------------------------------------------
+# Monochrome albums
+#
+# Two catalogues behind one host: a long id is Monochrome's own (named by its
+# tracks API), a short one or /t/ is Tidal's. Both lookups are stubbed.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("url,expected_id,expected_route", [
+    ("https://monochrome.st/album/154041926511759360", "154041926511759360", "tracks"),
+    ("https://monochrome.st/album/tracks/154041926511759360", "154041926511759360", "tracks"),
+    ("https://monochrome.st/album/mono/154041926511759360?play=1", "154041926511759360", "tracks"),
+    ("https://monochrome.st/album/t/77646169", "77646169", "tidal"),
+    ("https://monochrome.st/album/77646169", "77646169", "tidal"),
+    ("https://monochrome.tf/album/77646169", "77646169", "tidal"),
+])
+def test_monochrome_album_urls_route_to_the_right_catalogue(url, expected_id, expected_route, monkeypatch):
+    album_urls = _import_album_urls_or_skip()
+    import monochrome_tracks
+    import tidal
+    asked = []
+    monkeypatch.setattr(
+        monochrome_tracks, "fetch_release_info",
+        lambda rid: asked.append(("tracks", rid)) or {"artist": "Radiohead", "album": "OK Computer"},
+    )
+    monkeypatch.setattr(
+        tidal, "fetch_tidal_album_info",
+        lambda aid: asked.append(("tidal", aid)) or {"artist": "Radiohead", "album": "OK Computer"},
+    )
+
+    result = album_urls.parse_album_url(url)
+
+    assert result == {"service": "monochrome", "id": expected_id, "artist": "Radiohead", "album": "OK Computer"}
+    assert asked == [(expected_route, expected_id)]
+
+
+def test_monochrome_release_survives_a_failed_lookup(monkeypatch):
+    album_urls = _import_album_urls_or_skip()
+    import monochrome_tracks
+
+    def boom(rid):
+        raise RuntimeError("404")
+    monkeypatch.setattr(monochrome_tracks, "fetch_release_info", boom)
+
+    result = album_urls.parse_album_url("https://monochrome.st/album/154041926511759360")
+
+    assert result == {"service": "monochrome", "id": "154041926511759360", "artist": None, "album": None}
+
+
+def test_monochrome_playlist_url_is_not_an_album():
+    album_urls = _import_album_urls_or_skip()
+    assert album_urls.parse_album_url(
+        "https://monochrome.st/playlist/0dfc3b10-fbdb-4419-bf54-11b90051fa6c"
+    ) is None
+
+
+# ---------------------------------------------------------------------------
 # Amazon Music albums
 #
 # The scrape itself needs a real browser, so these cover the parts that do not:

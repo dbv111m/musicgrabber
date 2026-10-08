@@ -77,12 +77,18 @@ _AMAZON_ALBUM_RE = re.compile(
     r'^https?://music\.amazon\.[a-z.]+/albums/([A-Z0-9]{10})(?:[/?#].*)?$',
     re.IGNORECASE,
 )
-# Monochrome album shares are Tidal album ids behind Monochrome's own host,
-# exactly as its playlist shares are Tidal playlist UUIDs.
+# Monochrome album shares come in two catalogues. The old ones (monochrome.tf,
+# or /album/t/ on monochrome.st) are Tidal album ids on Monochrome's host. The
+# new monochrome.st ones are 17-20 digit ids from its own tracks catalogue,
+# optionally spelt /album/tracks/, /mono/ or /monochrome/. Tidal ids are nine
+# digits at most, so the length alone tells them apart, as Monochrome's own
+# router does.
 _MONOCHROME_ALBUM_RE = re.compile(
-    r'^https?://(?:www\.)?(?:monochrome\.tf|monochrome\.samidy\.com)/album/(\d+)(?:[/?#].*)?$',
+    r'^https?://(?:www\.)?(?:monochrome\.tf|monochrome\.st|monochrome\.samidy\.com)'
+    r'/album/(?:(t|tracks|mono|monochrome)/)?(\d+)(?:[/?#].*)?$',
     re.IGNORECASE,
 )
+_MONOCHROME_RELEASE_ID_RE = re.compile(r'^\d{17,20}$')
 
 
 def _first_track_artist(tracks: list[str]) -> str | None:
@@ -142,7 +148,12 @@ def parse_album_url(url: str) -> dict | None:
 
     monochrome_match = _MONOCHROME_ALBUM_RE.match(url)
     if monochrome_match:
-        return _parse_tidal_album("monochrome", monochrome_match.group(1))
+        prefix, album_id = monochrome_match.group(1), monochrome_match.group(2)
+        if (prefix or "").lower() in ("tracks", "mono", "monochrome") or (
+            not prefix and _MONOCHROME_RELEASE_ID_RE.match(album_id)
+        ):
+            return _parse_monochrome_release(album_id)
+        return _parse_tidal_album("monochrome", album_id)
 
     amazon_match = _AMAZON_ALBUM_RE.match(url)
     if amazon_match:
@@ -250,6 +261,20 @@ def _parse_tidal_album(service: str, album_id: str) -> dict:
         print(f"Tidal album scrape failed for album {album_id}: {exc}")
 
     return {"service": service, "id": album_id, "artist": artist, "album": album}
+
+
+def _parse_monochrome_release(release_id: str) -> dict:
+    """A monochrome.st album from its own catalogue, named by the tracks API."""
+    from monochrome_tracks import fetch_release_info
+
+    artist, album = None, None
+    try:
+        info = fetch_release_info(release_id)
+        artist, album = info.get("artist"), info.get("album")
+    except Exception as exc:
+        print(f"Monochrome release lookup failed for {release_id}: {exc}")
+
+    return {"service": "monochrome", "id": release_id, "artist": artist, "album": album}
 
 
 def _parse_amazon_album(url: str, asin: str) -> dict:

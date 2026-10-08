@@ -567,10 +567,11 @@ def detect_playlist_platform(url: str) -> tuple[str, str]:
     if soundcloud_likes:
         return "soundcloud", url
 
-    # Monochrome playlist shares are Tidal playlist UUIDs behind hifi-api, but
-    # the public URL uses Monochrome's own host.
+    # Monochrome playlist shares are Tidal playlist UUIDs behind Monochrome's
+    # own host; monochrome.st may also spell them /playlist/t/UUID. Its tracks
+    # catalogue has no playlists, so there is no second kind to tell apart.
     monochrome_playlist = re.match(
-        r'https?://(?:www\.)?(?:monochrome\.tf|monochrome\.samidy\.com)/playlist/([0-9a-f-]{36})',
+        r'https?://(?:www\.)?(?:monochrome\.tf|monochrome\.st|monochrome\.samidy\.com)/playlist/(?:t/)?([0-9a-f-]{36})',
         url,
         re.IGNORECASE,
     )

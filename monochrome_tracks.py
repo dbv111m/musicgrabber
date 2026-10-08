@@ -143,6 +143,24 @@ def search_tracks(query: str, limit: int = 25) -> list[dict]:
     return tracks if isinstance(tracks, list) else []
 
 
+def fetch_release_info(release_id: str) -> dict:
+    """Artist and title of a release, for naming a pasted monochrome.st album link.
+
+    Raises on transport trouble or an unknown id (a plain 404, unlike /track/).
+    """
+    resp = httpx.get(
+        f"{api_base()}/releases/{release_id}",
+        headers=_HEADERS,
+        timeout=TIMEOUT_MONOCHROME_SEARCH,
+        follow_redirects=True,
+    )
+    resp.raise_for_status()
+    body = resp.json()
+    artists = body.get("artists") or []
+    artist = (artists[0].get("name") or artists[0].get("displayName")) if artists else None
+    return {"artist": artist or None, "album": body.get("title") or None}
+
+
 def _query_variants(artist: str, title: str) -> list[str]:
     """Artist and title first, then the title alone for a catalogue that files
     the artist differently (featured credits, "The", ampersands and so on)."""

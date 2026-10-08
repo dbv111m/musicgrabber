@@ -21,8 +21,10 @@ fi
 
 # NOTE: always restart the local docker container before running the suite, so
 # it's serving the current code rather than a stale image. e.g.
-#   docker compose up -d --build music-grabber   (or: docker restart music-grabber)
-echo "Reminder: restart the local container first so tests run against current code (docker restart music-grabber)."
+#   docker compose up -d --build music-grabber
+# A plain `docker restart` is not enough: application files are copied into the
+# image, so it would cheerfully serve yesterday's code.
+echo "Reminder: rebuild the local container first so tests run against current code (docker compose up -d --build music-grabber)."
 if [ "${MG_ALLOW_HISTORY_DELETION:-}" = "1" ]; then
     echo "WARNING: Queue-history deletion is enabled. Use this only against a disposable test instance."
 else

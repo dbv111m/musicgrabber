@@ -424,12 +424,15 @@ def test_jobs_from_older_releases_still_resolve_by_isrc(monkeypatch, tmp_path):
     assert asked == ["GBZZZ9900001", "GBZZZ9900001"]
 
 
-def test_monochrome_playlist_urls_detect_as_monochrome():
+@pytest.mark.parametrize("url", [
+    "https://monochrome.tf/playlist/0dfc3b10-fbdb-4419-bf54-11b90051fa6c",
+    "https://monochrome.st/playlist/0dfc3b10-fbdb-4419-bf54-11b90051fa6c",
+    "https://monochrome.st/playlist/t/0dfc3b10-fbdb-4419-bf54-11b90051fa6c",
+])
+def test_monochrome_playlist_urls_detect_as_monochrome(url):
     from watched_playlists import detect_playlist_platform
 
-    platform, playlist_id = detect_playlist_platform(
-        "https://monochrome.tf/playlist/0dfc3b10-fbdb-4419-bf54-11b90051fa6c"
-    )
+    platform, playlist_id = detect_playlist_platform(url)
 
     assert platform == "monochrome"
     assert playlist_id == "0dfc3b10-fbdb-4419-bf54-11b90051fa6c"
