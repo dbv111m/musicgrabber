@@ -418,9 +418,7 @@ def build_queue_keyboard(jobs: list):
         }.get(status, "❓")
 
         label = f"{status_emoji} {title}"
-        if status in ["queued", "downloading"]:
-            callback = f"cancel_{job_id}"
-        elif status == "failed":
+        if status == "failed":
             callback = f"retry_{job_id}"
         else:
             callback = "noop"
@@ -893,6 +891,39 @@ async def callback_noop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.callback_query.answer()
 
 
+async def callback_queue_refresh(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Re-render the queue keyboard with fresh statuses."""
+    query = update.callback_query
+    chat_id = query.message.chat_id
+    jobs = await get_user_jobs(chat_id)
+    text = f"📋 <b>Мои загрузки</b>\n\nВсего: {len(jobs)}"
+    await query.answer()
+    try:
+        await query.edit_message_text(text, parse_mode="HTML", reply_markup=build_queue_keyboard(jobs))
+    except Exception:
+        pass  # nothing changed -> Telegram rejects identical edits
+
+
+async def callback_retry(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Retry a failed job via the app API, then refresh the queue view."""
+    query = update.callback_query
+    chat_id = query.message.chat_id
+    job_id = query.data.split("_", 1)[1]
+    await query.answer()
+
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.post(
+                f"{API_BASE_URL}/api/jobs/{job_id}/retry",
+                headers=_api_headers(),
+            )
+            response.raise_for_status()
+            await query.edit_message_text("🔄 Задача поставлена на повтор.", parse_mode="HTML")
+    except Exception as e:
+        logger.error(f"Retry error: {e}")
+        await query.edit_message_text(f"❌ Не удалось повторить: {e}", parse_mode="HTML")
+
+
 # =============================================================================
 # Bot setup
 # =============================================================================
@@ -932,7 +963,9 @@ def setup_bot():
     app.add_handler(CallbackQueryHandler(callback_download, pattern="^download_\\d+$"))
     app.add_handler(CallbackQueryHandler(callback_page, pattern="^page_\\d+$"))
     app.add_handler(CallbackQueryHandler(callback_search_cancel, pattern="^search_cancel$"))
-    app.add_handler(CallbackQueryHandler(callback_noop, pattern="^set_folder$|^cancel_|^retry_|^queue_refresh$"))
+    app.add_handler(CallbackQueryHandler(callback_queue_refresh, pattern="^queue_refresh$"))
+    app.add_handler(CallbackQueryHandler(callback_retry, pattern="^retry_"))
+    app.add_handler(CallbackQueryHandler(callback_noop, pattern="^set_folder$|^cancel_"))
 
     return app
 
