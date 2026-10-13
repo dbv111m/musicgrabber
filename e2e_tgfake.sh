@@ -13,7 +13,15 @@ fail() { echo "FAIL: $1"; curl -s "$T/chat/4242?format=text" | tail -25; exit 1;
 tap() { curl -s -X POST "$T/callback" -d "{\"label\": \"$1\"}" >/dev/null; sleep 2; }
 chat() { curl -s "$T/chat/4242?format=text"; }
 
-curl -s -m 3 "$T/state" >/dev/null || fail "tgfake не отвечает на $TGFAKE_URL"
+# Автозапуск стенда, если не поднят (бинарь: ~/tools/tgfake, см. IDEAS.md)
+TGFAKE_OWNED=""
+if ! curl -s -m 2 "$T/state" >/dev/null 2>&1; then
+  [ -x "$HOME/tools/tgfake/tgfake" ] || fail "нет ~/tools/tgfake/tgfake и стенд не поднят"
+  nohup "$HOME/tools/tgfake/tgfake" -addr "${TGFAKE_URL#http://}" >/tmp/tgfake_e2e.log 2>&1 &
+  TGFAKE_OWNED=$!
+  sleep 2
+  curl -s -m 3 "$T/state" >/dev/null || fail "tgfake не поднялся на $TGFAKE_URL"
+fi
 curl -s -X POST "$T/reset" >/dev/null
 rm -f /tmp/e2e_bot.db
 TELEGRAM_BOT_TOKEN=123456:AAEtestE2Etoken000000000000000 \
@@ -21,7 +29,7 @@ TELEGRAM_BOT_TOKEN=123456:AAEtestE2Etoken000000000000000 \
   TELEGRAM_BOT_DB=/tmp/e2e_bot.db \
   python3 "$DIR/telegram_bot.py" >/tmp/e2e_bot.log 2>&1 &
 BOT=$!
-trap 'kill $BOT 2>/dev/null' EXIT
+trap '[ -n "$BOT" ] && kill $BOT 2>/dev/null; [ -n "$TGFAKE_OWNED" ] && kill $TGFAKE_OWNED 2>/dev/null' EXIT
 sleep 4
 
 curl -s -X POST "$T/message" -d '{"text": "/start"}' >/dev/null
