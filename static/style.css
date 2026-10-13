@@ -1,5 +1,135 @@
+/* =============================================================================
+   MusicGrabber - style.css
+   Table of contents (approximate line numbers, update when adding sections)
+   =============================================================================
+
+   1.   CSS custom properties (variables)      ~   27
+   2.   Warning banner                         ~   58
+   3.   Reset and base styles                  ~   79
+   4.   Layout - container, header             ~  100
+   5.   Playlist selector chip                 ~  118
+   6.   Tabs                                   ~  165
+   7.   Search box                             ~  233
+   8.   Result cards                           ~  320
+   9.   Mobile action row                      ~  687
+   10.  Source badges                          ~  715
+   11.  Buttons (download, clear, test)        ~  760
+   12.  Queue tab                              ~  870
+   13.  Toast notification                     ~  885
+   14.  Bulk import tab                        ~  920
+   15.  Watched playlist cards                 ~ 1132
+   16.  Settings tab                           ~ 1368
+   17.  Mobile / responsive overrides          ~ 1839
+   18.  Explore similar                        ~ 1928
+
+   --- Added during CSS migration (previously inline styles) ---
+
+   19.  Auth screens (login, change password)  ~ 2049
+   20.  Header controls (right-hand cluster)   ~ 2131
+   21.  Bulk import tab (extended)             ~ 2183
+   22.  Watched playlists / artists tab        ~ 2352
+   23.  Watched artists add form               ~ 2464
+   24.  Queue tab / downloadable section       ~ 2512
+   25.  Settings - Search Sources             ~ 2539
+   26.  Settings - form fields                ~ 2603
+   27.  Settings - Notifications              ~ 2653
+   28.  Settings - Blacklist                  ~ 2688
+   29.  Settings - User Management            ~ 2703
+   30.  Settings - Security / Change Password ~ 2769
+   31.  Settings - Save/actions row           ~ 2805
+   32.  Release Notes modal                   ~ 2813
+   33.  Pills / segmented control              ~ 5591
+   34.  Find New Artists (discover)            ~ 5620
+   33.  Report / blacklist modal              ~ 2888
+   34.  Spotify cookies expired banner        ~ 2987
+   35.  Cookie expiry hint                    ~ 3001
+   36.  Utility classes (.mb-16 etc.)         ~ 3011
+
+   ============================================================================= */
+
+/* -----------------------------------------------------------------------------
+   Self-hosted fonts (Elms Sans for UI, SUSE Mono for code / IDs / paths)
+   The woff2 files are variable, so weight 600 reuses the 400 file.
+   ----------------------------------------------------------------------------- */
+@font-face {
+    font-family: 'Elms Sans';
+    font-style: normal;
+    font-weight: 100 900;
+    font-display: swap;
+    src: url('fonts/elms-sans-400-latin.woff2') format('woff2');
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+    font-family: 'Elms Sans';
+    font-style: normal;
+    font-weight: 100 900;
+    font-display: swap;
+    src: url('fonts/elms-sans-400-latin-ext.woff2') format('woff2');
+    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+    font-family: 'Elms Sans';
+    font-style: normal;
+    font-weight: 100 900;
+    font-display: swap;
+    src: url('fonts/elms-sans-400-vietnamese.woff2') format('woff2');
+    unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
+}
+@font-face {
+    font-family: 'SUSE Mono';
+    font-style: normal;
+    font-weight: 100 900;
+    font-display: swap;
+    src: url('fonts/suse-mono-400-latin.woff2') format('woff2');
+    unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}
+@font-face {
+    font-family: 'SUSE Mono';
+    font-style: normal;
+    font-weight: 100 900;
+    font-display: swap;
+    src: url('fonts/suse-mono-400-latin-ext.woff2') format('woff2');
+    unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C0, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+@font-face {
+    font-family: 'SUSE Mono';
+    font-style: normal;
+    font-weight: 100 900;
+    font-display: swap;
+    src: url('fonts/suse-mono-400-vietnamese.woff2') format('woff2');
+    unicode-range: U+0102-0103, U+0110-0111, U+0128-0129, U+0168-0169, U+01A0-01A1, U+01AF-01B0, U+0300-0301, U+0303-0304, U+0308-0309, U+0323, U+0329, U+1EA0-1EF9, U+20AB;
+}
+
 :root,
 [data-theme="dark"] {
+    /* Typography */
+    --font-sans: 'Elms Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    --font-mono: 'SUSE Mono', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+
+    /* Spacing scale (4px base). The half-steps are there because 2, 6, 10
+       and 20px were already doing a lot of the work by hand; they are steps
+       to pick, not licence to invent 14px again. */
+    --space-0-5: 2px;
+    --space-1: 4px;
+    --space-1-5: 6px;
+    --space-2: 8px;
+    --space-2-5: 10px;
+    --space-3: 12px;
+    --space-4: 16px;
+    --space-4-5: 20px;
+    --space-5: 24px;
+    --space-6: 32px;
+    /* The app column, content plus its 20px gutters. Shared with the Settings
+       save bar so the two cannot drift apart. Widened for desktop below. */
+    --container-max: 640px;
+
+    /* Radius scale */
+    --radius-sm: 6px;
+    --radius-md: 10px;
+    --radius-lg: 14px;
+    --radius-pill: 999px;
+
+    /* Colours */
     --bg-primary: #0a0a0b;
     --bg-secondary: #141416;
     --bg-tertiary: #1c1c1f;
@@ -29,12 +159,12 @@
 .warning-banner {
     background: var(--warning);
     color: #000;
-    padding: 10px 16px;
-    font-size: 13px;
+    padding: var(--space-2-5) var(--space-4);
+    font-size: 14px;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 12px;
+    gap: var(--space-3);
 }
 
 .warning-banner a {
@@ -49,7 +179,7 @@
     cursor: pointer;
     color: #000;
     opacity: 0.7;
-    padding: 0 4px;
+    padding: 0 var(--space-1);
 }
 
 .warning-dismiss:hover {
@@ -62,8 +192,30 @@
     box-sizing: border-box;
 }
 
+/* Form controls don't inherit font/colour by default; force them to.
+   This makes the 56 individual `font-family: inherit` rules elsewhere
+   redundant (they can stay or go, both are no-ops now). */
+button,
+input,
+select,
+textarea,
+optgroup {
+    font-family: inherit;
+    font-size: inherit;
+    color: inherit;
+    line-height: inherit;
+}
+
+/* Native form controls (checkbox tick, radio dot, range thumb/track,
+   progress bar) all pick up the app accent instead of browser blue. */
+input,
+progress {
+    accent-color: var(--accent);
+}
+
 body {
-    font-family: 'Space Grotesk', -apple-system, sans-serif;
+    font-family: var(--font-sans);
+    font-size: 17px;
     background: var(--bg-primary);
     color: var(--text-primary);
     min-height: 100vh;
@@ -71,31 +223,45 @@ body {
     line-height: 1.5;
 }
 
+a {
+    color: var(--accent);
+    text-decoration-color: var(--accent);
+    text-underline-offset: 2px;
+}
+
+a:hover {
+    color: var(--accent);
+}
+
 .container {
-    max-width: 640px;
+    max-width: var(--container-max);
     margin: 0 auto;
-    padding: 20px;
-    padding-bottom: env(safe-area-inset-bottom, 20px);
+    padding: var(--space-4-5);
+    padding-bottom: max(60px, env(safe-area-inset-bottom, 60px));
+}
+
+/* Desktop only: a 600px column on a 1440px monitor was mostly black bars and
+   queue cards that were mostly whitespace. Phones and tablets keep 640. */
+@media (min-width: 1024px) {
+    .container,
+    .settings-floating-bar-inner {
+        --container-max: 880px;
+    }
 }
 
 header {
     display: flex;
     align-items: center;
-    gap: 12px;
-    margin-bottom: 24px;
-    padding-bottom: 20px;
+    gap: var(--space-3);
+    margin-bottom: var(--space-5);
+    padding-bottom: var(--space-4-5);
     border-bottom: 1px solid var(--border);
 }
 
 .logo {
     width: 40px;
     height: 40px;
-    background: linear-gradient(135deg, var(--accent) 0%, var(--accent-dim) 100%);
     border-radius: 10px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 20px;
 }
 
 h1 {
@@ -106,13 +272,201 @@ h1 {
 
 .search-box {
     position: relative;
-    margin-bottom: 24px;
+    margin-bottom: var(--space-2);
+}
+
+/* Toggle chip that reveals the playlist selector */
+.playlist-selector-toggle {
+    padding: var(--space-1) var(--space-2-5);
+    font-size: 12px;
+    font-family: inherit;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.15s;
+}
+
+.playlist-selector-toggle:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.playlist-selector-toggle.active {
+    background: var(--bg-tertiary);
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+/* Expanded selector panel (sits inline after the toggle chip) */
+.playlist-selector {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin-top: var(--space-1-5);
+    flex-wrap: wrap;
+}
+
+.playlist-selector-select {
+    padding: var(--space-1) var(--space-2-5);
+    font-size: 13px;
+    font-family: inherit;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-primary);
+    outline: none;
+    cursor: pointer;
+    max-width: 280px;
+}
+
+.playlist-selector-select:focus {
+    border-color: var(--accent);
+}
+
+.playlist-selector-warn {
+    font-size: 12px;
+    color: var(--warning, #f59e0b);
+}
+
+.album-route-label {
+    font-size: 12px;
+    color: var(--text-secondary);
+    max-width: 340px;
+}
+
+.playlist-selector-clear {
+    padding: var(--space-1) var(--space-2);
+    font-size: 13px;
+    font-family: inherit;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    line-height: 1;
+}
+
+.playlist-selector-clear:hover {
+    border-color: var(--error, #ef4444);
+    color: var(--error, #ef4444);
+}
+
+.playlist-new-name-input {
+    padding: var(--space-1) var(--space-2-5);
+    font-size: 13px;
+    font-family: inherit;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--accent);
+    border-radius: 6px;
+    color: var(--text-primary);
+    outline: none;
+    width: 180px;
+}
+
+.playlist-new-name-confirm {
+    padding: var(--space-1) var(--space-2);
+    font-size: 14px;
+    font-family: inherit;
+    background: transparent;
+    border: 1px solid var(--accent);
+    border-radius: 6px;
+    color: var(--accent);
+    cursor: pointer;
+    line-height: 1;
+}
+
+.playlist-new-name-confirm:hover {
+    background: var(--accent);
+    color: var(--bg-primary);
+}
+
+/* Track list panel  -  full track view per watched playlist */
+.track-list-summary {
+    margin-bottom: var(--space-2-5);
+    color: var(--text-secondary);
+    font-size: 12px;
+}
+
+.track-list-section-header {
+    font-weight: 600;
+    color: var(--text-secondary);
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin: var(--space-2-5) 0 var(--space-1);
+    padding-bottom: var(--space-1);
+    border-bottom: 1px solid var(--border);
+}
+
+.track-list-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-1) 0;
+    flex-wrap: wrap;
+}
+
+.track-list-label {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.track-list-actions {
+    display: flex;
+    gap: var(--space-1);
+    align-items: center;
+    flex-shrink: 0;
+}
+
+.track-status-chip {
+    font-size: 12px;
+    padding: var(--space-0-5) var(--space-1-5);
+    border-radius: 4px;
+    white-space: nowrap;
+}
+
+.track-status-ok    { color: var(--success, #22c55e); }
+.track-status-fail  { color: var(--error, #ef4444); }
+.track-status-pending { color: var(--text-secondary); }
+.track-status-removed { color: var(--text-secondary); font-style: italic; }
+
+.track-action-btn, .track-replace-btn {
+    padding: var(--space-0-5) var(--space-2);
+    font-size: 12px;
+    font-family: inherit;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    cursor: pointer;
+    white-space: nowrap;
+    color: var(--text-secondary);
+}
+
+.track-replace-btn {
+    color: var(--warning, #f59e0b);
+    border-color: var(--warning, #f59e0b);
+}
+
+.track-replace-btn:hover {
+    background: var(--warning, #f59e0b);
+    color: #000;
+}
+
+.track-action-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
 }
 
 .search-input {
     width: 100%;
-    padding: 16px 20px;
-    padding-right: 100px;
+    padding: var(--space-4) var(--space-4-5);
+    /* Keeps typed text from sliding under the clear button and search button. */
+    padding-right: 180px;
     font-size: 16px;
     font-family: inherit;
     background: var(--bg-secondary);
@@ -129,6 +483,83 @@ h1 {
 }
 
 .search-input::placeholder {
+    color: var(--text-secondary);
+}
+
+.source-health-strip {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    margin: 0 var(--space-0-5) var(--space-3);
+    color: var(--text-secondary);
+    font-size: 11px;
+}
+
+.source-health-label {
+    font-weight: 600;
+}
+
+.source-health-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    padding: var(--space-1) var(--space-2);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+}
+
+.source-health-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 50%;
+    background: var(--text-secondary);
+}
+
+.source-health-chip.healthy .source-health-dot { background: var(--success, #22c55e); }
+.source-health-chip.checking .source-health-dot { background: var(--warning, #f59e0b); }
+.source-health-chip.unavailable .source-health-dot { background: var(--error, #ef4444); }
+
+.source-health-recheck,
+.search-source-retry {
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    background: var(--bg-tertiary);
+    color: var(--accent);
+    font: inherit;
+    cursor: pointer;
+}
+
+.source-health-recheck {
+    padding: var(--space-1) var(--space-2);
+    margin-left: var(--space-0-5);
+}
+
+.search-source-retry {
+    padding: var(--space-0-5) var(--space-1-5);
+    margin-left: var(--space-2);
+}
+
+.source-health-recheck:disabled,
+.search-source-retry:disabled {
+    cursor: wait;
+    opacity: 0.6;
+}
+
+.results-context-hidden {
+    display: none !important;
+}
+
+.job-journey {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--space-1);
+}
+
+.job-journey-arrow {
     color: var(--text-secondary);
 }
 
@@ -151,7 +582,7 @@ h1 {
 }
 
 .history-item {
-    padding: 12px 16px;
+    padding: var(--space-3) var(--space-4);
     font-size: 14px;
     color: var(--text-primary);
     cursor: pointer;
@@ -168,9 +599,9 @@ h1 {
 }
 
 .related-suggestions {
-    margin-top: 16px;
-    margin-bottom: 20px;
-    padding: 14px;
+    margin-top: var(--space-4);
+    margin-bottom: var(--space-4-5);
+    padding: var(--space-3);
     background: var(--bg-secondary);
     border: 1px solid var(--border);
     border-radius: 12px;
@@ -180,17 +611,17 @@ h1 {
     font-size: 13px;
     font-weight: 600;
     color: var(--text-secondary);
-    margin-bottom: 8px;
+    margin-bottom: var(--space-2);
 }
 
 .suggestion-chips {
     display: flex;
     flex-wrap: wrap;
-    gap: 8px;
+    gap: var(--space-2);
 }
 
 .suggestion-chip {
-    padding: 6px 12px;
+    padding: var(--space-1-5) var(--space-3);
     font-size: 13px;
     font-family: inherit;
     background: var(--bg-tertiary);
@@ -206,35 +637,67 @@ h1 {
     color: var(--accent);
 }
 
+.album-suggestion-chip {
+    border-color: var(--accent);
+}
+
+.album-suggestion-chip i {
+    margin-right: var(--space-1);
+    opacity: 0.7;
+}
+
+.related-title + .suggestion-chips {
+    margin-bottom: var(--space-3);
+}
+
+.related-title + .suggestion-chips:last-child {
+    margin-bottom: 0;
+}
+
+.search-clear-btn {
+    position: absolute;
+    /* Clears .search-btn's 128px min-width plus its 8px offset, with a gap. */
+    right: 144px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    border: none;
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    font-size: 13px;
+    line-height: 1;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s, opacity 0.15s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.search-clear-btn:hover {
+    background: var(--border);
+    color: var(--text-primary);
+}
+
+/* .search-btn now only handles positioning + sizing.
+   Colour, hover, transition, disabled state come from .btn .btn-primary. */
 .search-btn {
     position: absolute;
     right: 8px;
     top: 50%;
     transform: translateY(-50%);
-    padding: 10px 20px;
-    font-size: 14px;
-    font-family: inherit;
-    font-weight: 600;
-    background: var(--accent);
-    color: #000;
-    border: none;
-    border-radius: 8px;
-    cursor: pointer;
-    transition: background 0.2s, transform 0.1s;
+    padding: var(--space-2-5) var(--space-4-5);
+    font-size: 15px;
+    /* Wide enough for "Searching…" as well as "Search", so the button keeps the
+       same width whatever it is currently saying. The clear button is parked
+       just past this edge; when the label grew mid-search the button spread
+       leftwards and sat straight on top of the poor thing. */
+    min-width: 128px;
 }
 
-.search-btn:hover {
-    background: #16a34a;
-}
-
-.search-btn:active {
+.search-btn:active:not(:disabled) {
     transform: translateY(-50%) scale(0.98);
-}
-
-.search-btn:disabled {
-    background: var(--bg-tertiary);
-    color: var(--text-secondary);
-    cursor: not-allowed;
 }
 
 .source-selector {
@@ -243,8 +706,8 @@ h1 {
     top: 50%;
     transform: translateY(-50%);
     display: flex;
-    gap: 2px;
-    padding: 3px;
+    gap: var(--space-0-5);
+    padding: var(--space-1);
     background: var(--bg-tertiary);
     border: 1px solid var(--border);
     border-radius: 8px;
@@ -252,8 +715,8 @@ h1 {
 }
 
 .source-option {
-    padding: 5px 8px;
-    font-size: 11px;
+    padding: var(--space-1) var(--space-2);
+    font-size: 12px;
     font-weight: 600;
     font-family: inherit;
     background: transparent;
@@ -275,22 +738,94 @@ h1 {
     color: var(--text-primary);
 }
 
+.format-option {
+    padding: var(--space-1) var(--space-2);
+    font-size: 12px;
+    font-weight: 600;
+    font-family: inherit;
+    background: transparent;
+    border: none;
+    border-radius: 6px;
+    cursor: pointer;
+    color: var(--text-secondary);
+    transition: all 0.2s;
+    line-height: 1;
+}
+
+.format-option.active {
+    background: var(--accent);
+    color: #000;
+}
+
+.format-option:hover:not(.active) {
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+}
+
+/* 22px tall is a guessing game with a thumb, especially between 128k and 96k. */
+@media (pointer: coarse) {
+    .format-option {
+        min-height: 32px;
+    }
+}
+
 .tabs {
     display: flex;
-    gap: 8px;
-    margin-bottom: 20px;
+    gap: var(--space-1);
+    margin-bottom: var(--space-4-5);
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
     scrollbar-width: none;
+}
+
+/* Tab panel transitions -- fade up on enter */
+@keyframes tabFadeUp {
+    from {
+        opacity: 0;
+        transform: translateY(8px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+.tab-panel {
+    display: none;
+}
+
+.tab-panel.tab-visible {
+    display: block;
+    animation: tabFadeUp 0.2s ease forwards;
+}
+
+/* Results tab is a flex container */
+#resultsTab.tab-panel.tab-visible {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
 }
 
 .tabs::-webkit-scrollbar {
     display: none;
 }
 
+/* Seven tabs do not fit across a phone, and a hidden scrollbar meant Stats and
+   Settings sat off the edge with nothing to say they existed. Two rows, every
+   tab one tap away, and the tabs stretch so the rows look intentional. */
+@media (max-width: 768px) {
+    .tabs {
+        flex-wrap: wrap;
+    }
+
+    .tabs .tab {
+        flex: 1 1 auto;
+    }
+}
+
 .tab {
-    padding: 8px 16px;
-    font-size: 14px;
+    padding: var(--space-1) var(--space-2);
+    font-size: 12px;
     font-family: inherit;
     font-weight: 600;
     background: transparent;
@@ -317,13 +852,43 @@ h1 {
 .results {
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: var(--space-3);
+}
+
+.search-duplicate-notice {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-2-5);
+    padding: var(--space-3) var(--space-3);
+    margin-bottom: var(--space-2-5);
+    background: rgba(245, 158, 11, 0.12);
+    border: 1px solid rgba(245, 158, 11, 0.35);
+    border-radius: var(--radius-md);
+    color: var(--text-primary);
+    font-size: 13px;
+}
+
+.search-duplicate-notice i {
+    color: var(--warning);
+    margin-top: var(--space-0-5);
+}
+
+.search-duplicate-message {
+    font-weight: 600;
+    line-height: 1.35;
+}
+
+.search-duplicate-source {
+    margin-top: var(--space-1);
+    color: var(--text-secondary);
+    font-size: 12px;
 }
 
 .result-item {
     display: flex;
-    gap: 14px;
-    padding: 14px;
+    flex-wrap: wrap;
+    gap: var(--space-3);
+    padding: var(--space-3);
     background: var(--bg-secondary);
     border: 1px solid var(--border);
     border-radius: 12px;
@@ -344,18 +909,18 @@ h1 {
     bottom: 100%;
     left: 50%;
     transform: translateX(-50%);
-    padding: 6px 10px;
+    padding: var(--space-1-5) var(--space-2-5);
     background: var(--bg-tertiary);
     border: 1px solid var(--border);
     border-radius: 6px;
-    font-size: 11px;
+    font-size: 12px;
     color: var(--text-secondary);
     white-space: nowrap;
     opacity: 0;
     pointer-events: none;
     transition: opacity 0.15s;
     z-index: 100;
-    margin-bottom: 4px;
+    margin-bottom: var(--space-1);
 }
 
 .result-item:hover::after {
@@ -419,6 +984,88 @@ h1 {
     animation: pulse 1s infinite;
 }
 
+/* Mobile preview button  -  styled here, visibility controlled by .mobile-actions */
+.preview-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    padding: var(--space-1) var(--space-2-5);
+    font-size: 12px;
+    font-family: inherit;
+    font-weight: 600;
+    background: rgba(34, 197, 94, 0.15);
+    color: var(--accent);
+    border: 1px solid var(--accent);
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+    flex: 1;
+}
+
+.preview-btn:active {
+    background: var(--accent);
+    color: #000;
+}
+
+.result-item.previewing .preview-btn,
+.result-item.loading-preview .preview-btn {
+    background: var(--accent);
+    color: #000;
+}
+
+/* Resolving a YouTube URL takes a few seconds; a button that just sits there
+   looking pressed invites a second press. Let it breathe while it waits. */
+.result-item.loading-preview .preview-btn {
+    animation: pulse 0.8s infinite;
+}
+
+/* Actions row  -  sits below the card content.
+   On desktop: hidden by default, shows on hover with only the ~ Similar button.
+   On mobile: always visible as a full-width button strip with both buttons. */
+.mobile-actions {
+    display: none;
+    gap: var(--space-2);
+    width: 100%;
+}
+
+/* Desktop (hover-capable): show on hover  -  explore-btn only, preview-btn hidden */
+@media (hover: hover) {
+    .result-item:hover .mobile-actions {
+        display: flex;
+    }
+
+    /* Preview is handled by hover-to-preview on desktop; keep it out of the row */
+    .result-item:hover .mobile-actions .preview-btn {
+        display: none;
+    }
+}
+
+/* Opt-in (Settings > Preview Button on Desktop): give hover-capable machines the
+   same permanent button strip touch devices get. Hover-to-preview is switched off
+   in JS when this is on, so the button is the only way in. */
+@media (hover: hover) {
+    body.desktop-preview-button .mobile-actions {
+        display: flex;
+    }
+
+    /* Undoes the rule above that keeps the button out of the hover row */
+    body.desktop-preview-button .result-item:hover .mobile-actions .preview-btn {
+        display: inline-flex;
+    }
+}
+
+/* Touch devices: always show the full row with both buttons */
+@media (hover: none) {
+    .mobile-actions {
+        display: flex;
+    }
+
+    /* Hover tooltip doesn't make sense on touch  -  hide it */
+    .result-item::after {
+        display: none;
+    }
+}
+
 .result-thumb {
     width: 64px;
     height: 64px;
@@ -434,7 +1081,7 @@ h1 {
     display: flex;
     flex-direction: column;
     justify-content: center;
-    gap: 4px;
+    gap: var(--space-1);
 }
 
 .result-title {
@@ -453,27 +1100,113 @@ h1 {
     text-overflow: ellipsis;
 }
 
+.album-link {
+    cursor: pointer;
+    text-decoration: underline;
+    text-decoration-style: dotted;
+    text-underline-offset: 2px;
+    transition: color 0.15s;
+}
+
+.album-link:hover {
+    color: var(--accent);
+    text-decoration-style: solid;
+}
+
 .result-duration {
-    font-family: 'JetBrains Mono', monospace;
+    font-family: var(--font-mono);
     font-size: 12px;
     color: var(--text-secondary);
     background: var(--bg-tertiary);
-    padding: 2px 8px;
+    padding: var(--space-0-5) var(--space-2);
     border-radius: 4px;
     align-self: flex-start;
 }
 
+.result-year {
+    color: var(--text-secondary);
+    opacity: 0.8;
+}
+
+/* Size and bitrate: facts the source volunteered, quieter than the quality badge
+   because they are supporting evidence rather than the headline. */
+.result-detail {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text-secondary);
+    padding: var(--space-0-5) var(--space-1-5);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    align-self: flex-start;
+    white-space: nowrap;
+}
+
+.result-uploader {
+    font-size: 12px;
+    color: var(--text-secondary);
+    opacity: 0.75;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 180px;
+}
+
+/* Match confidence, right-hand side of the card. Only Soulseek has an honest
+   number to put here, so only Soulseek rows get one. */
+.result-match {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    align-self: center;
+    flex-shrink: 0;
+    min-width: 58px;
+    padding: var(--space-1-5) var(--space-2);
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    font-family: var(--font-mono);
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 1.1;
+}
+
+.result-match-caption {
+    font-family: var(--font-sans);
+    font-size: 10px;
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    opacity: 0.7;
+}
+
+.result-match.match-strong {
+    color: var(--accent);
+    border-color: color-mix(in srgb, var(--accent) 45%, transparent);
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.result-match.match-fair {
+    color: var(--warning);
+    border-color: color-mix(in srgb, var(--warning) 45%, transparent);
+    background: color-mix(in srgb, var(--warning) 12%, transparent);
+}
+
+.result-match.match-weak {
+    color: var(--text-secondary);
+}
+
 .result-badges {
     display: flex;
-    gap: 6px;
+    flex-wrap: wrap;
+    gap: var(--space-1-5);
     align-items: center;
-    margin-top: 4px;
+    margin-top: var(--space-1);
 }
 
 .source-badge {
-    font-size: 10px;
+    font-size: 12px;
     font-weight: 600;
-    padding: 2px 6px;
+    padding: var(--space-0-5) var(--space-1-5);
     border-radius: 3px;
     text-transform: uppercase;
 }
@@ -488,8 +1221,13 @@ h1 {
     color: white;
 }
 
-.source-badge.monochrome {
-    background: #111111;
+.source-badge.mp3phoenix {
+    background: #e05c00;
+    color: white;
+}
+
+.source-badge.zvu4no {
+    background: #7a6aee;
     color: white;
 }
 
@@ -498,20 +1236,294 @@ h1 {
     color: white;
 }
 
+.source-badge.monochrome {
+    background: #0f766e;
+    color: white;
+}
+
+.source-badge.freemp3cloud {
+    background: #3a2fd6;
+    color: white;
+}
+
+.source-badge.jiosaavn {
+    background: #2bc5b4;
+    color: #000;
+}
+
+/* Watched Upgrades rows */
+.upgrade-row {
+    cursor: default;
+    align-items: center;
+    justify-content: space-between;
+}
+.upgrade-row:hover { border-color: var(--border); background: var(--bg-secondary); }
+.upgrade-current { flex: 1 1 240px; min-width: 0; }
+.upgrade-track { font-weight: 500; }
+.upgrade-meta { font-size: 13px; color: var(--text-secondary); margin-top: var(--space-0-5); }
+.upgrade-quality-now { color: var(--text-secondary); }
+.upgrade-proposed {
+    flex: 1 1 320px;
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+    font-size: 14px;
+}
+.upgrade-arrow { color: var(--accent); font-weight: 700; }
+.upgrade-quality-new { font-weight: 600; }
+.upgrade-conversion-arrow { color: var(--text-secondary); font-weight: 700; }
+.upgrade-output-label {
+    padding: var(--space-0-5) var(--space-2);
+    border-radius: 5px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+    font-weight: 600;
+}
+.upgrade-conf { color: var(--text-secondary); font-size: 12px; }
+.upgrade-searching, .upgrade-none { color: var(--text-secondary); font-style: italic; }
+.upgrade-verified {
+    font-size: 11px; padding: 1px var(--space-1-5); border-radius: 3px;
+    background: #0f766e; color: #fff; text-transform: uppercase; letter-spacing: 0.03em;
+}
+.upgrade-unverified {
+    font-size: 11px; padding: 1px var(--space-1-5); border-radius: 3px;
+    background: var(--bg-tertiary); color: var(--text-secondary); border: 1px solid var(--border);
+}
+.upgrade-actions { flex: 0 0 auto; display: flex; gap: var(--space-1-5); }
+.btn-sm { padding: var(--space-1) var(--space-2-5); font-size: 13px; }
+.upgrades-pager {
+    display: flex; align-items: center; justify-content: center; gap: var(--space-4);
+    margin-top: var(--space-3);
+}
+.upgrades-page-info { color: var(--text-secondary); font-size: 14px; }
+.upgrade-header-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+.upgrade-go { white-space: nowrap; }
+.watched-empty-text { color: var(--text-secondary); padding: var(--space-3) 0; }
+
+/* Read-only Audio Provenance Audit */
+.audio-audit-header-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+}
+
+.audio-audit-summary {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: var(--space-2);
+    margin: var(--space-3) 0;
+}
+
+.audio-audit-summary-card {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-0-5);
+    min-height: 66px;
+    padding: var(--space-2-5) var(--space-3);
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--text-secondary);
+    border-radius: 8px;
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    font-size: 12px;
+}
+
+.audio-audit-summary-count {
+    color: var(--text-primary);
+    font-size: 22px;
+    font-weight: 700;
+    line-height: 1.1;
+}
+
+.audio-audit-filters {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(175px, 1fr));
+    gap: var(--space-2-5);
+    margin-top: var(--space-3);
+}
+
+.audio-audit-filters label {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    color: var(--text-secondary);
+    font-size: 12px;
+}
+
+.audio-audit-filters .watched-select {
+    width: 100%;
+    min-width: 0;
+}
+
+.audio-audit-row {
+    align-items: flex-start;
+    cursor: default;
+    gap: var(--space-4);
+}
+
+.audio-audit-row:hover {
+    border-color: var(--border);
+    background: var(--bg-secondary);
+}
+
+.audio-audit-main {
+    flex: 1 1 420px;
+    min-width: 0;
+}
+
+.audio-audit-path {
+    overflow-wrap: anywhere;
+    color: var(--text-primary);
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.audio-audit-identity,
+.audio-audit-meta {
+    margin-top: var(--space-1);
+    color: var(--text-secondary);
+    font-size: 12px;
+}
+
+.audio-audit-result {
+    display: flex;
+    flex: 1 1 380px;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: var(--space-2);
+    min-width: 280px;
+}
+
+.audio-audit-badge {
+    display: inline-flex;
+    align-items: center;
+    width: fit-content;
+    padding: var(--space-1) var(--space-2);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    font-size: 11px;
+    font-weight: 700;
+}
+
+.audit-known_lossy_transcode {
+    border-left-color: #dc2626;
+}
+.audio-audit-badge.audit-known_lossy_transcode {
+    border-color: #dc2626;
+    color: #ef4444;
+}
+
+.audit-native_lossy {
+    border-left-color: #f59e0b;
+}
+.audio-audit-badge.audit-native_lossy {
+    border-color: #f59e0b;
+    color: #f59e0b;
+}
+
+.audit-lossy_derivative {
+    border-left-color: #d97706;
+}
+.audio-audit-badge.audit-lossy_derivative {
+    border-color: #d97706;
+    color: #f59e0b;
+}
+
+.audit-recorded_lossless {
+    border-left-color: #0f766e;
+}
+.audio-audit-badge.audit-recorded_lossless {
+    border-color: #0f766e;
+    color: #14b8a6;
+}
+
+.audit-historical_unknown,
+.audit-unreadable {
+    border-left-color: #64748b;
+}
+
+.audio-audit-evidence {
+    width: 100%;
+    color: var(--text-secondary);
+    font-size: 12px;
+}
+
+.audio-audit-evidence summary {
+    cursor: pointer;
+    text-align: right;
+    color: var(--accent);
+    font-weight: 600;
+}
+
+.audio-audit-evidence h4 {
+    margin: var(--space-2-5) 0 var(--space-1);
+    color: var(--text-primary);
+    font-size: 12px;
+}
+
+.audio-audit-evidence ul {
+    margin: 0;
+    padding-left: var(--space-4-5);
+}
+
+.audio-audit-evidence li {
+    margin: var(--space-1) 0;
+}
+
+.audio-audit-evidence li span {
+    display: block;
+    margin-top: 1px;
+    opacity: 0.85;
+}
+
+.audio-audit-caveats {
+    color: var(--warning);
+}
+
+@media (max-width: 720px) {
+    .audio-audit-header-actions {
+        justify-content: flex-end;
+    }
+
+    .audio-audit-row {
+        flex-direction: column;
+    }
+
+    .audio-audit-main,
+    .audio-audit-result {
+        flex-basis: auto;
+        width: 100%;
+        min-width: 0;
+    }
+
+    .audio-audit-result {
+        align-items: flex-start;
+    }
+
+    .audio-audit-evidence summary {
+        text-align: left;
+    }
+}
+
 .job-source-badge {
     position: absolute;
     bottom: 2px;
     right: 2px;
     border-radius: 4px 0 10px 0;
-    font-size: 9px;
-    padding: 3px 7px 3px 6px;
+    font-size: 10px;
+    padding: var(--space-1) var(--space-2) var(--space-1) var(--space-1-5);
     line-height: 1;
 }
 
 .quality-badge {
-    font-size: 10px;
+    font-size: 12px;
     font-weight: 600;
-    padding: 2px 6px;
+    padding: var(--space-0-5) var(--space-1-5);
     border-radius: 3px;
     background: var(--accent);
     color: white;
@@ -541,18 +1553,91 @@ h1 {
 }
 
 .result-item.soulseek .result-thumb::before {
-    content: '🎵';
+    content: '\f58f';
+    font-family: 'Font Awesome 6 Free';
+    font-weight: 900;
+    color: white;
+}
+
+/* When artwork is applied, override the soulseek placeholder gradient */
+.result-item.soulseek .result-thumb.has-artwork::before {
+    display: none;
+}
+
+.slskd-searching-indicator {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-3) var(--space-3);
+    color: var(--text-secondary);
+    font-size: 13px;
+}
+
+/* Live search progress panel: one row per source, ticked off as they land */
+.search-progress {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1-5) var(--space-4);
+    padding: var(--space-2-5) var(--space-3);
+    margin-bottom: var(--space-2-5);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    transition: opacity 0.5s ease;
+}
+
+.search-progress-fading {
+    opacity: 0;
+}
+
+.search-progress-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    font-size: 13px;
+    color: var(--text-secondary);
+    opacity: 1;
+    transition: opacity 1.2s ease;
+}
+
+/* Each row drifts away on its own once its source has reported in */
+.search-progress-row-fading {
+    opacity: 0;
+}
+
+.search-progress-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 16px;
+    height: 16px;
+}
+
+.search-progress-name {
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.search-progress-row[data-status="done"] .search-progress-icon { color: var(--accent); }
+.search-progress-row[data-status="timeout"] .search-progress-icon,
+.search-progress-row[data-status="skipped"] .search-progress-icon,
+.search-progress-row[data-status="error"] .search-progress-icon { color: var(--text-secondary); }
+
+.search-progress-status {
+    font-style: italic;
+    opacity: 0.85;
 }
 
 .job-item {
     display: flex;
-    gap: 14px;
-    padding: 14px;
+    gap: var(--space-3);
+    padding: var(--space-3);
     background: var(--bg-secondary);
     border: 1px solid var(--border);
     border-radius: 12px;
     position: relative;
     overflow: hidden;
+    transition: border-color 0.3s ease, box-shadow 0.3s ease;
 }
 
 .job-status {
@@ -560,7 +1645,7 @@ h1 {
     height: 10px;
     border-radius: 50%;
     flex-shrink: 0;
-    margin-top: 6px;
+    margin-top: var(--space-1-5);
 }
 
 .job-status.queued { background: var(--warning); }
@@ -573,13 +1658,23 @@ h1 {
 .job-status.failed { background: var(--error); }
 
 .job-warning-badge {
-    font-size: 10px;
+    font-size: 12px;
     font-weight: 600;
-    padding: 2px 6px;
+    padding: var(--space-0-5) var(--space-1-5);
     border-radius: 3px;
     background: var(--warning);
     color: #000;
-    margin-left: 6px;
+    margin-left: var(--space-1-5);
+}
+
+.job-upgrade-badge {
+    font-size: 12px;
+    font-weight: 600;
+    padding: var(--space-0-5) var(--space-1-5);
+    border-radius: 3px;
+    background: var(--accent);
+    color: #000;
+    margin-left: var(--space-1-5);
 }
 
 @keyframes pulse {
@@ -605,10 +1700,49 @@ h1 {
     color: var(--text-secondary);
 }
 
-.job-error {
+.job-status-label {
+    text-transform: capitalize;
+}
+
+.job-progress-stage {
     font-size: 12px;
+    color: var(--accent);
+    font-style: italic;
+    margin-left: var(--space-1);
+}
+
+.job-progress-stage::before {
+    content: "·";
+    margin-right: var(--space-1);
+    color: var(--text-secondary);
+    font-style: normal;
+}
+
+.job-elapsed-wrap {
+    margin-left: var(--space-1);
+    font-size: 11px;
+    color: var(--text-secondary);
+}
+
+.job-elapsed {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+}
+
+.job-date {
+    white-space: nowrap;
+}
+
+.job-error {
+    font-size: 13px;
     color: var(--error);
-    margin-top: 4px;
+    margin-top: var(--space-1);
+}
+
+/* "Already in library" rides in the error slot but is good news; a queue full
+   of red for things that went perfectly well was needlessly alarming. */
+.job-error.job-note {
+    color: var(--text-secondary);
 }
 
 .job-item.has-details {
@@ -624,23 +1758,37 @@ h1 {
     background: var(--bg-hover, rgba(255,255,255,0.05));
 }
 
+.job-item.job-jump-highlight {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 25%, transparent);
+}
+
+.job-superseded-note {
+    color: var(--accent);
+}
+
+.job-superseded-note a {
+    color: inherit;
+    text-decoration: underline;
+}
+
 .job-details {
-    margin-top: 8px;
-    padding-top: 8px;
+    margin-top: var(--space-2);
+    padding-top: var(--space-2);
     border-top: 1px solid var(--border);
-    font-size: 12px;
+    font-size: 13px;
     color: var(--text-secondary);
 }
 
 .job-details-row {
-    margin-bottom: 3px;
+    margin-bottom: var(--space-1);
     word-break: break-all;
 }
 
 .job-details-label {
     color: var(--text-secondary);
     opacity: 0.7;
-    margin-right: 4px;
+    margin-right: var(--space-1);
 }
 
 .job-details a {
@@ -658,20 +1806,35 @@ h1 {
 
 .empty-state {
     text-align: center;
-    padding: 60px 20px;
+    padding: 60px var(--space-4-5);
     color: var(--text-secondary);
 }
 
 .empty-state-icon {
     font-size: 48px;
-    margin-bottom: 16px;
+    margin-bottom: var(--space-4);
     opacity: 0.5;
+}
+
+.empty-state small {
+    display: block;
+    margin-top: var(--space-1);
+    font-size: 12px;
+    opacity: 0.8;
 }
 
 .loading {
     display: flex;
     justify-content: center;
     padding: 40px;
+}
+
+.loading-with-copy {
+    align-items: center;
+    flex-direction: column;
+    gap: var(--space-3);
+    color: var(--text-secondary);
+    font-size: 13px;
 }
 
 .spinner {
@@ -692,20 +1855,24 @@ h1 {
     bottom: 100px;
     left: 50%;
     transform: translateX(-50%) translateY(100px);
-    padding: 14px 24px;
+    padding: var(--space-3) var(--space-5);
     background: var(--accent);
     color: #000;
     font-weight: 600;
     border-radius: 10px;
     opacity: 0;
+    pointer-events: none;
     transition: all 0.3s ease;
     z-index: 100;
     box-shadow: 0 10px 40px rgba(0, 0, 0, 0.3);
+    max-width: min(560px, calc(100vw - 32px));
+    text-align: center;
 }
 
 .toast.show {
     transform: translateX(-50%) translateY(0);
     opacity: 1;
+    pointer-events: auto;
 }
 
 .toast.error {
@@ -713,51 +1880,300 @@ h1 {
     color: #fff;
 }
 
+/* Every section header wraps rather than pushing the page sideways on a phone.
+   It used to be the Queue tab's private privilege, while Watched Upgrades
+   quietly made the whole page 451px wide on a 390px screen. */
 .queue-header {
     display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
     justify-content: space-between;
     align-items: center;
-    margin-bottom: 12px;
+    margin-bottom: var(--space-3);
 }
 
-.clear-btn {
-    padding: 8px 16px;
+.queue-header-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2-5);
+}
+
+/* The Download Queue header carries a search box now, so give the heading its
+   own line before it gets folded into origami. */
+#queueTabContainer > .queue-header .queue-section-heading {
+    flex: 1 1 260px;
+}
+
+/* Queue search: finding one track in a 900-track import without the scroll wheel
+   going the way of a Spitfire's propeller. */
+.queue-search {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.queue-search-icon {
+    position: absolute;
+    left: var(--space-2);
+    font-size: 12px;
+    color: var(--text-secondary);
+    pointer-events: none;
+    transition: color 180ms ease;
+}
+
+.queue-search-input {
+    width: 220px;
+    max-width: 100%;
+    padding: var(--space-1-5) var(--space-2) var(--space-1-5) var(--space-5);
     font-size: 13px;
     font-family: inherit;
-    font-weight: 600;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-primary);
+    transition: border-color 180ms ease, box-shadow 180ms ease, width 180ms ease;
+}
+
+.queue-search-input::placeholder {
+    color: var(--text-secondary);
+}
+
+.queue-search-input:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.queue-search:focus-within .queue-search-icon {
+    color: var(--accent);
+}
+
+.queue-search-clear {
+    position: absolute;
+    right: var(--space-1);
+    width: 20px;
+    height: 20px;
+    border: none;
+    border-radius: 50%;
     background: transparent;
     color: var(--text-secondary);
-    border: 1px solid var(--border);
-    border-radius: 8px;
+    font-size: 11px;
+    line-height: 1;
     cursor: pointer;
-    transition: all 0.2s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 150ms ease, color 150ms ease;
 }
 
-.clear-btn:hover {
-    color: var(--error);
+.queue-search-clear:hover {
+    background: var(--border);
+    color: var(--text-primary);
+}
+
+/* Match count under the header, so a fruitless search says so rather than
+   leaving you staring at an empty box wondering if it is broken. */
+.queue-search-status {
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin-bottom: var(--space-3);
+}
+
+.queue-search-status strong {
+    color: var(--text-primary);
+}
+
+.queue-search-status-action {
+    margin-left: var(--space-1);
+    padding: 0;
+    border: none;
+    background: none;
+    color: var(--accent);
+    font: inherit;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.queue-search-status-action:hover,
+.queue-search-status-action:focus-visible {
+    text-decoration: underline;
+}
+
+/* The Stats Failed card, when there is something to go and look at. */
+.stats-card-link {
+    padding: var(--space-3);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    text-align: center;
+    font: inherit;
+    color: inherit;
+    cursor: pointer;
+    transition: border-color 0.15s ease, transform 0.15s ease;
+}
+
+.stats-card-link:hover,
+.stats-card-link:focus-visible {
     border-color: var(--error);
+    transform: translateY(-1px);
 }
 
-.clear-btn:active {
-    transform: scale(0.98);
+@media (max-width: 768px) {
+    .queue-search-input {
+        width: 100%;
+    }
+
+    .queue-search {
+        flex: 1 1 160px;
+    }
+
+    /* The actions row already ran off the side of a phone before the search box
+       turned up; letting it wrap stops us making an old mess a slightly bigger one. */
+    .queue-header-actions {
+        flex-wrap: wrap;
+        justify-content: flex-end;
+        gap: var(--space-2);
+    }
 }
 
-.clear-btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
+.queue-live-summary {
+    align-items: center;
+    gap: var(--space-2-5);
+    padding: var(--space-2-5) var(--space-3);
+    margin-bottom: var(--space-3);
+    background: color-mix(in srgb, var(--accent) 7%, var(--bg-secondary));
+    border: 1px solid color-mix(in srgb, var(--accent) 28%, var(--border));
+    border-radius: var(--radius-md);
+    transition: background-color 320ms ease, border-color 320ms ease, box-shadow 320ms ease;
 }
+
+.queue-live-dot {
+    width: 9px;
+    height: 9px;
+    flex: 0 0 auto;
+    border-radius: 50%;
+    background: var(--text-secondary);
+    opacity: 0.65;
+}
+
+.queue-live-dot.active {
+    background: var(--accent);
+    opacity: 1;
+    box-shadow: 0 0 0 4px color-mix(in srgb, var(--accent) 16%, transparent);
+    animation: pulse 1.4s ease-in-out infinite;
+}
+
+.queue-live-copy {
+    display: flex;
+    min-width: 0;
+    flex-direction: column;
+    line-height: 1.35;
+}
+
+.queue-live-copy strong {
+    font-size: 13px;
+    color: var(--text-primary);
+}
+
+.queue-live-copy > span {
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.queue-live-updated {
+    margin-left: auto;
+    flex: 0 0 auto;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-secondary);
+    opacity: 1;
+    transform: translateY(0);
+    transition: opacity 140ms ease, transform 140ms ease;
+}
+
+.queue-live-updated.is-changing {
+    opacity: 0;
+    transform: translateY(3px);
+}
+
+.stats-loading {
+    align-items: center;
+    flex-direction: column;
+    gap: var(--space-3);
+    color: var(--text-secondary);
+    font-size: 13px;
+}
+
+.stats-equaliser {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-1);
+    width: 46px;
+    height: 34px;
+}
+
+.stats-equaliser span {
+    width: 5px;
+    height: 8px;
+    background: var(--accent);
+    border-radius: var(--radius-pill);
+    box-shadow: 0 0 12px color-mix(in srgb, var(--accent) 35%, transparent);
+    animation: stats-equaliser-pulse 900ms ease-in-out infinite alternate;
+}
+
+.stats-equaliser span:nth-child(2) {
+    animation-delay: -600ms;
+}
+
+.stats-equaliser span:nth-child(3) {
+    animation-delay: -300ms;
+}
+
+@keyframes stats-equaliser-pulse {
+    from { height: 8px; opacity: 0.55; }
+    to { height: 30px; opacity: 1; }
+}
+
+.stats-reveal {
+    animation: stats-reveal 320ms ease-out both;
+}
+
+@keyframes stats-reveal {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+@media (max-width: 520px) {
+    .queue-live-summary {
+        align-items: flex-start;
+        flex-wrap: wrap;
+    }
+
+    .queue-live-copy {
+        flex: 1;
+    }
+
+    .queue-live-updated {
+        width: 100%;
+        margin-left: var(--space-4-5);
+    }
+}
+
+/* .clear-btn removed; all callers migrated to .btn .btn-ghost / .btn-danger.
+   .accent-btn and .warning-btn modifiers below still compose on .btn. */
 
 .bulk-textarea {
     width: 100%;
     min-height: 200px;
     max-height: 400px;
-    padding: 14px;
-    font-family: 'JetBrains Mono', monospace;
+    padding: var(--space-4);
+    font-family: var(--font-mono);
     font-size: 13px;
     line-height: 1.5;
     background: var(--bg-secondary);
     border: 1px solid var(--border);
-    border-radius: 12px;
+    border-radius: var(--radius-lg);
     color: var(--text-primary);
     resize: vertical;
     outline: none;
@@ -774,27 +2190,494 @@ h1 {
     opacity: 0.5;
 }
 
-.file-upload {
-    display: inline-block;
-    padding: 10px 20px;
-    font-size: 13px;
-    font-family: inherit;
-    font-weight: 600;
-    background: var(--bg-tertiary);
-    color: var(--text-primary);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    cursor: pointer;
-    transition: all 0.2s;
+/* .file-upload is a <label> styled as a button via .btn. Hide the actual
+   file input nested inside; the label captures the click. */
+.file-upload input[type="file"] {
+    display: none;
 }
 
-.file-upload:hover {
+.watched-controls-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-4);
+    align-items: center;
+    margin-bottom: var(--space-2);
+}
+
+.watched-control-label {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1-5);
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
+.watched-select {
+    padding: var(--space-1-5) var(--space-2-5);
+    font-size: 13px;
+    font-family: inherit;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-primary);
+}
+
+/* "Set Destination" row in the add-watched-playlist panel */
+.watched-dest-add-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+}
+
+.watched-dest-hint {
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.watched-dest-set-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-1) var(--space-3);
+    font-size: 12px;
+    font-weight: 600;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: border-color 0.15s, color 0.15s;
+}
+
+.watched-dest-set-btn:hover {
     border-color: var(--accent);
     color: var(--accent);
 }
 
-.file-upload input[type="file"] {
-    display: none;
+.watched-dest-display {
+    font-size: 12px;
+    color: var(--text-secondary);
+    font-family: var(--font-mono);
+}
+
+.watched-dest-clear {
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 12px;
+    padding: var(--space-0-5) var(--space-1);
+    line-height: 1;
+    display: inline-flex;
+    align-items: center;
+}
+
+.watched-dest-clear:hover { color: var(--text-primary); }
+
+/* Destination row inside a watched playlist card */
+.watched-card-dest-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1-5);
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.watched-card-dest-label {
+    white-space: nowrap;
+}
+
+.watched-card-dest-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    padding: var(--space-0-5) var(--space-2);
+    font-size: 12px;
+    font-weight: 600;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    color: var(--text-secondary);
+    cursor: pointer;
+    max-width: 220px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    transition: border-color 0.15s;
+}
+
+.watched-card-dest-btn:hover { border-color: var(--accent); color: var(--accent); }
+
+.watched-card-dest-path {
+    font-family: var(--font-mono);
+    font-weight: normal;
+    font-size: 12px;
+}
+
+/* --------------------------------------------------------------------------
+   Destination folder picker modal
+-------------------------------------------------------------------------- */
+
+.dest-picker-card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: var(--space-5);
+    width: min(480px, 92vw);
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+}
+
+.dest-picker-breadcrumb {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-top: var(--space-1);
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-0-5);
+}
+
+.dest-crumb {
+    cursor: pointer;
+    color: var(--accent);
+}
+
+.dest-crumb:hover { text-decoration: underline; }
+
+.dest-crumb-root { font-weight: 600; }
+
+.dest-crumb-sep { color: var(--text-secondary); }
+
+.dest-picker-body {
+    overflow-y: auto;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-0-5);
+    min-height: 120px;
+    max-height: 280px;
+}
+
+.dest-picker-loading,
+.dest-picker-empty {
+    padding: var(--space-3);
+    font-size: 12px;
+    color: var(--text-secondary);
+    text-align: center;
+}
+
+.dest-picker-item {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    width: 100%;
+    text-align: left;
+    padding: var(--space-2) var(--space-2-5);
+    font-size: 13px;
+    font-family: inherit;
+    background: none;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    color: var(--text-primary);
+    cursor: pointer;
+    transition: background 0.1s;
+}
+
+.dest-picker-item:hover { background: var(--bg-tertiary); border-color: var(--border); }
+
+.dest-picker-up { color: var(--text-secondary); font-size: 12px; }
+
+.dest-picker-self {
+    color: var(--accent);
+    border-color: var(--border);
+    background: var(--bg-tertiary);
+    margin-bottom: var(--space-1);
+    font-size: 12px;
+}
+
+.dest-picker-self:hover { border-color: var(--accent); }
+
+.dest-picker-custom-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding-top: var(--space-2);
+    border-top: 1px solid var(--border);
+}
+
+.dest-picker-custom-label {
+    font-size: 12px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+}
+
+.dest-picker-custom-input {
+    flex: 1;
+    padding: var(--space-1-5) var(--space-2-5);
+    font-size: 13px;
+    font-family: var(--font-mono);
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-primary);
+}
+
+/* Watched playlist cards */
+.watched-card {
+    padding: var(--space-3);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+}
+
+.watched-card-header {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+}
+
+.watched-card-name {
+    font-weight: 600;
+    flex: 1;
+}
+
+.watched-card-paused {
+    font-size: 12px;
+    color: var(--text-secondary);
+    background: var(--bg-tertiary);
+    padding: var(--space-0-5) var(--space-1-5);
+    border-radius: 4px;
+}
+
+/* What this artist is actually followed for. Singles, albums, or both. */
+.watched-card-mode {
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+    color: var(--accent, var(--text-primary));
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    padding: 1px var(--space-1-5);
+    border-radius: 10px;
+}
+
+.watched-card-refreshing {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1-5);
+    font-size: 12px;
+    color: var(--accent);
+    background: color-mix(in srgb, var(--accent) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+    padding: var(--space-0-5) var(--space-2);
+    border-radius: 999px;
+}
+
+.watched-refresh-spinner {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    border: 2px solid color-mix(in srgb, var(--accent) 30%, transparent);
+    border-top-color: var(--accent);
+    animation: spin 0.8s linear infinite;
+}
+
+
+.watched-card-meta {
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
+.watched-card-refresh-error {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-2-5);
+    border-radius: 6px;
+    border: 1px solid color-mix(in srgb, var(--error) 35%, transparent);
+    background: color-mix(in srgb, var(--error) 10%, transparent);
+    color: var(--text-primary);
+    font-size: 12px;
+    line-height: 1.35;
+}
+
+.watched-card-refresh-error i {
+    color: var(--error);
+    margin-top: 1px;
+    flex-shrink: 0;
+}
+
+.watched-card-settings {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-3);
+    padding-top: var(--space-1-5);
+    border-top: 1px solid var(--border);
+}
+
+.watched-card-toggle {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1-5);
+    font-size: 12px;
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+
+.watched-card-select {
+    padding: var(--space-1) var(--space-1-5);
+    font-size: 12px;
+    font-family: inherit;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text-primary);
+}
+
+/* The singles start date, both as a card control and inside the "start watching"
+   prompt. Same clothes as the interval dropdown, since they do the same sort of job. */
+.watched-card-date {
+    padding: var(--space-1) var(--space-1-5);
+    font-size: 12px;
+    font-family: inherit;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text-primary);
+}
+
+/* Shown only while you are switching singles on, and nothing has been saved yet. */
+.watched-singles-start {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2);
+    margin-top: var(--space-2);
+    padding: var(--space-2) var(--space-2-5);
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+}
+
+.watched-singles-start-label {
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.watched-sources-chips,
+.watched-sources-selector {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1);
+}
+
+.source-chip {
+    padding: var(--space-0-5) var(--space-2);
+    font-size: 12px;
+    font-family: inherit;
+    font-weight: 600;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    cursor: pointer;
+    line-height: 1.4;
+    transition: opacity 0.15s, background 0.15s;
+}
+
+.source-chip.on {
+    background: var(--accent);
+    color: #fff;
+    border-color: var(--accent);
+    opacity: 1;
+}
+
+.source-chip.off {
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    opacity: 0.5;
+}
+
+.watched-card-stale-warning {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-2-5);
+    background: color-mix(in srgb, var(--warning, #f59e0b) 12%, transparent);
+    border: 1px solid color-mix(in srgb, var(--warning, #f59e0b) 40%, transparent);
+    border-radius: 6px;
+    font-size: 12px;
+    color: var(--text-primary);
+    line-height: 1.4;
+}
+
+.watched-card-stale-warning i {
+    color: var(--warning, #f59e0b);
+    margin-top: var(--space-0-5);
+    flex-shrink: 0;
+}
+
+.watched-card-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-1-5);
+    padding-top: var(--space-2);
+    border-top: 1px solid var(--border);
+}
+
+/* Compact action buttons used inside watched playlist + artist cards.
+   Smaller than .btn-sm to fit the dense card row. Hover lightens rather
+   than tinting accent, so colour modifiers (pause/delete) remain visible. */
+.watched-action-btn {
+    padding: var(--space-1) var(--space-3);
+    font-size: 13px;
+    font-weight: 500;
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.watched-action-btn:hover:not(:disabled) {
+    background: var(--border);
+    color: var(--text-primary);
+}
+
+.watched-action-btn:disabled {
+    opacity: 0.65;
+    cursor: not-allowed;
+}
+
+.watched-action-pause {
+    color: var(--accent);
+}
+
+.watched-action-pause:hover {
+    color: var(--accent);
+}
+
+.watched-action-delete {
+    color: var(--error);
+    margin-left: auto;
+}
+
+.watched-action-delete:hover {
+    color: var(--error);
+}
+
+.watched-card-expanded {
+    padding-top: var(--space-2-5);
+    border-top: 1px solid var(--border);
+    font-size: 13px;
+    color: var(--text-secondary);
 }
 
 .toggle-switch {
@@ -849,30 +2732,30 @@ h1 {
     background: var(--bg-secondary);
     border: 1px solid var(--border);
     border-radius: 12px;
-    padding: 16px;
-    margin-bottom: 16px;
+    padding: var(--space-4);
+    margin-bottom: var(--space-4);
 }
 
 .settings-section-title {
-    font-size: 14px;
+    font-size: 15px;
     font-weight: 600;
     color: var(--text-primary);
-    margin-bottom: 12px;
-    padding-bottom: 8px;
+    margin-bottom: var(--space-3);
+    padding-bottom: var(--space-2);
     border-bottom: 1px solid var(--border);
 }
 
 .settings-grid {
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: var(--space-3);
 }
 
 .settings-label {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    font-size: 13px;
+    font-size: 14px;
     color: var(--text-primary);
     cursor: pointer;
 }
@@ -880,23 +2763,23 @@ h1 {
 .settings-form {
     display: flex;
     flex-direction: column;
-    gap: 12px;
+    gap: var(--space-3);
 }
 
 .settings-row {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--space-1);
 }
 
 .settings-row label {
-    font-size: 12px;
+    font-size: 13px;
     color: var(--text-secondary);
 }
 
 .settings-row input {
-    padding: 10px 12px;
-    font-size: 13px;
+    padding: var(--space-2-5) var(--space-3);
+    font-size: 14px;
     font-family: inherit;
     background: var(--bg-tertiary);
     border: 1px solid var(--border);
@@ -916,9 +2799,9 @@ h1 {
 }
 
 .settings-row textarea {
-    padding: 10px 12px;
-    font-size: 12px;
-    font-family: monospace;
+    padding: var(--space-2-5) var(--space-3);
+    font-size: 13px;
+    font-family: var(--font-mono);
     background: var(--bg-tertiary);
     border: 1px solid var(--border);
     border-radius: 8px;
@@ -945,14 +2828,40 @@ h1 {
 }
 
 .settings-hint {
-    font-size: 11px;
+    font-size: 13px;
     color: var(--text-secondary);
     opacity: 0.8;
+    line-height: 1.45;
+}
+
+.settings-warning {
+    margin-bottom: var(--space-3);
+    padding: var(--space-2-5) var(--space-3);
+    border: 1px solid rgba(245, 158, 11, 0.45);
+    border-radius: 8px;
+    background: rgba(245, 158, 11, 0.08);
+    color: var(--text-primary);
+    font-size: 13px;
+    line-height: 1.45;
+}
+
+.settings-warning code {
+    color: var(--accent);
+}
+
+/* Lift tiny helper copy in Settings where inline styles were 10-12px */
+#settingsTabContainer .settings-row > span {
+    font-size: 13px !important;
+    line-height: 1.45;
+}
+
+#settingsTabContainer .settings-label span span {
+    font-size: 12px !important;
 }
 
 .password-field {
     display: flex;
-    gap: 8px;
+    gap: var(--space-2);
 }
 
 .password-field input {
@@ -960,8 +2869,8 @@ h1 {
 }
 
 .password-toggle {
-    padding: 8px 12px;
-    font-size: 11px;
+    padding: var(--space-2) var(--space-3);
+    font-size: 12px;
     font-family: inherit;
     background: var(--bg-tertiary);
     border: 1px solid var(--border);
@@ -977,27 +2886,12 @@ h1 {
     color: var(--text-primary);
 }
 
-.setting-clear-btn {
-    padding: 8px 12px;
-    font-size: 11px;
-    font-family: inherit;
-    background: transparent;
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    color: var(--text-secondary);
-    cursor: pointer;
-    transition: all 0.2s;
-    white-space: nowrap;
-}
-
-.setting-clear-btn:hover {
-    color: var(--error);
-    border-color: var(--error);
-}
+/* .setting-clear-btn now driven by .btn .btn-sm .btn-danger (JS-rendered). */
+.setting-clear-btn { white-space: nowrap; }
 
 .setting-input-group {
     display: flex;
-    gap: 8px;
+    gap: var(--space-2);
 }
 
 .setting-input-group input,
@@ -1005,33 +2899,12 @@ h1 {
     flex: 1;
 }
 
-.test-btn {
-    padding: 10px 16px;
-    font-size: 13px;
-    font-family: inherit;
-    font-weight: 600;
-    background: var(--bg-tertiary);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    color: var(--text-primary);
-    cursor: pointer;
-    transition: all 0.2s;
-    align-self: flex-start;
-}
-
-.test-btn:hover {
-    border-color: var(--accent);
-    color: var(--accent);
-}
-
-.test-btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-}
+/* .test-btn now driven by .btn. Only layout positioning kept. */
+.test-btn { align-self: flex-start; }
 
 .test-result {
-    font-size: 12px;
-    padding: 8px 12px;
+    font-size: 13px;
+    padding: var(--space-2) var(--space-3);
     border-radius: 6px;
     display: none;
 }
@@ -1050,15 +2923,124 @@ h1 {
     color: var(--error);
 }
 
+.test-result.warning {
+    display: block;
+    background: rgba(234, 179, 8, 0.1);
+    border: 1px solid var(--warning);
+    color: var(--warning);
+}
+
+/* Step-by-step diagnostic output (Monochrome download test) */
+.diag-steps {
+    margin-top: var(--space-2);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+    font-size: 13px;
+}
+
+.diag-step {
+    display: flex;
+    gap: var(--space-2-5);
+    align-items: baseline;
+    padding: var(--space-2) var(--space-3);
+    border-bottom: 1px solid var(--border);
+}
+
+.diag-step:last-child {
+    border-bottom: none;
+}
+
+.diag-step-status {
+    flex: 0 0 auto;
+    width: 46px;
+    font-weight: 600;
+    font-size: 11px;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+}
+
+.diag-step.ok .diag-step-status { color: var(--accent); }
+.diag-step.fail .diag-step-status { color: var(--error); }
+.diag-step.warn .diag-step-status { color: var(--warning); }
+.diag-step.skip .diag-step-status { color: var(--text-secondary); }
+
+.diag-step-body {
+    min-width: 0;
+    flex: 1;
+}
+
+.diag-step-name {
+    font-weight: 600;
+}
+
+.diag-step-detail {
+    display: block;
+    margin-top: var(--space-0-5);
+    color: var(--text-secondary);
+    overflow-wrap: anywhere;
+}
+
+.diag-hint {
+    padding: var(--space-2) var(--space-3);
+    border-top: 1px solid var(--border);
+    background: rgba(234, 179, 8, 0.1);
+    color: var(--warning);
+}
+
+.user-mgmt-section {
+    position: relative;
+}
+
+.user-info-toggle {
+    position: absolute;
+    top: 0;
+    right: 0;
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    font-size: 16px;
+    cursor: pointer;
+    padding: var(--space-1) var(--space-1-5);
+    line-height: 1;
+}
+
+.user-info-toggle:hover {
+    color: var(--text-primary);
+}
+
+.user-info-panel {
+    margin: 0 0 var(--space-3) 0;
+    padding: var(--space-3) var(--space-3);
+    background: var(--surface-2, rgba(255,255,255,0.04));
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-size: 13px;
+    color: var(--text-secondary);
+    line-height: 1.5;
+}
+
+.user-info-panel p {
+    margin: 0 0 var(--space-2) 0;
+}
+
+.user-info-panel p:last-child {
+    margin-bottom: 0;
+}
+
+.user-info-panel strong {
+    color: var(--text-primary);
+}
+
 .settings-details {
-    margin-top: 12px;
+    margin-top: var(--space-3);
 }
 
 .settings-details summary {
-    font-size: 13px;
+    font-size: 14px;
     color: var(--text-secondary);
     cursor: pointer;
-    padding: 8px 0;
+    padding: var(--space-2) 0;
 }
 
 .settings-details summary:hover {
@@ -1067,17 +3049,18 @@ h1 {
 
 .settings-actions {
     display: flex;
-    align-items: center;
-    gap: 16px;
-    margin-top: 8px;
+    align-items: stretch;
+    gap: var(--space-4);
+    margin-top: var(--space-2);
 }
 
 .donation-link {
-    margin-left: auto;
-    display: inline-flex;
+    display: flex;
     align-items: center;
-    gap: 6px;
-    padding: 14px 28px;
+    justify-content: center;
+    gap: var(--space-1-5);
+    flex: 1;
+    padding: var(--space-3) var(--space-5);
     font-size: 14px;
     font-family: inherit;
     font-weight: 600;
@@ -1087,7 +3070,94 @@ h1 {
     border-radius: 10px;
     text-decoration: none;
     cursor: pointer;
+    position: relative;
+    overflow: hidden;
+    isolation: isolate;
     transition: all 0.2s;
+    animation: donation-link-magnify 4s ease-in-out infinite;
+}
+
+.donation-link > * {
+    position: relative;
+    z-index: 2;
+}
+
+.donation-link::before {
+    content: "";
+    position: absolute;
+    left: -24%;
+    top: 50%;
+    width: 62px;
+    height: 62px;
+    border-radius: 999px;
+    pointer-events: none;
+    z-index: 1;
+    opacity: 0;
+    background:
+        radial-gradient(circle at 34% 34%, rgba(255, 255, 255, 0.85) 0%, rgba(255, 255, 255, 0.35) 40%, rgba(255, 255, 255, 0.10) 70%, rgba(255, 255, 255, 0) 100%);
+    box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.28), 0 0 14px rgba(255, 255, 255, 0.22);
+    animation: donation-link-lens-roll 4s linear infinite;
+}
+
+.donation-link i {
+    display: inline-block;
+    animation: donation-link-icon-roll 4s ease-in-out infinite;
+}
+
+@keyframes donation-link-magnify {
+    0%, 100% { transform: scale(1); }
+    2% { transform: scale(1.02); }
+    8% { transform: scale(1.035); }
+    10% { transform: scale(1); }
+}
+
+@keyframes donation-link-lens-roll {
+    0% {
+        transform: translate(-170%, -50%) scale(0.72) rotate(-60deg);
+        opacity: 0;
+    }
+    1.5% {
+        opacity: 0.95;
+    }
+    8.5% {
+        transform: translate(700%, -50%) scale(1.2) rotate(340deg);
+        opacity: 0.95;
+    }
+    10% {
+        transform: translate(760%, -50%) scale(1.25) rotate(400deg);
+        opacity: 0;
+    }
+    100% {
+        transform: translate(760%, -50%) scale(1.25) rotate(400deg);
+        opacity: 0;
+    }
+}
+
+@keyframes donation-link-icon-roll {
+    0%, 100% { transform: translateX(0) rotate(0deg) scale(1); }
+    2% { transform: translateX(-2px) rotate(-10deg) scale(1.05); }
+    8% { transform: translateX(2px) rotate(20deg) scale(1.14); }
+    10% { transform: translateX(0) rotate(0deg) scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .donation-link,
+    .donation-link::before,
+    .donation-link i,
+    .spinner,
+    .watched-refresh-spinner,
+    .job-status.downloading,
+    .queue-live-dot.active,
+    .stats-equaliser span,
+    .stats-reveal {
+        animation: none !important;
+    }
+
+    .toast,
+    .queue-live-summary,
+    .queue-live-updated {
+        transition-duration: 0.01ms;
+    }
 }
 
 .donation-link:hover {
@@ -1095,29 +3165,40 @@ h1 {
     color: #000;
 }
 
-.donation-link-icon {
-    font-size: 15px;
+/* .save-btn now driven by .btn .btn-primary, just kept for layout (flex). */
+.save-btn { flex: 1; padding: var(--space-3) var(--space-5); }
+
+/* .release-notes-btn now driven by .btn .btn-ghost, just kept for layout. */
+.release-notes-btn { flex: 1; padding: var(--space-3) var(--space-5); }
+
+.release-notes-nav {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
 }
 
-.save-btn {
-    padding: 14px 28px;
-    font-size: 14px;
-    font-family: inherit;
-    font-weight: 600;
-    background: var(--accent);
-    color: #000;
-    border: none;
-    border-radius: 10px;
+.release-notes-nav-btn {
+    width: 30px;
+    height: 30px;
+    padding: 0;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: transparent;
+    color: var(--text-secondary);
+    font-size: 18px;
+    line-height: 1;
     cursor: pointer;
     transition: all 0.2s;
 }
 
-.save-btn:hover {
-    background: #16a34a;
+.release-notes-nav-btn:hover:not(:disabled) {
+    color: var(--text-primary);
+    border-color: var(--text-secondary);
+    background: var(--bg-tertiary);
 }
 
-.save-btn:disabled {
-    opacity: 0.5;
+.release-notes-nav-btn:disabled {
+    opacity: 0.35;
     cursor: not-allowed;
 }
 
@@ -1147,7 +3228,7 @@ h1 {
     top: 50%;
     transform: translateY(-50%);
     font-size: 9px;
-    padding: 2px 8px;
+    padding: var(--space-0-5) var(--space-2);
     background: var(--warning);
     color: #000;
     border-radius: 4px;
@@ -1161,7 +3242,7 @@ h1 {
 
 @media (max-width: 400px) {
     .container {
-        padding: 16px;
+        padding: var(--space-4);
     }
 
     .result-thumb {
@@ -1171,5 +3252,3337 @@ h1 {
 
     .result-title {
         font-size: 14px;
+    }
+
+    /* Narrow phones: the match figure keeps its place, the caption gives up its */
+    .result-match {
+        min-width: 44px;
+        font-size: 13px;
+        padding: var(--space-1) var(--space-1-5);
+    }
+
+    .result-match-caption {
+        display: none;
+    }
+
+    .result-uploader {
+        max-width: 120px;
+    }
+}
+
+/* Settings readability/layout on phones */
+@media (max-width: 760px) {
+    #settingsTabContainer .settings-section {
+        padding: var(--space-3);
+    }
+
+    #settingsTabContainer .settings-section-title {
+        font-size: 16px;
+    }
+
+    #settingsTabContainer .settings-label {
+        font-size: 15px;
+    }
+
+    #settingsTabContainer .settings-row label {
+        font-size: 14px;
+    }
+
+    #settingsTabContainer .settings-row input,
+    #settingsTabContainer .settings-row select,
+    #settingsTabContainer .settings-row textarea {
+        font-size: 16px;
+    }
+
+    #settingsTabContainer .password-field,
+    #settingsTabContainer .setting-input-group {
+        flex-direction: column;
+        align-items: stretch;
+    }
+
+    #settingsTabContainer .password-field input,
+    #settingsTabContainer .setting-input-group input,
+    #settingsTabContainer .setting-input-group .password-field {
+        width: 100%;
+        min-width: 0;
+    }
+
+    #settingsTabContainer .password-toggle,
+    #settingsTabContainer .setting-clear-btn {
+        width: 100%;
+        text-align: center;
+    }
+
+    #settingsTabContainer .settings-hint,
+    #settingsTabContainer .settings-row > span {
+        font-size: 14px !important;
+        line-height: 1.5;
+    }
+
+    #settingsTabContainer .settings-label span span {
+        font-size: 13px !important;
+        line-height: 1.35;
+    }
+
+    /* Lift tiny inline helper copy without touching desktop */
+    #settingsTabContainer [style*="font-size:10px"],
+    #settingsTabContainer [style*="font-size: 10px"],
+    #settingsTabContainer [style*="font-size:12px"],
+    #settingsTabContainer [style*="font-size: 12px"],
+    #settingsTabContainer [style*="font-size:12px"],
+    #settingsTabContainer [style*="font-size: 12px"] {
+        font-size: 14px !important;
+        line-height: 1.5;
+    }
+
+    /* Several settings controls are inline-width 240/320px in HTML */
+    #settingsTabContainer input[style*="width: 240px"],
+    #settingsTabContainer input[style*="width: 120px"],
+    #settingsTabContainer input[style*="width: 320px"],
+    #settingsTabContainer select[style*="width: 320px"],
+    #settingsTabContainer #customSubdirInput,
+    #settingsTabContainer #customPlaylistsSubdirInput {
+        width: 100% !important;
+        max-width: 100%;
+    }
+
+    #settingsFloatingBar .save-btn,
+    #settingsFloatingBar .donation-link,
+    #settingsFloatingBar .release-notes-btn {
+        width: 100%;
+        justify-content: center;
+    }
+}
+
+/* Explore similar  -  "~ Similar" button on result cards */
+/* Desktop: hidden by default, shown on hover via .result-item:hover */
+/* Mobile: lives in .mobile-actions row, always visible */
+.explore-btn {
+    display: none;
+    font-size: 12px;
+    font-family: inherit;
+    font-weight: 500;
+    padding: var(--space-1) var(--space-2-5);
+    background: transparent;
+    color: var(--text-secondary);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    cursor: pointer;
+    transition: all 0.2s;
+    white-space: nowrap;
+    flex: 1;
+}
+
+.explore-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+    background: var(--bg-tertiary);
+}
+
+/* On mobile the button is inside .mobile-actions  -  always show it there */
+.mobile-actions .explore-btn {
+    display: inline-block;
+}
+
+/* Explore bar  -  shown above results when in similar mode */
+.explore-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+    padding: var(--space-2) var(--space-3);
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    margin-bottom: var(--space-2-5);
+    font-size: 13px;
+}
+
+.explore-bar-label {
+    color: var(--text-secondary);
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.explore-bar-label strong {
+    color: var(--text-primary);
+}
+
+.explore-bar-actions {
+    display: flex;
+    gap: var(--space-2);
+    flex-shrink: 0;
+}
+
+.explore-download-all-btn {
+    font-size: 13px;
+    font-family: inherit;
+    font-weight: 500;
+    padding: var(--space-1) var(--space-2-5);
+    background: var(--accent);
+    color: var(--bg-primary);
+    border: none;
+    border-radius: 5px;
+    cursor: pointer;
+    transition: opacity 0.2s;
+}
+
+.explore-download-all-btn:hover {
+    opacity: 0.85;
+}
+
+.explore-download-all-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.explore-back-btn {
+    font-size: 13px;
+    font-family: inherit;
+    padding: var(--space-1) var(--space-2-5);
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.explore-back-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.explore-playlist-label {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1);
+    font-size: 13px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.explore-playlist-label input[type="checkbox"] {
+    accent-color: var(--accent);
+    cursor: pointer;
+}
+
+/* --------------------------------------------------------------------------
+   Auth screens (login, forced password change)
+   Full-viewport overlay, centred card layout.
+-------------------------------------------------------------------------- */
+
+.auth-screen {
+    position: fixed;
+    inset: 0;
+    background: var(--bg-primary);
+    z-index: 9999;
+    align-items: center;
+    justify-content: center;
+}
+
+.auth-card {
+    background: var(--bg-secondary);
+    padding: var(--space-6);
+    border-radius: 16px;
+    width: 100%;
+    max-width: 360px;
+    border: 1px solid var(--border);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+}
+
+.auth-title {
+    margin: 0 0 var(--space-5);
+    font-size: 20px;
+    font-weight: 600;
+}
+
+/* Slightly less bottom margin for the change-password heading */
+.auth-title-sm {
+    margin: 0 0 var(--space-2);
+    font-size: 20px;
+    font-weight: 600;
+}
+
+.auth-forced-notice {
+    color: var(--warning, #fb923c);
+    margin-bottom: var(--space-4);
+    font-size: 13px;
+}
+
+/* Shared text/password input used on auth screens */
+.auth-input {
+    width: 100%;
+    padding: var(--space-2-5) var(--space-3);
+    margin-bottom: var(--space-3);
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--bg-primary);
+    color: var(--text);
+    font-size: 15px;
+    box-sizing: border-box;
+}
+
+/* Utility: slightly more bottom margin, used on the last input before a submit button */
+.mb-16 {
+    margin-bottom: var(--space-4);
+}
+
+/* .auth-submit-btn now driven by .btn .btn-primary .btn-block. */
+
+.auth-error {
+    color: var(--error, #f87171);
+    margin-top: var(--space-2-5);
+    font-size: 13px;
+}
+
+/* --------------------------------------------------------------------------
+   Header controls (right-hand cluster)
+-------------------------------------------------------------------------- */
+
+.header-controls {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+}
+
+.header-format-label {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1-5);
+    font-size: 12px;
+    color: var(--text-secondary);
+    cursor: pointer;
+}
+
+/* One label doing two jobs: what the toggle will do, and whether that is a
+   downgrade. Never let it wrap; "Convert to Opus" split across two lines was
+   what started all this. */
+.header-format-text {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    white-space: nowrap;
+}
+
+.header-format-text .header-lossy-icon {
+    display: none;
+}
+
+.header-format-text.is-lossy {
+    color: var(--warning);
+    font-weight: 700;
+}
+
+.header-format-text.is-lossy .header-lossy-icon {
+    display: inline;
+}
+
+.theme-toggle-btn {
+    background: none;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: var(--space-1) var(--space-2);
+    cursor: pointer;
+    font-size: 14px;
+    line-height: 1;
+    color: var(--text-secondary);
+    transition: all 0.2s;
+}
+
+/* Thumbs are bigger than cursors. 29x24 was a fine target for a mouse. */
+@media (pointer: coarse) {
+    .theme-toggle-btn {
+        min-width: 36px;
+        min-height: 32px;
+    }
+}
+
+.version-label {
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+/* Update available: sits above the search box until dismissed for that version */
+.update-banner {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--space-2) var(--space-3);
+    margin-bottom: var(--space-4);
+    padding: var(--space-3) var(--space-4);
+    background: var(--bg-secondary);
+    border: 1px solid var(--accent-dim);
+    border-left: 3px solid var(--accent);
+    border-radius: var(--radius-md);
+    font-size: 13px;
+    color: var(--text-secondary);
+    animation: update-banner-in 0.3s ease-out;
+}
+
+.update-banner strong {
+    color: var(--text-primary);
+}
+
+.update-banner-icon {
+    color: var(--accent);
+}
+
+.update-banner-text {
+    flex: 1 1 260px;
+}
+
+.update-banner-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin-left: auto;
+}
+
+.update-banner-btn {
+    font-size: 13px;
+}
+
+/* The settings bar's coffee button, shrunk to banner size */
+.donation-link.update-banner-coffee {
+    flex: none;
+    padding: var(--space-2) var(--space-3);
+    font-size: 13px;
+    border-radius: var(--radius-md);
+}
+
+@keyframes update-banner-in {
+    from { opacity: 0; transform: translateY(-6px); }
+    to { opacity: 1; transform: none; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .update-banner {
+        animation: none;
+    }
+}
+
+/* Current-user display and sign-out button share the same text style */
+.header-user-text {
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
+/* .logout-btn now driven by .btn .btn-ghost. Sized down for header chrome. */
+.logout-btn {
+    font-size: 13px;
+    padding: var(--space-1) var(--space-2);
+}
+
+.maintenance-preview {
+    margin: var(--space-3) 0;
+    padding: var(--space-3);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    font-size: 13px;
+}
+
+.maintenance-actions,
+.maintenance-history {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-2-5);
+    margin-top: var(--space-3);
+}
+
+.maintenance-history label {
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+@media (max-width: 560px) {
+    .version-label,
+    .header-user-text {
+        display: none !important;
+    }
+
+    header {
+        gap: var(--space-2);
+    }
+
+    .header-controls {
+        gap: var(--space-2);
+        min-width: 0;
+    }
+}
+
+/* 520px rather than the phone-ish 430px: signed in, the controls beside the
+   two-line title clip Sign out off the edge up to 498px, and only have a
+   sensible gutter again from about 515px */
+@media (max-width: 520px) {
+    header {
+        flex-wrap: wrap;
+    }
+
+    /* The header has wrapped, so there is room for the version again, and on a
+       phone that is the only place to find out which one you are running */
+    .version-label {
+        display: inline !important;
+        font-size: 11px;
+    }
+
+    .header-controls {
+        flex-basis: 100%;
+        justify-content: flex-end;
+    }
+}
+
+/* --------------------------------------------------------------------------
+   Bulk import tab
+-------------------------------------------------------------------------- */
+
+.bulk-intro {
+    margin-bottom: var(--space-3);
+}
+
+.bulk-intro-text {
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin-bottom: var(--space-3);
+}
+
+.bulk-file-row {
+    margin-bottom: var(--space-3);
+}
+
+.bulk-file-name {
+    margin-left: var(--space-3);
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
+.bulk-url-row {
+    margin-bottom: var(--space-3);
+}
+
+/* .bulk-url-flex now uses .input-action wrapper for the inside-button pattern.
+   Kept as a no-op selector so old refs in JS don't break. */
+.bulk-url-flex {
+    display: block;
+}
+
+.bulk-url-input {
+    padding: var(--space-4) var(--space-4-5);
+    font-size: 16px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    color: var(--text-primary);
+}
+
+/* .bulk-fetch-btn now driven by .btn .btn-primary .input-action-btn.
+   Reserved class hook kept for JS / future overrides. */
+.bulk-fetch-btn { white-space: nowrap; }
+
+.form-error {
+    margin-top: var(--space-2);
+    font-size: 12px;
+    color: var(--error);
+}
+
+.bulk-services-row {
+    margin-top: var(--space-1-5);
+    display: flex;
+    align-items: center;
+    gap: var(--space-1-5);
+}
+
+.bulk-services-hint {
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+/* Small circular info badge */
+.info-badge {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    cursor: help;
+}
+
+.bulk-services-note {
+    margin-top: var(--space-1-5);
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.bulk-textarea-wrap {
+    position: relative;
+}
+
+/* Line counter overlay inside the bulk textarea */
+.line-counter {
+    position: absolute;
+    bottom: 8px;
+    right: 12px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    background: var(--bg-tertiary);
+    padding: var(--space-1) var(--space-2);
+    border-radius: 4px;
+}
+
+.bulk-playlist-toggle {
+    margin-top: var(--space-3);
+    margin-bottom: var(--space-3);
+}
+
+.bulk-playlist-row-inline {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-4);
+}
+
+.bulk-playlist-row {
+    margin-top: var(--space-3);
+}
+
+.bulk-playlist-checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    font-size: 13px;
+    color: var(--text-primary);
+    cursor: pointer;
+}
+
+.bulk-checkbox {
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+}
+
+/* Playlist name input - JS toggles display, so display:none stays inline;
+   these rules handle the layout when it is visible */
+.bulk-playlist-name-input {
+    width: 100%;
+    margin-top: var(--space-2);
+    padding: var(--space-2-5) var(--space-3);
+    font-size: 13px;
+    font-family: inherit;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text-primary);
+}
+
+/* "Save files to Playlists folder" row - also JS-toggled */
+.bulk-playlists-dir-label {
+    align-items: center;
+    gap: var(--space-2);
+    font-size: 13px;
+    color: var(--text-primary);
+    cursor: pointer;
+    margin-top: var(--space-2);
+}
+
+/* .bulk-import-btn now driven by .btn .btn-primary .btn-lg .btn-block.
+   Reserved hook kept for any future tweaks. */
+
+.bulk-import-btn:disabled {
+    background: var(--border);
+    color: var(--text-secondary);
+    cursor: not-allowed;
+    opacity: 0.6;
+}
+
+/* --------------------------------------------------------------------------
+   Albums tab
+-------------------------------------------------------------------------- */
+
+.album-artist-results {
+    margin: var(--space-4) 0 var(--space-5);
+    padding: var(--space-1-5) var(--space-0-5);
+    display: flex;
+    flex-wrap: wrap;
+    column-gap: var(--space-3);
+    row-gap: var(--space-3);
+}
+
+.album-search-note {
+    margin-top: var(--space-2-5);
+    margin-bottom: var(--space-2-5);
+    padding: var(--space-2-5) var(--space-3);
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.album-artist-btn {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: var(--space-3) var(--space-4);
+    text-align: left;
+    cursor: pointer;
+    color: var(--text-primary);
+    font-family: inherit;
+    font-size: 13px;
+    transition: border-color 0.15s, background 0.15s;
+}
+
+.album-artist-btn:hover,
+.album-artist-btn.selected {
+    border-color: var(--accent);
+    background: var(--hover-bg);
+}
+
+.album-artist-name {
+    font-weight: 600;
+}
+
+.album-retry-btn {
+    margin-left: var(--space-2);
+    padding: var(--space-1) var(--space-3);
+    background: var(--accent);
+    color: var(--accent-text, #000);
+    border: none;
+    border-radius: 4px;
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.album-retry-btn:hover {
+    opacity: 0.85;
+}
+
+.album-track-error {
+    color: var(--text-error, #ff6b6b);
+}
+
+.album-artist-disambig {
+    color: var(--text-secondary);
+    margin-left: var(--space-2);
+    font-size: 12px;
+}
+
+.album-section-heading {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin: 0 0 var(--space-2-5);
+}
+
+.album-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    margin-bottom: var(--space-4);
+}
+
+.album-list-btn {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2-5);
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: var(--space-2) var(--space-3);
+    text-align: left;
+    cursor: pointer;
+    color: var(--text-primary);
+    font-family: inherit;
+    font-size: 13px;
+    transition: border-color 0.15s, background 0.15s;
+}
+
+.album-list-btn:hover,
+.album-list-btn.selected {
+    border-color: var(--accent);
+    background: var(--hover-bg);
+}
+
+.album-list-thumb {
+    width: 36px;
+    height: 36px;
+    border-radius: 6px;
+    object-fit: cover;
+    background: var(--bg-tertiary);
+    flex-shrink: 0;
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.album-list-thumb.has-artwork:hover {
+    transform: scale(2.4);
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.45);
+    z-index: 5;
+}
+
+.album-list-title {
+    font-weight: 600;
+}
+
+.album-list-year {
+    color: var(--text-secondary);
+    margin-left: var(--space-2);
+    font-size: 12px;
+}
+
+.album-tracklist {
+    margin: 0 0 var(--space-3) var(--space-4-5);
+    padding: 0;
+    font-size: 13px;
+    color: var(--text-primary);
+    line-height: 1.7;
+}
+
+.album-track-existing {
+    color: var(--text-secondary);
+}
+
+.album-track-item {
+    padding: var(--space-1) 0;
+}
+
+.album-track-title {
+    margin-right: var(--space-3);
+}
+
+.album-track-repair-btn {
+    white-space: nowrap;
+}
+
+.album-track-missing {
+    color: var(--accent);
+    font-weight: 600;
+}
+
+.album-track-legend {
+    margin: 0 0 var(--space-2);
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.album-track-legend .missing {
+    color: var(--accent);
+    font-weight: 600;
+}
+
+.album-track-legend .existing {
+    color: var(--text-secondary);
+}
+
+.album-m3u-hint {
+    margin-top: var(--space-1-5);
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.album-existing-warning {
+    margin: 0 0 var(--space-2-5);
+    padding: var(--space-2) var(--space-2-5);
+    border-radius: 8px;
+    border: 1px solid var(--warning-border, #d97706);
+    background: var(--warning-bg, #fef3c7);
+    color: var(--warning-text, #92400e);
+    font-size: 12px;
+}
+
+.album-reset-btn {
+    margin-top: 0;
+    max-height: 0;
+    padding-top: 0;
+    padding-bottom: 0;
+    border-width: 0;
+    opacity: 0;
+    overflow: hidden;
+    pointer-events: none;
+    transform: translateY(6px);
+    transition: max-height 0.2s ease, margin-top 0.2s ease, padding 0.2s ease, opacity 0.2s ease, transform 0.2s ease;
+}
+
+.album-reset-btn.show {
+    margin-top: var(--space-3);
+    max-height: 56px;
+    padding-top: var(--space-3);
+    padding-bottom: var(--space-3);
+    opacity: 1;
+    pointer-events: auto;
+    transform: translateY(0);
+}
+
+.album-download-progress {
+    margin-top: var(--space-3);
+}
+
+.album-download-btn {
+    margin-top: var(--space-3);
+}
+
+/* --------------------------------------------------------------------------
+   Long-form YouTube split panel (Bulk Import Fetch box)
+-------------------------------------------------------------------------- */
+
+.longform-split-panel {
+    font-size: 13px;
+    margin-top: var(--space-3);
+}
+
+.longform-video-header {
+    display: flex;
+    gap: var(--space-2-5);
+    align-items: center;
+    margin-bottom: var(--space-2-5);
+}
+
+.longform-video-thumb {
+    width: 80px;
+    height: 45px;
+    object-fit: cover;
+    border-radius: 6px;
+    flex-shrink: 0;
+}
+
+.longform-video-title {
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.longform-detected-via {
+    color: var(--text-secondary);
+    font-size: 12px;
+}
+
+.longform-field-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin-bottom: var(--space-2-5);
+}
+
+.longform-rows-wrap {
+    overflow-x: auto;
+    margin-bottom: var(--space-2);
+}
+
+.longform-row {
+    display: grid;
+    grid-template-columns: 90px 90px 1fr 1fr auto;
+    gap: var(--space-1-5);
+    align-items: center;
+    margin-bottom: var(--space-1-5);
+    min-width: 480px;
+}
+
+.longform-row-input {
+    padding: var(--space-1-5) var(--space-2);
+    font-size: 12px;
+    font-family: inherit;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-primary);
+    width: 100%;
+}
+
+.longform-row-remove {
+    padding: var(--space-1) var(--space-2);
+}
+
+.longform-paste-wrap {
+    margin: var(--space-2-5) 0;
+}
+
+.longform-paste-textarea {
+    width: 100%;
+    min-height: 70px;
+    padding: var(--space-2) var(--space-2-5);
+    font-size: 12px;
+    font-family: inherit;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    color: var(--text-primary);
+    resize: vertical;
+}
+
+.longform-actions {
+    display: flex;
+    gap: var(--space-2);
+    margin-top: var(--space-2-5);
+}
+
+/* --------------------------------------------------------------------------
+   Watched playlists / watched artists tab
+-------------------------------------------------------------------------- */
+
+
+.queue-section-heading {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
+.queue-section-heading a {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--accent);
+    text-decoration: none;
+}
+
+/* Modifier: keep the .btn shape, just recolour. */
+.btn.accent-btn,
+.accent-btn {
+    color: var(--accent);
+    border-color: var(--accent);
+}
+
+.btn.accent-btn:hover:not(:disabled),
+.accent-btn:hover:not(:disabled) {
+    background: var(--accent);
+    color: #000;
+    border-color: var(--accent);
+}
+
+.btn.warning-btn,
+.warning-btn {
+    color: var(--warning);
+    border-color: var(--warning);
+}
+
+.btn.warning-btn:hover:not(:disabled),
+.warning-btn:hover:not(:disabled) {
+    background: var(--warning);
+    color: #000;
+    border-color: var(--warning);
+}
+
+.watched-add-panel {
+    margin-bottom: var(--space-4);
+    padding: var(--space-3);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+}
+
+.watched-panel-text {
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin-bottom: var(--space-2);
+}
+
+.watched-schedule-info {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-bottom: var(--space-3);
+    opacity: 0.8;
+}
+
+/* .watched-url-row now uses .input-action wrapper for inside-button pattern. */
+.watched-url-row {
+    margin-bottom: var(--space-2);
+}
+
+/* Shared URL/text input used inside watched and artist add panels */
+.panel-text-input {
+    padding: var(--space-4) var(--space-4-5);
+    font-size: 16px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    color: var(--text-primary);
+}
+
+/* .panel-action-btn now driven by .btn .btn-primary .input-action-btn.
+   Reserved class hook kept for JS / future overrides. */
+.panel-action-btn { white-space: nowrap; }
+
+.lb-toggle-btn {
+    background: none;
+    border: none;
+    padding: 0;
+    font-size: 12px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+}
+
+/* ListenBrainz row - JS-toggled; layout applied when visible */
+.lb-row {
+    gap: var(--space-2);
+    margin-bottom: var(--space-2);
+    align-items: center;
+}
+
+
+/* Status feedback box (watched add, artist add) */
+.watched-status-box {
+    margin-top: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+/* --------------------------------------------------------------------------
+   Watched artists add form (inline panel)
+-------------------------------------------------------------------------- */
+
+.artist-add-panel {
+    padding: var(--space-2-5) var(--space-3);
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    margin-bottom: var(--space-2);
+}
+
+.artist-selected-name {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: var(--space-2);
+}
+
+.artist-date-input {
+    padding: var(--space-1) var(--space-2);
+    font-size: 12px;
+    font-family: inherit;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    color: var(--text-primary);
+}
+
+/* .artist-add-btn now driven by .btn .btn-primary, with just the layout
+   spacing kept here (top margin so it sits below the controls grid). */
+.artist-add-btn {
+    margin-top: var(--space-2);
+}
+
+.artist-cancel-btn {
+    margin-top: var(--space-2);
+    margin-left: var(--space-2);
+}
+
+/* --------------------------------------------------------------------------
+   Artist mode chooser: pick the artist once, then decide what you want
+-------------------------------------------------------------------------- */
+
+.artist-mode-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-2);
+    margin-bottom: var(--space-1);
+}
+
+.artist-mode-btn {
+    flex: 1 1 200px;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: var(--space-1);
+    text-align: left;
+    padding: var(--space-2-5) var(--space-3);
+    height: auto;
+}
+
+.artist-mode-title {
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.artist-mode-sub {
+    font-size: 11px;
+    font-weight: 400;
+    opacity: 0.8;
+    line-height: 1.35;
+    white-space: normal;
+}
+
+/* Album checklist: tick the ones you want, ignore the eleven live albums */
+
+.artist-album-checklist-header {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    margin: var(--space-2-5) 0 var(--space-1-5);
+}
+
+.artist-album-count {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-right: auto;
+}
+
+.album-checklist {
+    max-height: 340px;
+    overflow-y: auto;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-secondary);
+}
+
+.album-checklist-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2-5);
+    padding: var(--space-2) var(--space-2-5);
+    border-bottom: 1px solid var(--border);
+    font-size: 13px;
+}
+
+.album-checklist-row:last-child {
+    border-bottom: none;
+}
+
+.album-checklist-row input[type="checkbox"] {
+    flex-shrink: 0;
+    cursor: pointer;
+}
+
+/* Already in the library. Dimmed as a hint, not disabled: re-grabbing a record
+   you only own as a dodgy 128k rip is a perfectly reasonable thing to want. */
+.album-checklist-row.on-disk .album-checklist-title {
+    opacity: 0.55;
+}
+
+.album-checklist-title {
+    flex: 1;
+    cursor: pointer;
+    color: var(--text-primary);
+}
+
+.album-checklist-year {
+    font-size: 12px;
+    color: var(--text-secondary);
+    flex-shrink: 0;
+}
+
+.album-checklist-have {
+    font-size: 11px;
+    color: var(--text-secondary);
+    flex-shrink: 0;
+    white-space: nowrap;
+}
+
+/* --------------------------------------------------------------------------
+   Queue tab / downloadable section
+-------------------------------------------------------------------------- */
+
+.section-with-top-margin {
+    margin-top: 1.5rem;
+}
+
+.downloadable-intro-text {
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin-bottom: var(--space-3);
+}
+
+/* Pager controls - JS toggles display:none; layout applied when visible */
+.downloadable-pager {
+    margin-top: var(--space-3);
+    gap: var(--space-2);
+    align-items: center;
+    justify-content: center;
+}
+
+.pager-info {
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+/* --------------------------------------------------------------------------
+   Settings tab - Search Sources sub-section
+-------------------------------------------------------------------------- */
+
+.settings-label-top {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    row-gap: var(--space-1-5);
+}
+
+.settings-label-top > span {
+    padding-top: var(--space-0-5);
+}
+
+.source-toggle-list {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1-5);
+}
+
+/* Individual source row (label wrapping the toggle) */
+.source-toggle-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+    font-size: 13px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    min-width: 180px;
+}
+
+.source-toggle-text {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+}
+
+.source-toggle-help {
+    font-size: 11px;
+    color: var(--text-secondary);
+    opacity: 0.75;
+}
+
+.source-toggle-item:hover .source-toggle-help {
+    opacity: 1;
+}
+
+.settings-hint-full {
+    width: 100%;
+}
+
+.settings-inline-grid {
+    width: 100%;
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: var(--space-2);
+}
+
+.settings-inline-grid label {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2);
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+/* Audio format selector */
+.format-selector-wrap {
+    flex-wrap: wrap;
+    row-gap: var(--space-1);
+}
+
+.format-btn-group {
+    display: flex;
+    gap: var(--space-0-5);
+    padding: var(--space-1);
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+}
+
+.conversion-target-options {
+    width: 100%;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--space-1-5);
+    padding-top: var(--space-1);
+}
+
+.conversion-target-options > .settings-label-sub {
+    margin-bottom: 0;
+}
+
+/* Sub-label for quality rows within the format selector */
+.settings-label-sub {
+    display: block;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-bottom: var(--space-1);
+}
+
+/* MP3 quality notice - JS-toggled; layout applied when visible */
+.mp3-format-note {
+    width: 100%;
+    font-size: 10px;
+    color: var(--text-secondary);
+}
+
+.lossy-conversion-warning {
+    width: 100%;
+    padding: var(--space-2) var(--space-2-5);
+    border: 1px solid var(--warning);
+    border-radius: 6px;
+    color: var(--warning);
+    font-size: 12px;
+    font-weight: 600;
+}
+
+/* Organise-by-artist hint row */
+.settings-label-wrap {
+    flex-wrap: wrap;
+    row-gap: var(--space-1);
+}
+
+/* --------------------------------------------------------------------------
+   Settings tab - various form fields
+-------------------------------------------------------------------------- */
+
+.settings-form-top {
+    margin-top: var(--space-2);
+}
+
+.settings-input-sm {
+    width: 120px;
+}
+
+.settings-input-path {
+    width: 320px;
+    padding: var(--space-2);
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-size: 14px;
+}
+
+.settings-subdir-flex {
+    display: flex;
+    gap: var(--space-1-5);
+    align-items: center;
+}
+
+/* Custom subdir input row - JS-toggled; layout applied when visible */
+.custom-subdir-row {
+    margin-top: var(--space-1-5);
+}
+
+.settings-path-preview {
+    font-size: 12px;
+    color: var(--text-secondary);
+    font-family: var(--font-mono);
+    margin-top: var(--space-0-5);
+}
+
+.settings-hint-sm {
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+/* AcoustID key input */
+.settings-input-acoustid {
+    width: 240px;
+}
+
+/* --------------------------------------------------------------------------
+   Settings tab - Notifications
+-------------------------------------------------------------------------- */
+
+.notify-on-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--space-3);
+}
+
+.notify-checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: var(--space-1-5);
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.notify-checkbox {
+    accent-color: var(--accent);
+}
+
+@media (pointer: coarse) {
+    .notify-checkbox {
+        width: 20px;
+        height: 20px;
+    }
+}
+
+/* Apprise test row */
+.apprise-test-row {
+    display: flex;
+    gap: var(--space-2);
+    align-items: center;
+    flex-wrap: wrap;
+}
+
+/* Email settings - shown inside details */
+.email-settings-form {
+    margin-top: var(--space-3);
+}
+
+/* --------------------------------------------------------------------------
+   Settings tab - Blacklist
+-------------------------------------------------------------------------- */
+
+.blacklist-intro {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin: 0 0 var(--space-3);
+}
+
+/* --------------------------------------------------------------------------
+   Watch mismatch log (Stats tab)
+-------------------------------------------------------------------------- */
+
+.mismatch-intro {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin: 0 0 var(--space-3);
+}
+
+.mismatch-row {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: var(--space-3) var(--space-3);
+    margin-bottom: var(--space-2);
+    font-size: 13px;
+}
+
+.mismatch-meta {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: var(--space-2);
+}
+
+.mismatch-playlist {
+    font-weight: 600;
+    color: var(--text-primary);
+    font-size: 12px;
+}
+
+.mismatch-date {
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.mismatch-pair {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1);
+    margin-bottom: var(--space-2);
+}
+
+.mismatch-line {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-2);
+}
+
+.mismatch-tag {
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    width: 52px;
+    flex-shrink: 0;
+    color: var(--text-secondary);
+}
+
+.mismatch-expected .mismatch-tag { color: var(--accent); }
+.mismatch-got .mismatch-tag      { color: var(--error); }
+
+.mismatch-normalised {
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.mismatch-normalised summary {
+    cursor: pointer;
+    user-select: none;
+    color: var(--text-secondary);
+    opacity: 0.7;
+}
+
+.mismatch-norm-line {
+    display: flex;
+    gap: var(--space-2);
+    margin-top: var(--space-1);
+    font-family: var(--font-mono);
+    word-break: break-all;
+}
+
+.mismatch-accept-btn {
+    margin-top: var(--space-2);
+    padding: var(--space-1) var(--space-3);
+    font-size: 13px;
+    font-family: inherit;
+    font-weight: 500;
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+}
+.mismatch-accept-btn:hover {
+    background: var(--border);
+    color: var(--text-primary);
+}
+.mismatch-accept-btn:disabled {
+    opacity: 0.65;
+    cursor: not-allowed;
+}
+
+/* --------------------------------------------------------------------------
+   Score Rationale panel (inside job details)
+-------------------------------------------------------------------------- */
+
+.score-rationale {
+    margin-top: var(--space-2-5);
+    padding: var(--space-2-5) var(--space-3);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+.score-rationale-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: var(--space-2);
+}
+
+.score-rationale-header .score-rationale-query {
+    color: var(--text-secondary);
+    font-size: 12px;
+    font-style: italic;
+}
+
+.score-rationale-candidate {
+    margin-bottom: var(--space-2);
+    padding: var(--space-1-5) var(--space-2);
+    border-radius: 6px;
+}
+
+.score-rationale-picked {
+    background: rgba(52, 211, 153, 0.08);
+    border: 1px solid rgba(52, 211, 153, 0.25);
+}
+
+.score-rationale-runnerup {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+}
+
+.score-rationale-candidate-header {
+    display: flex;
+    align-items: baseline;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+}
+
+.score-rationale-label {
+    font-weight: 600;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.3px;
+    flex-shrink: 0;
+}
+
+.score-rationale-picked .score-rationale-label {
+    color: var(--accent);
+}
+
+.score-rationale-runnerup .score-rationale-label {
+    color: var(--text-secondary);
+}
+
+.score-rationale-title {
+    color: var(--text-primary);
+    font-weight: 500;
+}
+
+.score-rationale-score {
+    color: var(--text-secondary);
+    font-size: 12px;
+    margin-left: auto;
+    flex-shrink: 0;
+}
+
+.score-rationale-reasons {
+    margin-top: var(--space-1);
+    font-size: 12px;
+    color: var(--text-secondary);
+    line-height: 1.6;
+}
+
+.score-reason-positive {
+    color: var(--accent);
+}
+
+.score-reason-negative {
+    color: var(--error);
+}
+
+.score-rationale-raw {
+    margin-top: var(--space-1-5);
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+.score-rationale-raw summary {
+    cursor: pointer;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.score-rationale-raw pre {
+    margin: var(--space-1) 0 0;
+    padding: var(--space-1-5) var(--space-2);
+    background: var(--bg-primary);
+    border-radius: 4px;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    white-space: pre-wrap;
+    word-break: break-all;
+    line-height: 1.5;
+}
+
+.score-rationale-copy {
+    padding: var(--space-1) var(--space-2);
+    font-size: 10px;
+    font-family: inherit;
+    font-weight: 600;
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+}
+
+.score-rationale-copy:hover {
+    background: var(--border);
+    color: var(--text-primary);
+}
+
+/* Six columns do not fit on a phone. Scroll the table, not the whole page. */
+.blacklist-content {
+    font-size: 13px;
+    color: var(--text-secondary);
+    overflow-x: auto;
+}
+
+/* --------------------------------------------------------------------------
+   Settings tab - User Management
+-------------------------------------------------------------------------- */
+
+.user-list-wrap {
+    margin-bottom: var(--space-4);
+}
+
+.first-user-warning {
+    padding: var(--space-2-5) var(--space-3);
+    border-radius: 8px;
+    background: rgba(251, 191, 36, 0.12);
+    border: 1px solid rgba(251, 191, 36, 0.4);
+    color: #fbbf24;
+    font-size: 13px;
+    line-height: 1.5;
+    margin-bottom: var(--space-3);
+}
+
+.user-create-grid {
+    display: grid;
+    gap: var(--space-2);
+}
+
+.user-create-row {
+    display: flex;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+}
+
+/* Text/password/select inputs in the create-user form */
+.user-input {
+    flex: 1;
+    min-width: 120px;
+    padding: var(--space-2) var(--space-2-5);
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--bg-primary);
+    color: var(--text);
+    font-size: 14px;
+}
+
+.user-role-select {
+    padding: var(--space-2) var(--space-2-5);
+    border-radius: 8px;
+    border: 1px solid var(--border);
+    background: var(--bg-primary);
+    color: var(--text);
+    font-size: 14px;
+}
+
+.user-create-error {
+    color: var(--error, #f87171);
+    font-size: 13px;
+}
+
+/* .user-add-btn now driven by .btn .btn-primary. */
+
+.user-action-btn {
+    padding: var(--space-1-5) var(--space-3);
+    font-size: 12px;
+    font-family: inherit;
+    font-weight: 600;
+    background: transparent;
+    color: var(--text-secondary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: all 0.2s;
+}
+
+.user-action-btn:hover {
+    color: var(--error);
+    border-color: var(--error);
+}
+
+.user-action-btn.warning:hover {
+    color: #f59e0b;
+    border-color: #f59e0b;
+}
+
+/* --------------------------------------------------------------------------
+   Settings tab - Security / Change Password
+-------------------------------------------------------------------------- */
+
+.session-auth-row {
+    display: flex;
+    gap: var(--space-2);
+    align-items: center;
+}
+
+.browser-api-key-status {
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
+.clear-stored-key-btn {
+    padding: var(--space-1-5) var(--space-3);
+    font-size: 12px;
+}
+
+.change-password-heading {
+    margin: var(--space-4) 0 var(--space-2);
+    font-size: 14px;
+    font-weight: 600;
+}
+
+/* .change-password-btn now driven by .btn .btn-ghost. */
+
+/* --------------------------------------------------------------------------
+   Settings tab - floating save bar
+-------------------------------------------------------------------------- */
+
+/* Spacer so content isn't hidden behind the floating bar */
+.settings-actions-spacer {
+    height: 80px;
+}
+
+.settings-floating-bar {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 100;
+    display: flex;
+    justify-content: center;
+    padding: var(--space-3) var(--space-4);
+    background: var(--bg-secondary);
+    border-top: 1px solid var(--border);
+    box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.3);
+}
+
+.settings-floating-bar-inner {
+    display: flex;
+    align-items: stretch;
+    gap: var(--space-4);
+    width: 100%;
+    max-width: var(--container-max);
+}
+
+@media (max-width: 600px) {
+    .settings-floating-bar-inner {
+        flex-direction: column;
+        gap: var(--space-2);
+    }
+}
+
+
+/* --------------------------------------------------------------------------
+   Release Notes modal
+-------------------------------------------------------------------------- */
+
+.modal-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.6);
+    z-index: 1000;
+    align-items: center;
+    justify-content: center;
+}
+
+.modal-card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: var(--space-5);
+    width: min(520px, 92vw);
+    max-height: 80vh;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+}
+
+.modal-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+}
+
+.modal-title {
+    margin: 0;
+    font-size: 15px;
+    color: var(--text-primary);
+}
+
+.modal-close-btn {
+    background: none;
+    border: none;
+    font-size: 18px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    padding: 0 var(--space-1);
+    line-height: 1;
+}
+
+.modal-body {
+    overflow-y: auto;
+    font-size: 13px;
+    line-height: 1.6;
+    color: var(--text-secondary);
+    flex: 1;
+}
+
+.modal-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+}
+
+.release-notes-footer {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+}
+
+.release-notes-donate-btn {
+    justify-self: center;
+    white-space: nowrap;
+}
+
+.modal-confirm-btn {
+    justify-self: end;
+}
+
+@media (max-width: 480px) {
+    .release-notes-footer {
+        grid-template-columns: minmax(0, 1fr) auto;
+        grid-template-areas:
+            "donate donate"
+            "nav confirm";
+    }
+
+    .release-notes-footer .release-notes-nav {
+        grid-area: nav;
+    }
+
+    .release-notes-donate-btn {
+        grid-area: donate;
+        width: 100%;
+        justify-content: center;
+    }
+
+    .release-notes-footer .modal-confirm-btn {
+        grid-area: confirm;
+    }
+}
+
+/* .modal-confirm-btn now driven by .btn .btn-primary. */
+
+/* --------------------------------------------------------------------------
+   Tag editor modal
+-------------------------------------------------------------------------- */
+
+.tag-editor-card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: var(--space-5);
+    width: min(560px, 92vw);
+    max-width: 92vw;
+    max-height: 85vh;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.32);
+}
+
+.tag-editor-meta {
+    margin-top: var(--space-1);
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.tag-editor-body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    overflow-y: auto;
+}
+
+.tag-editor-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: var(--space-3);
+}
+
+.tag-editor-label {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1-5);
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.tag-editor-label-full {
+    grid-column: 1 / -1;
+}
+
+.tag-editor-input {
+    width: 100%;
+    padding: var(--space-3) var(--space-3);
+    font-size: 14px;
+    font-family: inherit;
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    outline: none;
+}
+
+.tag-editor-input:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+
+.tag-editor-preview {
+    padding: var(--space-3) var(--space-3);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: linear-gradient(180deg, color-mix(in srgb, var(--bg-tertiary) 92%, white 8%), var(--bg-tertiary));
+    font-size: 12px;
+    color: var(--text-secondary);
+    line-height: 1.5;
+}
+
+.tag-editor-preview strong {
+    color: var(--text-primary);
+}
+
+.tag-editor-error {
+    font-size: 12px;
+    color: var(--error);
+}
+
+.tag-editor-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+    flex-wrap: wrap;
+}
+
+.tag-editor-actions-left,
+.tag-editor-actions-right {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2-5);
+    flex-wrap: wrap;
+}
+
+.tag-editor-actions-right {
+    margin-left: auto;
+}
+
+/* Tag editor buttons now driven by .btn .btn-ghost / .btn .btn-primary.
+   Rules kept only for the mobile flex sizing below. */
+
+@media (max-width: 640px) {
+    .tag-editor-card {
+        width: min(100vw - 20px, 100vw);
+        padding: var(--space-4);
+        border-radius: 14px;
+    }
+
+    .tag-editor-grid {
+        grid-template-columns: 1fr;
+    }
+
+    .tag-editor-actions {
+        align-items: stretch;
+    }
+
+    .tag-editor-actions-right {
+        width: 100%;
+        margin-left: 0;
+    }
+
+    .tag-editor-secondary-btn,
+    .tag-editor-primary-btn {
+        flex: 1;
+        justify-content: center;
+    }
+}
+
+/* --------------------------------------------------------------------------
+   Report / blacklist modal
+-------------------------------------------------------------------------- */
+
+/* Report overlay uses the shared .modal-overlay class */
+
+.missing-track-modal-card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: var(--space-5);
+    width: min(760px, 94vw);
+    max-width: 94vw;
+    max-height: 85vh;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-4);
+    box-shadow: 0 24px 60px rgba(0, 0, 0, 0.32);
+}
+
+.missing-track-modal-toolbar {
+    display: flex;
+    justify-content: flex-end;
+}
+
+.missing-track-modal-body {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+    overflow-y: auto;
+    min-height: 180px;
+}
+
+.missing-track-modal-empty {
+    padding: var(--space-4);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    font-size: 13px;
+    line-height: 1.5;
+}
+
+.missing-track-candidate {
+    position: relative;
+}
+
+.missing-track-candidate .result-item {
+    padding-right: 148px;
+}
+
+.missing-track-candidate-actions {
+    position: absolute;
+    top: 50%;
+    right: 14px;
+    transform: translateY(-50%);
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    z-index: 2;
+}
+
+.missing-track-candidate-note {
+    color: var(--text-muted);
+    font-size: 11px;
+    white-space: nowrap;
+}
+
+.missing-track-candidate-btn {
+    padding: var(--space-2) var(--space-3);
+    font-size: 12px;
+    font-family: inherit;
+    font-weight: 600;
+    border-radius: 8px;
+    border: none;
+    cursor: pointer;
+    background: var(--accent);
+    color: #000;
+}
+
+.missing-track-candidate-btn:disabled {
+    opacity: 0.65;
+    cursor: default;
+}
+
+@media (max-width: 640px) {
+    .missing-track-modal-card {
+        width: min(100vw - 16px, 100vw);
+        padding: var(--space-4);
+        border-radius: 14px;
+    }
+
+    .missing-track-candidate .result-item {
+        padding-right: var(--space-4);
+        padding-bottom: 62px;
+    }
+
+    .missing-track-candidate-actions {
+        top: auto;
+        bottom: 12px;
+        right: 12px;
+        transform: none;
+    }
+}
+
+.report-card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: var(--space-5);
+    width: min(400px, 90vw);
+    max-width: 90vw;
+}
+
+.report-title {
+    margin: 0 0 var(--space-4);
+    font-size: 15px;
+    color: var(--text-primary);
+}
+
+.report-field {
+    margin-bottom: var(--space-3);
+}
+
+.report-field-label {
+    display: block;
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-bottom: var(--space-1);
+}
+
+.report-select {
+    width: 100%;
+    padding: var(--space-2);
+    font-size: 13px;
+    font-family: inherit;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+}
+
+.report-text-input {
+    width: 100%;
+    padding: var(--space-2);
+    font-size: 13px;
+    font-family: inherit;
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    box-sizing: border-box;
+}
+
+.report-uploader-row {
+    margin-bottom: var(--space-4);
+}
+
+.report-uploader-label {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    font-size: 13px;
+    color: var(--text-primary);
+    cursor: pointer;
+}
+
+.report-uploader-checkbox {
+    accent-color: var(--warning);
+}
+
+.report-actions {
+    display: flex;
+    gap: var(--space-2);
+    justify-content: flex-end;
+}
+
+/* Shared base for report action buttons */
+/* Report modal buttons now driven by .btn .btn-ghost / .btn .warning-btn. */
+
+/* --------------------------------------------------------------------------
+   Spotify cookies expired banner
+-------------------------------------------------------------------------- */
+
+.cookies-expired-banner {
+    background: var(--warning-bg, #fef3c7);
+    border: 1px solid var(--warning-border, #d97706);
+    border-radius: 6px;
+    padding: var(--space-2-5) var(--space-3);
+    margin-bottom: var(--space-3);
+    font-size: 13px;
+    color: var(--warning-text, #92400e);
+}
+
+/* --------------------------------------------------------------------------
+   Cookie expiry hint (monospace one-liner, JS-toggled display)
+-------------------------------------------------------------------------- */
+
+.cookie-expiry-hint {
+    font-size: 12px;
+    font-family: var(--font-mono);
+    margin-top: var(--space-0-5);
+}
+
+/* Destination picker row (unified "Add to...") - JS-toggled */
+.playlist-selector-row-wrap {
+    display: inline-flex;
+    flex-direction: column;
+    vertical-align: top;
+    margin: 0 var(--space-2) var(--space-2) 0;
+}
+
+/* Mode choice panel shown after clicking "Add to..." */
+.dest-mode-panel {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+    margin-top: var(--space-1);
+}
+
+/* Album two-level browser panel */
+.album-route-panel {
+    flex-wrap: wrap;
+    gap: var(--space-2);
+}
+
+/* ListenBrainz toggle row */
+.lb-toggle-row {
+    margin-bottom: var(--space-2);
+}
+
+/* Artist search results list - JS-toggled; bottom margin applied when visible */
+.artist-search-results {
+    margin-bottom: var(--space-2);
+}
+
+/* Custom subdir text input - width matches the select above it */
+.settings-input-path-text {
+    width: 320px;
+}
+
+/* =============================================================================
+   37.  Shared primitives (commonisation pass, 2026-05-24)
+   These are the canonical, reusable classes. Migrate bespoke selectors over
+   to these gradually; old classes still work, but new markup should prefer
+   these. Goal: one button, one card, one form-row, used everywhere.
+   ============================================================================= */
+
+/* --- Buttons -------------------------------------------------------------- */
+
+.btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1;
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    cursor: pointer;
+    transition: background 0.15s, border-color 0.15s, color 0.15s, transform 0.1s;
+    text-decoration: none;
+    white-space: nowrap;
+}
+
+.btn:hover:not(:disabled) {
+    border-color: var(--accent);
+    color: var(--accent);
+}
+
+.btn:active:not(:disabled) {
+    transform: scale(0.98);
+}
+
+.btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+/* Primary action (green, used for the main verb on a screen) */
+.btn-primary {
+    background: var(--accent);
+    color: #000;
+    border-color: var(--accent);
+}
+
+.btn-primary:hover:not(:disabled) {
+    background: #16a34a;
+    border-color: #16a34a;
+    color: #000;
+}
+
+/* Ghost button (transparent, used for secondary actions) */
+.btn-ghost {
+    background: transparent;
+}
+
+/* Destructive action (used for delete, remove, clear) */
+.btn-danger {
+    background: transparent;
+    color: var(--error);
+    border-color: var(--border);
+}
+
+.btn-danger:hover:not(:disabled) {
+    background: var(--error);
+    color: #fff;
+    border-color: var(--error);
+}
+
+/* Size modifiers */
+.btn-sm {
+    padding: var(--space-1) var(--space-2);
+    font-size: 12px;
+    border-radius: var(--radius-sm);
+}
+
+.btn-lg {
+    padding: var(--space-3) var(--space-5);
+    font-size: 16px;
+}
+
+.btn-block {
+    display: flex;
+    width: 100%;
+}
+
+/* --- Cards ---------------------------------------------------------------- */
+
+.card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    padding: var(--space-4);
+    margin-bottom: var(--space-3);
+}
+
+.card-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-3);
+    margin-bottom: var(--space-3);
+}
+
+.card-title {
+    font-size: 15px;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.card-meta {
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.card-actions {
+    display: flex;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+}
+
+/* --- Form rows ------------------------------------------------------------ */
+
+.form-row {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+    margin-bottom: var(--space-4);
+}
+
+.form-label {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
+.form-input,
+.form-select,
+.form-textarea {
+    padding: var(--space-2) var(--space-3);
+    font-size: 14px;
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    transition: border-color 0.15s;
+}
+
+.form-input:focus,
+.form-select:focus,
+.form-textarea:focus {
+    outline: none;
+    border-color: var(--accent);
+}
+
+.form-hint {
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+/* --- Input + action button (button overlaid on right edge of input) ------- */
+/* Wrap an <input> + <button class="btn btn-primary input-action-btn"> in
+   <div class="input-action"> for the unified search-pill look. */
+
+.input-action {
+    position: relative;
+}
+
+.input-action > input,
+.input-action > textarea,
+.input-action > select {
+    width: 100%;
+    padding-right: 180px;
+}
+
+.input-action > .input-action-btn {
+    position: absolute;
+    right: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    padding: var(--space-2-5) var(--space-4-5);
+    font-size: 15px;
+    /* Busy-state labels ("Hunting for a cue sheet…", "Scrolling playlist
+       (large lists take a minute)...") can run much longer than "Fetch" -
+       cap the button so it truncates instead of growing left over the
+       input's own text underneath it. */
+    max-width: 160px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.input-action > .input-action-btn:active:not(:disabled) {
+    transform: translateY(-50%) scale(0.98);
+}
+
+/* --- Chips / badges ------------------------------------------------------- */
+
+.chip {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1);
+    padding: var(--space-0-5) var(--space-2);
+    font-size: 12px;
+    font-weight: 600;
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-pill);
+    line-height: 1.4;
+}
+
+.chip-accent {
+    background: var(--accent-dim);
+    color: var(--accent);
+    border-color: var(--accent);
+}
+
+/* Minimum-quality filter above the Tracks results.
+   Kept deliberately low-key: it is a refinement, not the main event. */
+.quality-filter-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2-5);
+    flex-wrap: wrap;
+    margin: 0 0 var(--space-3);
+    padding: var(--space-2) var(--space-3);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--bg-secondary, transparent);
+}
+
+.quality-filter-label {
+    font-size: 13px;
+    color: var(--text-secondary);
+    white-space: nowrap;
+}
+
+.quality-filter-check {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-1-5);
+    font-size: 13px;
+    color: var(--text-secondary);
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.quality-filter-check input {
+    margin: 0;
+    cursor: pointer;
+}
+
+.quality-filter-count {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-left: auto;
+}
+
+@media (max-width: 600px) {
+    .quality-filter-count {
+        margin-left: 0;
+        width: 100%;
+    }
+}
+
+/* --------------------------------------------------------------------------
+   Pills / segmented control
+   Reusable two-or-more option switch. One .pill-group holds any number of
+   .pill buttons plus a single .pill-indicator that JS (initPillGroup in
+   app.js) slides underneath whichever one is active, measured in pixels so
+   uneven label widths and narrow screens both behave.
+   -------------------------------------------------------------------------- */
+
+.pill-group {
+    position: relative;
+    display: inline-flex;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-pill);
+    padding: var(--space-1);
+    gap: var(--space-0-5);
+    max-width: 100%;
+    overflow-x: auto;
+    scrollbar-width: none;
+}
+
+.pill-group::-webkit-scrollbar {
+    display: none;
+}
+
+.pill {
+    position: relative;
+    z-index: 1;
+    padding: var(--space-2) var(--space-4);
+    font-size: 13px;
+    font-family: inherit;
+    font-weight: 600;
+    background: transparent;
+    color: var(--text-secondary);
+    border: none;
+    border-radius: var(--radius-pill);
+    cursor: pointer;
+    transition: color 0.2s;
+    white-space: nowrap;
+}
+
+.pill:hover:not(.active) {
+    color: var(--text-primary);
+}
+
+.pill.active {
+    color: #000;
+}
+
+.pill-indicator {
+    position: absolute;
+    top: 3px;
+    bottom: 3px;
+    left: 0;
+    width: 0;
+    border-radius: var(--radius-pill);
+    background: var(--accent);
+    transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1), width 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    z-index: 0;
+}
+
+@media (max-width: 480px) {
+    .pill {
+        padding: var(--space-2) var(--space-3);
+        font-size: 12px;
+    }
+}
+
+/* --------------------------------------------------------------------------
+   Watched tab pills
+   Panels and their header buttons switch by class, not inline display,
+   because applyUserRoleToUI clears inline display on every .peon-hide and
+   would otherwise reveal whichever panel it pleased.
+   -------------------------------------------------------------------------- */
+
+.watched-mode-hidden {
+    display: none !important;
+}
+
+.watched-mode-actions {
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    flex-wrap: wrap;
+}
+
+/* --------------------------------------------------------------------------
+   M3U Files pill, M3U editor and library picker
+   -------------------------------------------------------------------------- */
+
+#m3uFilesList {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-2);
+}
+
+.m3u-file-row {
+    display: flex;
+    align-items: center;
+    gap: var(--space-3);
+    width: 100%;
+    padding: var(--space-3) var(--space-4);
+    font-family: inherit;
+    text-align: left;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    color: var(--text-primary);
+    cursor: pointer;
+    transition: border-color 0.15s, transform 0.15s;
+}
+
+.m3u-file-row:hover {
+    border-color: var(--accent);
+    transform: translateY(-1px);
+}
+
+.m3u-file-icon {
+    color: var(--text-secondary);
+}
+
+.m3u-file-info {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-0-5);
+    flex: 1;
+    min-width: 0;
+}
+
+.m3u-file-name {
+    font-size: 14px;
+    font-weight: 600;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.m3u-file-meta {
+    font-size: 12px;
+    color: var(--text-secondary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.m3u-file-open {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--accent);
+}
+
+.m3u-badge {
+    display: inline-block;
+    margin-left: var(--space-1);
+    padding: 0 var(--space-1-5);
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-pill);
+    vertical-align: middle;
+}
+
+.m3u-missing-count {
+    color: var(--error);
+}
+
+.m3u-editor-card,
+.library-picker-card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: var(--space-5);
+    width: min(760px, 94vw);
+    max-height: 85vh;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-3);
+}
+
+.library-picker-card {
+    width: min(620px, 94vw);
+    max-height: 80vh;
+}
+
+/* Opened on top of the M3U editor, so it has to sit above it. */
+#libraryPickerOverlay {
+    z-index: 1010;
+}
+
+.m3u-editor-notice {
+    padding: var(--space-2-5) var(--space-3);
+    font-size: 12px;
+    color: var(--text-secondary);
+    background: var(--bg-tertiary);
+    border-left: 3px solid var(--warning);
+    border-radius: var(--radius-sm);
+}
+
+.m3u-editor-list {
+    flex: 1;
+    min-height: 200px;
+    overflow-y: auto;
+    border: 1px solid var(--border);
+    border-radius: 12px;
+}
+
+.m3u-row {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-1-5) var(--space-2);
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border);
+    transition: background 0.15s, box-shadow 0.15s;
+}
+
+.m3u-row:last-child {
+    border-bottom: none;
+}
+
+.m3u-row:hover {
+    background: var(--bg-tertiary);
+}
+
+.m3u-row-dragging {
+    z-index: 1;
+    background: var(--bg-tertiary);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35), inset 0 0 0 1px var(--accent);
+}
+
+.m3u-drag-handle {
+    padding: var(--space-1) var(--space-1-5);
+    color: var(--text-secondary);
+    cursor: grab;
+    touch-action: none;
+}
+
+.m3u-row-dragging .m3u-drag-handle {
+    cursor: grabbing;
+    color: var(--accent);
+}
+
+.m3u-row-num {
+    min-width: 28px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+
+.m3u-row-text {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-width: 0;
+}
+
+.m3u-row-title,
+.m3u-row-sub {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.m3u-row-title {
+    font-size: 13px;
+    color: var(--text-primary);
+}
+
+.m3u-row-sub {
+    font-size: 11px;
+    color: var(--text-secondary);
+}
+
+.m3u-row-missing .m3u-row-title {
+    color: var(--text-secondary);
+    text-decoration: line-through;
+}
+
+.m3u-row-flag {
+    margin-left: var(--space-1);
+    padding: 0 var(--space-1);
+    font-size: 10px;
+    color: var(--text-secondary);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    text-decoration: none;
+    display: inline-block;
+}
+
+.m3u-row-flag-missing {
+    color: var(--error);
+    border-color: var(--error);
+}
+
+.m3u-row-flag-new {
+    color: var(--accent);
+    border-color: var(--accent);
+}
+
+.m3u-row-duration {
+    font-size: 12px;
+    color: var(--text-secondary);
+    font-variant-numeric: tabular-nums;
+}
+
+.m3u-row-actions {
+    display: flex;
+    gap: var(--space-0-5);
+}
+
+.m3u-row-btn {
+    width: 28px;
+    height: 28px;
+    font-size: 12px;
+    color: var(--text-secondary);
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: color 0.15s, border-color 0.15s;
+}
+
+.m3u-row-btn:hover:not(:disabled),
+.m3u-row-btn:focus-visible {
+    color: var(--accent);
+    border-color: var(--border);
+}
+
+.m3u-row-btn:disabled {
+    opacity: 0.3;
+    cursor: default;
+}
+
+.m3u-row-remove:hover:not(:disabled) {
+    color: var(--error);
+}
+
+.btn.m3u-delete-btn:hover {
+    color: var(--error);
+    border-color: var(--error);
+}
+
+.m3u-editor-empty {
+    padding: var(--space-5) var(--space-4);
+    font-size: 13px;
+    color: var(--text-secondary);
+    text-align: center;
+}
+
+.library-picker-results {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-1-5);
+    min-height: 160px;
+    overflow-y: auto;
+}
+
+.library-picker-row {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-0-5);
+    padding: var(--space-2) var(--space-3);
+    font-family: inherit;
+    text-align: left;
+    background: var(--bg-tertiary);
+    border: 1px solid transparent;
+    border-radius: var(--radius-md);
+    color: var(--text-primary);
+    cursor: pointer;
+    transition: border-color 0.15s, opacity 0.15s;
+}
+
+.library-picker-row:hover,
+.library-picker-row:focus-visible {
+    border-color: var(--accent);
+}
+
+.library-picker-picked {
+    opacity: 0.55;
+    border-color: var(--accent);
+}
+
+.library-picker-picked::after {
+    content: "\2713  added";
+    position: absolute;
+    top: var(--space-2);
+    right: var(--space-3);
+    font-size: 11px;
+    color: var(--accent);
+}
+
+.library-picker-title {
+    font-size: 13px;
+    font-weight: 600;
+}
+
+.library-picker-sub,
+.library-picker-path {
+    font-size: 11px;
+    color: var(--text-secondary);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.library-picker-path {
+    font-family: var(--font-mono);
+    opacity: 0.8;
+}
+
+@media (max-width: 640px) {
+    .m3u-editor-card,
+    .library-picker-card {
+        width: calc(100vw - 20px);
+        max-height: 92vh;
+        padding: var(--space-4);
+    }
+
+    .m3u-row-num,
+    .m3u-row-duration {
+        display: none;
+    }
+}
+
+/* --------------------------------------------------------------------------
+   Find New Artists (Artists tab -> "Find New Artists" pill)
+   Horizontal rows of artist cards, seeded from listening/library/download
+   history, a manual "recommend based on" box, and the rabbit hole (click a
+   name, get a new row of their own similar artists). Rows scroll sideways
+   rather than squashing cards on narrow screens.
+   -------------------------------------------------------------------------- */
+
+.discover-rows {
+    display: flex;
+    flex-direction: column;
+    gap: var(--space-5);
+}
+
+.discover-row {
+    animation: tabFadeUp 0.25s ease both;
+}
+
+/* Just-arrived row: the same accent ring the Queue uses when it jumps you to a
+   job, held for a moment and then faded out rather than snapped off. */
+.discover-row-arrived {
+    /* outline rather than box-shadow purely for outline-offset: it stands the
+       ring off the cards instead of drawing it against their edges, and costs
+       no layout, which a padding change would. */
+    outline: 2px solid var(--accent);
+    outline-offset: 6px;
+    border-radius: 6px;
+    animation: tabFadeUp 0.25s ease both, discover-row-arrived-fade 2.2s ease-out forwards;
+}
+
+@keyframes discover-row-arrived-fade {
+    0%, 55% { outline-color: var(--accent); background: color-mix(in srgb, var(--accent) 7%, transparent); }
+    100%    { outline-color: transparent; background: transparent; }
+}
+
+/* Nobody asked for a light show. */
+@media (prefers-reduced-motion: reduce) {
+    .discover-row-arrived { animation-duration: 0.01s, 0.01s; }
+}
+
+.discover-row-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: var(--space-2-5);
+    margin: 0 0 var(--space-2-5);
+}
+
+.discover-row-heading {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin: 0;
+}
+
+/* Hangs back until you hover the row, so five of them don't shout at once. */
+.discover-row-grab-btn {
+    flex-shrink: 0;
+    opacity: 0.45;
+    transition: opacity 0.2s;
+}
+
+.discover-row:hover .discover-row-grab-btn,
+.discover-row-grab-btn:focus-visible {
+    opacity: 1;
+}
+
+.discover-row-grab-btn:disabled {
+    opacity: 0.3;
+    cursor: not-allowed;
+}
+
+/* No hover on a phone, so a permanently half-faded button would just look broken. */
+@media (hover: none) {
+    .discover-row-grab-btn { opacity: 1; }
+}
+
+.discover-row-empty {
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
+.discover-row-retry-btn {
+    margin-left: var(--space-1);
+}
+
+.discover-row-scroll {
+    display: flex;
+    gap: var(--space-3);
+    overflow-x: auto;
+    padding: var(--space-0-5) var(--space-0-5) var(--space-2-5);
+    scroll-snap-type: x proximity;
+    -webkit-overflow-scrolling: touch;
+}
+
+.discover-card {
+    flex: 0 0 132px;
+    /* A flex item will not shrink below its content, and the artist name is
+       deliberately nowrap, so "Olly Alexander (Years & Years)" was stretching
+       its card to twice the width of its neighbours and making the whole row
+       look drunk. This is what the ellipsis was for. */
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-1-5);
+    padding: var(--space-3) var(--space-2-5);
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-md);
+    text-align: center;
+    scroll-snap-align: start;
+    transition: transform 0.15s ease, border-color 0.15s ease;
+}
+
+.discover-card:hover {
+    transform: translateY(-2px);
+    border-color: var(--accent);
+}
+
+.discover-card-art {
+    position: relative;
+    width: 72px;
+    height: 72px;
+    border-radius: 50%;
+    overflow: hidden;
+    background: var(--bg-tertiary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.discover-card-art-fallback {
+    font-size: 26px;
+    opacity: 0.4;
+}
+
+.discover-card-img {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+/* "Now playing" gets a gently pulsing accent ring; "loading" gets a duller,
+   faster one so the two states don't feel identical while you're waiting. */
+.discover-card-loading .discover-card-art {
+    animation: discover-pulse-loading 0.9s ease-in-out infinite;
+}
+
+.discover-card-playing .discover-card-art {
+    animation: discover-pulse-playing 1.6s ease-in-out infinite;
+}
+
+@keyframes discover-pulse-playing {
+    0%, 100% { box-shadow: 0 0 0 2px var(--accent); }
+    50% { box-shadow: 0 0 0 5px color-mix(in srgb, var(--accent) 35%, transparent); }
+}
+
+@keyframes discover-pulse-loading {
+    0%, 100% { box-shadow: 0 0 0 2px var(--border); }
+    50% { box-shadow: 0 0 0 4px color-mix(in srgb, var(--text-secondary) 30%, transparent); }
+}
+
+.discover-card-name {
+    width: 100%;
+    padding: 0;
+    background: none;
+    border: none;
+    font-family: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-primary);
+    cursor: pointer;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    transition: color 0.15s;
+}
+
+.discover-card-name:hover {
+    color: var(--accent);
+    text-decoration: underline;
+}
+
+.discover-owned-badge {
+    font-size: 10px;
+    font-weight: 600;
+    color: var(--accent);
+    opacity: 0.85;
+}
+
+.discover-card-title {
+    font-size: 11px;
+    color: var(--text-secondary);
+    min-height: 14px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 100%;
+}
+
+.discover-card-actions {
+    display: flex;
+    gap: var(--space-1-5);
+    margin-top: var(--space-0-5);
+}
+
+.discover-play-btn,
+.discover-dl-btn {
+    padding: var(--space-1) var(--space-2-5);
+    font-size: 12px;
+}
+
+/* Sticky, because new rows land at the bottom and the way out used to be
+   3,000px back up the page by the second hop */
+.discover-breadcrumb {
+    position: sticky;
+    top: 0;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: var(--space-1-5);
+    padding: var(--space-2) var(--space-3);
+    margin-bottom: var(--space-4);
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    font-size: 12px;
+}
+
+.discover-breadcrumb-label {
+    color: var(--text-secondary);
+    white-space: nowrap;
+}
+
+.discover-breadcrumb-item {
+    padding: var(--space-0-5) var(--space-1);
+    background: none;
+    border: none;
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-primary);
+    cursor: pointer;
+    border-radius: 4px;
+    transition: color 0.15s;
+}
+
+.discover-breadcrumb-item:hover {
+    color: var(--accent);
+}
+
+.discover-breadcrumb-sep {
+    color: var(--text-secondary);
+    opacity: 0.6;
+}
+
+.discover-breadcrumb-exit {
+    margin-left: auto;
+}
+
+@media (max-width: 480px) {
+    .discover-card {
+        flex: 0 0 112px;
+    }
+
+    .discover-card-art {
+        width: 60px;
+        height: 60px;
     }
 }

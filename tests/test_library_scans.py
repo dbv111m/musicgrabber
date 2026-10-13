@@ -1,0 +1,408 @@
+"""Slow library scans stay in the background and publish only complete results."""
+
+import sys
+import threading
+import time
+from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+
+import pytest
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+import library_scans
+import utils
+
+
+def wait_until(predicate):
+    deadline = time.monotonic() + 2
+    while not predicate():
+        assert time.monotonic() < deadline, 'background worker did not finish'
+        time.sleep(.005)
+
+
+def test_listing_cold_scan_returns_immediately_and_shares_worker():
+    cache = library_scans.LibrarySnapshots()
+    release = threading.Event()
+    calls = []
+
+    def scan():
+        calls.append(1)
+        assert release.wait(2)
+        return ['Example']
+
+    try:
+        start = time.monotonic()
+        for _ in range(10):
+            assert cache.get(('alice', '/music'), scan) == (None, 'refreshing')
+        assert time.monotonic() - start < .5
+        wait_until(lambda: len(calls) == 1)
+    finally:
+        release.set()
+    wait_until(lambda: not cache.entries[('alice', '/music')]['running'])
+    assert cache.get(('alice', '/music'), scan) == (['Example'], 'ready')
+    assert len(calls) == 1
+    assert cache.get(('bob', '/other'), lambda: ['Other'])[0] is None
+    wait_until(lambda: not cache.entries[('bob', '/other')]['running'])
+
+
+def test_failed_refresh_preserves_complete_snapshot(monkeypatch):
+    cache = library_scans.LibrarySnapshots()
+    cache.entries['library'] = dict(value=['Previous'], finished=1, running=False, error=False)
+
+    def fail():
+        raise OSError('NAS unavailable')
+
+    assert cache.get('library', fail) == (['Previous'], 'refreshing')
+    wait_until(lambda: not cache.entries['library']['running'])
+    assert cache.get('library', fail) == (['Previous'], 'error')
+
+
+def test_storage_deduplicates_hardlinks_and_excludes_trash(tmp_path):
+    song = tmp_path / 'song.flac'
+    song.write_bytes(b'12345')
+    (tmp_path / 'copy.flac').hardlink_to(song)
+    trash = tmp_path / '@Recycle'
+    trash.mkdir()
+    (trash / 'deleted.flac').write_bytes(b'12345')
+    assert library_scans.scan_storage((tmp_path,)) == {'storage_bytes': 5, 'file_count': 1}
+
+
+def test_storage_uses_the_walkers_stat_and_never_touches_the_disk(tmp_path, monkeypatch):
+    """The storage tile refreshes every five minutes; it can stat things once.
+
+    The walker is replaced with entries whose stat data is pure fiction and
+    whose paths do not exist at all. If scan_storage still reports the fictional
+    sizes, it is reading what the walk handed it rather than going back to the
+    array for a second opinion.
+    """
+    import os
+
+    def make_stat(size, ino):
+        return os.stat_result((0o100644, ino, 99, 1, 0, 0, size, 0, 0, 0))
+
+    fake = [
+        utils.LibraryFile(tmp_path / 'Imaginary One.flac', make_stat(1000, 1)),
+        utils.LibraryFile(tmp_path / 'Imaginary Two.flac', make_stat(2500, 2)),
+        # Same device and inode: a hardlink, counted once.
+        utils.LibraryFile(tmp_path / 'Imaginary Two (copy).flac', make_stat(2500, 2)),
+    ]
+    monkeypatch.setattr(library_scans, 'iter_library_audio_files', lambda *a, **kw: iter(fake))
+
+    assert library_scans.scan_storage((tmp_path,)) == {
+        'storage_bytes': 3500, 'file_count': 2,
+    }
+
+
+@pytest.fixture
+def tag_cache(monkeypatch, tmp_path):
+    monkeypatch.setattr(utils, '_tag_index_cache', {})
+    monkeypatch.setattr(utils, '_tag_index_running', {})
+    monkeypatch.setattr(utils, '_tag_index_errors', {})
+    monkeypatch.setattr(utils, 'get_setting', lambda *a, **kw: str(tmp_path))
+    return tmp_path
+
+
+def test_duplicate_scan_never_blocks_and_worker_is_shared(tag_cache, monkeypatch):
+    release = threading.Event()
+    calls = []
+    song = tag_cache / 'renamed.flac'
+    song.write_bytes(b'123')
+
+    def scan(**kwargs):
+        calls.append(1)
+        assert release.wait(2)
+        return {utils._tag_identity('Blur', 'Song 2'): song}
+
+    monkeypatch.setattr(utils, 'build_library_tag_index', scan)
+    try:
+        started = time.monotonic()
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            futures = [pool.submit(utils._tagged_duplicate, 'Blur', 'Song 2', 'alice') for _ in range(4)]
+            for future in futures:
+                assert future.result(timeout=1) is None
+        assert time.monotonic() - started < .5
+        assert len(calls) == 1
+        finished_after = time.monotonic()
+    finally:
+        release.set()
+    wait_until(lambda: not utils._tag_index_running)
+    snapshot = next(iter(utils._tag_index_cache.values()))
+    assert snapshot[0] >= finished_after
+    assert utils._tagged_duplicate('Blur', 'Song 2', 'alice') == song
+    assert utils._tagged_duplicate('Missing', 'Track', 'alice') is None
+    assert len(calls) == 1
+
+
+def test_declines_fallback_walk_while_reconciliation_owns_the_root(tag_cache, monkeypatch):
+    """The legacy tag crawl must not fight the persistent index's own walk for
+    the same disk, or a big library's first build never finishes (#93)."""
+    import library_index
+
+    calls = []
+
+    def scan(**kwargs):
+        calls.append(1)
+        return {}
+
+    monkeypatch.setattr(utils, 'build_library_tag_index', scan)
+    monkeypatch.setattr(library_index, 'reconcile_in_progress', lambda root: True)
+
+    assert utils._tagged_duplicate('Blur', 'Song 2', 'alice') is None
+    assert not calls
+    assert not utils._tag_index_running
+
+
+def test_failed_tag_scan_does_not_publish_empty_index(tag_cache, monkeypatch):
+    def fail(**kwargs):
+        raise OSError('NAS unavailable')
+    monkeypatch.setattr(utils, 'build_library_tag_index', fail)
+    assert utils._tagged_duplicate('Blur', 'Song 2', 'alice') is None
+    wait_until(lambda: not utils._tag_index_running)
+    assert not utils._tag_index_cache
+    assert utils._tagged_duplicate('Blur', 'Song 2', 'alice') is None
+
+
+def load_route(name, namespace):
+    """Exercise the real handler without starting app.py's production schedulers."""
+    import ast
+    tree = ast.parse((Path(__file__).resolve().parents[1] / 'app.py').read_text())
+    function = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == name)
+    function.decorator_list = []
+    namespace['Request'] = object
+    exec(compile(ast.Module(body=[function], type_ignores=[]), 'app.py', 'exec'), namespace)
+    return namespace[name]
+
+
+def test_stats_releases_database_and_returns_while_storage_is_blocked(tmp_path):
+    import sqlite3
+    from contextlib import contextmanager
+    from types import SimpleNamespace
+
+    conn = sqlite3.connect(':memory:')
+    conn.executescript('''
+        CREATE TABLE jobs (status TEXT, source TEXT, completed_at TEXT, artist TEXT, title TEXT, search_token TEXT);
+        CREATE TABLE search_logs (result_count INTEGER, artist TEXT, search_token TEXT);
+        INSERT INTO jobs VALUES ('completed', 'youtube', datetime('now'), 'Blur', 'Song 2', 's1');
+    ''')
+    held = []
+    release = threading.Event()
+    started = threading.Event()
+    cache = library_scans.LibrarySnapshots()
+
+    @contextmanager
+    def connection():
+        held.append(True)
+        try:
+            yield conn
+        finally:
+            held.pop()
+
+    def storage(directories):
+        assert not held, 'filesystem scan still holds the database connection'
+        started.set()
+        assert release.wait(2)
+        return {'storage_bytes': 123, 'file_count': 1}
+
+    route = load_route('get_stats', {
+        'db_conn': connection, 'sqlite3': sqlite3, 'snapshots': cache,
+        'get_singles_dir': lambda: tmp_path, 'get_playlists_dir': lambda: None,
+        'scan_storage': storage, '_is_peon': lambda request: False,
+    })
+    request = SimpleNamespace(state=SimpleNamespace(is_admin=True))
+    try:
+        result = route(request)
+        assert started.wait(1)
+        assert result['completed'] == 1
+        assert result['file_count'] is None
+        assert result['storage_scan_state'] == 'refreshing'
+    finally:
+        release.set()
+    wait_until(lambda: all(not entry['running'] for entry in cache.entries.values()))
+    assert route(request)['storage_bytes'] == 123
+    conn.close()
+
+
+def test_stats_shows_users_their_own_and_admins_everything():
+    """A standard user's Stats match their own Queue; an admin's cover every
+    account, legacy single-user rows included; a peon gets none at all."""
+    import sqlite3
+    from contextlib import contextmanager
+    from types import SimpleNamespace
+
+    import pytest
+
+    conn = sqlite3.connect(':memory:')
+    conn.executescript('''
+        CREATE TABLE jobs (status TEXT, source TEXT, completed_at TEXT, artist TEXT, title TEXT,
+                           search_token TEXT, user_id TEXT);
+        CREATE TABLE search_logs (result_count INTEGER, artist TEXT, search_token TEXT, user_id TEXT);
+        INSERT INTO jobs VALUES ('completed', 'youtube', datetime('now'), 'Blur', 'Song 2', 'a1', 'alice');
+        INSERT INTO jobs VALUES ('failed', 'youtube', NULL, 'Blur', 'Beetlebum', NULL, 'alice');
+        INSERT INTO jobs VALUES ('completed', 'monochrome', datetime('now'), 'Oasis', 'Wonderwall', 'b1', 'bob');
+        INSERT INTO jobs VALUES ('completed', 'soulseek', datetime('now'), 'Pulp', 'Disco 2000', NULL, NULL);
+        INSERT INTO search_logs VALUES (3, 'Blur', 'a1', 'alice');
+        INSERT INTO search_logs VALUES (0, 'Oasis', 'b0', 'bob');
+        INSERT INTO search_logs VALUES (2, 'Oasis', 'b1', 'bob');
+    ''')
+
+    @contextmanager
+    def connection():
+        yield conn
+
+    class Refused(Exception):
+        pass
+
+    scans = []
+
+    def scan(directories):
+        scans.append(directories)
+        return {'storage_bytes': 0, 'file_count': 0}
+
+    route = load_route('get_stats', {
+        'db_conn': connection, 'sqlite3': sqlite3, 'snapshots': library_scans.LibrarySnapshots(),
+        'get_singles_dir': lambda: None, 'get_playlists_dir': lambda: None,
+        'scan_storage': scan, 'HTTPException': lambda status_code, detail: Refused(status_code),
+        '_is_peon': lambda request: request.state.role == 'peon',
+    })
+
+    def stats(user_id, is_admin=False, role='user'):
+        return route(SimpleNamespace(state=SimpleNamespace(user_id=user_id, is_admin=is_admin, role=role)))
+
+    alice = stats('alice')
+    assert (alice['scope'], alice['completed'], alice['failed'], alice['total_jobs']) == ('own', 1, 1, 2)
+    assert alice['sources'] == {'youtube': 1}
+    assert [a['artist'] for a in alice['top_artists']] == ['Blur']
+    assert [r['title'] for r in alice['recent']] == ['Song 2']
+    assert (alice['total_searches'], alice['converted_searches']) == (1, 1)
+    assert [a['artist'] for a in alice['top_searched_artists']] == ['Blur']
+    assert alice['storage_bytes'] is None and alice['storage_scan_state'] is None
+
+    bob = stats('bob')
+    assert (bob['completed'], bob['failed'], bob['total_searches'], bob['converted_searches']) == (1, 0, 2, 1)
+    assert scans == [], "a user's Stats must not scan the shared library"
+
+    admin = stats('alice', is_admin=True, role='admin')
+    assert (admin['scope'], admin['completed'], admin['failed'], admin['total_searches']) == ('all', 3, 1, 3)
+
+    with pytest.raises(Refused):
+        stats('carol', role='peon')
+    conn.close()
+
+
+def test_playlists_returns_scoped_watches_before_disk_scan(tmp_path):
+    import sqlite3
+    from contextlib import contextmanager
+    from types import SimpleNamespace
+
+    conn = sqlite3.connect(':memory:')
+    conn.executescript('''
+        CREATE TABLE watched_playlists (id TEXT, name TEXT, platform TEXT, sync_mode TEXT, user_id TEXT);
+        INSERT INTO watched_playlists VALUES ('a', 'Alice list', 'spotify', 'append', 'alice');
+        INSERT INTO watched_playlists VALUES ('b', 'Bob list', 'spotify', 'append', 'bob');
+    ''')
+    release = threading.Event()
+    cache = library_scans.LibrarySnapshots()
+
+    @contextmanager
+    def connection():
+        yield conn
+
+    def scan(directory):
+        assert release.wait(2)
+        return ['Physical list']
+
+    route = load_route('list_playlists', {
+        'db_conn': connection, 'sqlite3': sqlite3, 'snapshots': cache,
+        'get_playlists_dir': lambda **kw: tmp_path / kw['user_id'],
+        'scan_playlists': scan, '_user_scope': lambda user, admin: ('user_id = ?', [user]),
+    })
+    try:
+        for user, expected in [('alice', 'Alice list'), ('bob', 'Bob list')]:
+            request = SimpleNamespace(state=SimpleNamespace(user_id=user, is_admin=False))
+            result = route(request)
+            assert [row['name'] for row in result['playlists']] == [expected]
+            assert result['scan_ready'] is False
+    finally:
+        release.set()
+    wait_until(lambda: all(not entry['running'] for entry in cache.entries.values()))
+    assert len(cache.entries) == 2
+    conn.close()
+
+
+def test_strict_tag_scan_rejects_unavailable_root(tag_cache):
+    tag_cache.rmdir()
+    with pytest.raises(FileNotFoundError):
+        utils.build_library_tag_index(user_id='alice')
+
+
+def test_new_library_without_optional_folders_has_zero_storage(tmp_path):
+    assert library_scans.scan_storage((tmp_path / 'Singles', tmp_path / 'Playlists')) == {
+        'storage_bytes': 0, 'file_count': 0,
+    }
+
+
+def test_playlist_refresh_preserves_new_playlist_choice():
+    import shutil
+    import subprocess
+    node = shutil.which('node')
+    if not node:
+        pytest.skip('Node is needed to execute the browser function')
+    source = (Path(__file__).resolve().parents[1] / 'static/app.js').read_text()
+    function = source[source.index('        function _populatePlaylistSelector()'):source.index('        function getSelectedPlaylist()')]
+    script = '''
+        const assert = require('node:assert/strict');
+        const sel = {
+            value: '__new__', options: [{value: ''}, {value: '__new__'}],
+            remove(index) { this.options.splice(index, 1); this.value = ''; },
+            appendChild(option) { this.options.push(option); },
+        };
+        const document = {
+            getElementById() { return sel; },
+            createElement() { return {dataset: {}}; },
+        };
+        const _playlists = [{name: 'Newly scanned playlist', is_watched: false}];
+    ''' + function + '''
+        _populatePlaylistSelector();
+        assert.equal(sel.value, '__new__');
+        assert.ok(sel.options.some(option => option.value === 'Newly scanned playlist'));
+    '''
+    subprocess.run([node, '-e', script], check=True, capture_output=True, text=True)
+
+
+def test_late_unauthorised_response_preserves_new_session():
+    import shutil
+    import subprocess
+    node = shutil.which('node')
+    if not node:
+        pytest.skip('Node is needed to execute the browser function')
+    source = (Path(__file__).resolve().parents[1] / 'static/app.js').read_text()
+    start = source.index('        async function apiFetch(')
+    function = source[start:source.index('        // =============================================================================', start)]
+    script = '''
+        const assert = require('node:assert/strict');
+        let token = 'old';
+        let loginShown = 0;
+        let resolve;
+        const getSessionToken = () => token;
+        const setSessionToken = value => { token = value; };
+        const setCurrentUser = () => {};
+        const showLoginScreen = () => { loginShown++; };
+        const withRootPath = url => url;
+        const serverConfig = {users_exist: true};
+        const fetch = () => new Promise(r => { resolve = r; });
+    ''' + function + '''
+        (async () => {
+            const oldRequest = apiFetch('/api/playlists');
+            token = 'new';
+            resolve({status: 401});
+            await assert.rejects(oldRequest, /Authentication required/);
+            assert.equal(token, 'new');
+            assert.equal(loginShown, 0);
+            const expiredRequest = apiFetch('/api/playlists');
+            resolve({status: 401});
+            await assert.rejects(expiredRequest, /Authentication required/);
+            assert.equal(token, null);
+            assert.equal(loginShown, 1);
+        })().catch(error => { console.error(error); process.exitCode = 1; });
+    '''
+    subprocess.run([node, '-e', script], check=True, capture_output=True, text=True)

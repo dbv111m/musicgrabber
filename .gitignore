@@ -1,9 +1,6 @@
 # GitLab token - DO NOT COMMIT
 .gitlab-token
 
-# Environment variables (contains secrets)
-.env
-
 # Python
 __pycache__/
 *.py[cod]
@@ -14,6 +11,9 @@ env/
 venv/
 ENV/
 .venv
+
+# Scripts dir
+scripts/
 
 # Database
 *.db
@@ -40,7 +40,18 @@ Thumbs.db
 # Claude AI code reviews
 .claude/
 
-# Working docs (AI-managed project notes, plans, reviews)
-docs/test_bot.py
-test_coverage.py
-tests/
+# Codex code reviews
+.codex
+AGENTS.md
+
+# Working docs (project notes, plans, code reviews)
+docs/
+
+# Test Suite -- keep the suite, but exclude local credential files
+tests/sp_dc.txt
+tests/.venv/
+tests/.test-credentials
+# Tuning cache for MusicBrainz release selection: ~5 MB of API responses, and
+# regenerable with tests/tools/refresh_mb_corpus.py. The small committed fixture
+# in tests/fixtures/mb_lookup_fixture.json is what the test suite actually reads.
+tests/fixtures/mb_corpus_cache.json

@@ -1,22 +1,41 @@
 """
 MusicGrabber - Notification System
 
-Telegram webhook and SMTP email dispatch.
+Telegram webhook, SMTP email, generic webhook, and Apprise dispatch.
 """
 
-import asyncio
-import os
 import smtplib
-import sqlite3
-import subprocess
-import tempfile
+import socket
+import ssl
+import threading
+from contextlib import contextmanager
 from email.mime.text import MIMEText
-from pathlib import Path
 
 import httpx
 
-from constants import DB_PATH, TIMEOUT_HTTP_REQUEST, MUSIC_DIR
+from constants import TIMEOUT_HTTP_REQUEST
 from settings import get_setting, get_setting_bool, get_setting_int
+
+# Per-thread: is someone above us still going to try another source?
+_failure_hold = threading.local()
+
+
+@contextmanager
+def failure_notices_held():
+    """Swallow failure notifications sent from this thread for the duration.
+
+    The download workers announce their own failures, which is right when they
+    are the last word and wrong when an acquisition cycle is about to hand the
+    track to the next source. Monochrome fell over four times in five minutes on
+    2026-10-04, and four "FAILED" pings went out for four tracks that JioSaavn
+    and Soulseek delivered seconds later. The cycle holds the workers' notices
+    and sends one of its own if every source really does let it down.
+    """
+    _failure_hold.active = True
+    try:
+        yield
+    finally:
+        _failure_hold.active = False
 
 
 def _build_notification_message(
@@ -80,9 +99,9 @@ def _build_notification_message(
     return "\n".join(lines), subject
 
 
-def _should_notify(notification_type: str, status: str, error: str = None) -> bool:
+def _should_notify(notification_type: str, status: str, error: str = None, user_id: str | None = None) -> bool:
     """Check if notifications should be sent for this type."""
-    notify_on = get_setting("notify_on", "playlists,bulk,errors")
+    notify_on = get_setting("notify_on", "playlists,bulk,errors", user_id=user_id)
     enabled_types = [t.strip().lower() for t in notify_on.split(",")]
 
     type_map = {
@@ -98,9 +117,9 @@ def _should_notify(notification_type: str, status: str, error: str = None) -> bo
     return config_type in enabled_types or (is_error and "errors" in enabled_types)
 
 
-def _send_telegram(message: str):
+def _send_telegram(message: str, user_id: str | None = None):
     """Send notification via Telegram webhook."""
-    telegram_url = get_setting("telegram_webhook_url")
+    telegram_url = get_setting("telegram_webhook_url", user_id=user_id)
     if not telegram_url:
         return
 
@@ -111,39 +130,117 @@ def _send_telegram(message: str):
         pass
 
 
-def _send_email(subject: str, message: str):
-    """Send notification via SMTP email."""
-    smtp_host = get_setting("smtp_host")
-    smtp_to = get_setting("smtp_to")
+def _deliver_email(
+    subject: str,
+    message: str,
+    *,
+    smtp_host: str,
+    smtp_port: int,
+    smtp_user: str = "",
+    smtp_pass: str = "",
+    smtp_from: str = "",
+    smtp_to: str,
+    smtp_tls: bool = True,
+) -> None:
+    """Deliver one email, raising a useful exception when SMTP rejects it."""
+    host = (smtp_host or "").strip()
+    sender = (smtp_from or smtp_user or "").strip()
+    recipients = [address.strip() for address in (smtp_to or "").split(",") if address.strip()]
+    username = (smtp_user or "").strip()
+
+    if not host:
+        raise ValueError("SMTP host is required")
+    if not 1 <= smtp_port <= 65535:
+        raise ValueError("SMTP port must be between 1 and 65535")
+    if not sender:
+        raise ValueError("From address is required when no SMTP username is set")
+    if not recipients:
+        raise ValueError("At least one To address is required")
+    if bool(username) != bool(smtp_pass):
+        raise ValueError("SMTP username and password must both be set for authentication")
+
+    msg = MIMEText(message)
+    msg["Subject"] = subject
+    msg["From"] = sender
+    msg["To"] = ", ".join(recipients)
+
+    with smtplib.SMTP(host, smtp_port, timeout=15) as server:
+        server.ehlo()
+        if smtp_tls:
+            server.starttls(context=ssl.create_default_context())
+            server.ehlo()
+        if username:
+            server.login(username, smtp_pass)
+        server.sendmail(sender, recipients, msg.as_string())
+
+
+def _describe_email_error(error: Exception) -> str:
+    """Turn SMTP/socket failures into safe, actionable UI copy."""
+    if isinstance(error, ValueError):
+        return str(error)
+    if isinstance(error, smtplib.SMTPAuthenticationError):
+        return "SMTP authentication failed; check the username, password, and provider app-password requirements"
+    if isinstance(error, smtplib.SMTPNotSupportedError):
+        return "The SMTP server does not support STARTTLS; check the port or turn off STARTTLS"
+    if isinstance(error, smtplib.SMTPRecipientsRefused):
+        return "The SMTP server refused the recipient address"
+    if isinstance(error, smtplib.SMTPSenderRefused):
+        return "The SMTP server refused the From address"
+    if isinstance(error, smtplib.SMTPDataError):
+        return f"The SMTP server rejected the message (SMTP {error.smtp_code})"
+    if isinstance(error, smtplib.SMTPConnectError):
+        return f"The SMTP server refused the connection (SMTP {error.smtp_code})"
+    if isinstance(error, ssl.SSLError):
+        return "STARTTLS failed while verifying the SMTP server certificate"
+    if isinstance(error, socket.gaierror):
+        return "SMTP host could not be found; check the hostname and DNS"
+    if isinstance(error, (socket.timeout, TimeoutError)):
+        return "SMTP connection timed out; check the hostname, port, and firewall"
+    if isinstance(error, ConnectionRefusedError):
+        return "SMTP connection was refused; check the hostname and port"
+    if isinstance(error, smtplib.SMTPException):
+        return f"SMTP error: {error}"
+    return "Email failed; check the SMTP settings and server logs"
+
+
+def send_test_email(**smtp_settings) -> tuple[bool, str]:
+    """Exercise the real SMTP path and return a user-facing result."""
+    try:
+        _deliver_email(
+            "MusicGrabber test email",
+            "Test email from MusicGrabber. If you can read this, SMTP notifications are working.",
+            **smtp_settings,
+        )
+        return True, "Test email sent successfully"
+    except Exception as error:
+        print(f"SMTP test error: {type(error).__name__}: {error}")
+        return False, _describe_email_error(error)
+
+
+def _send_email(subject: str, message: str, user_id: str | None = None):
+    """Send notification via SMTP email without interrupting download work."""
+    smtp_host = get_setting("smtp_host", user_id=user_id)
+    smtp_to = get_setting("smtp_to", user_id=user_id)
 
     if not smtp_host or not smtp_to:
         return
 
-    smtp_port = get_setting_int("smtp_port", 587)
-    smtp_user = get_setting("smtp_user")
-    smtp_pass = get_setting("smtp_pass")
-    smtp_from = get_setting("smtp_from")
-    smtp_tls = get_setting_bool("smtp_tls", True)
-
     try:
-        msg = MIMEText(message)
-        msg["Subject"] = subject
-        msg["From"] = smtp_from or smtp_user
-        msg["To"] = smtp_to
-
-        if smtp_tls:
-            server = smtplib.SMTP(smtp_host, smtp_port)
-            server.starttls()
-        else:
-            server = smtplib.SMTP(smtp_host, smtp_port)
-
-        if smtp_user and smtp_pass:
-            server.login(smtp_user, smtp_pass)
-
-        server.sendmail(msg["From"], smtp_to.split(","), msg.as_string())
-        server.quit()
-    except Exception:
-        pass
+        _deliver_email(
+            subject,
+            message,
+            smtp_host=smtp_host,
+            smtp_port=get_setting_int("smtp_port", 587, user_id=user_id),
+            smtp_user=get_setting("smtp_user", user_id=user_id),
+            smtp_pass=get_setting("smtp_pass", user_id=user_id),
+            smtp_from=get_setting("smtp_from", user_id=user_id),
+            smtp_to=smtp_to,
+            smtp_tls=get_setting_bool("smtp_tls", True, user_id=user_id),
+        )
+    except Exception as error:
+        # Notifications must never fail a completed download, but they should no
+        # longer vanish without leaving the administrator a clue.
+        print(f"SMTP notification error: {type(error).__name__}: {error}")
 
 
 def _send_webhook(
@@ -156,10 +253,11 @@ def _send_webhook(
     track_count: int = None,
     failed_count: int = None,
     skipped_count: int = None,
-    playlist_name: str = None
+    playlist_name: str = None,
+    user_id: str | None = None,
 ):
     """Send notification via generic webhook POST."""
-    webhook_url = get_setting("webhook_url")
+    webhook_url = get_setting("webhook_url", user_id=user_id)
     if not webhook_url:
         return
 
@@ -191,6 +289,21 @@ def _send_webhook(
         pass
 
 
+def _send_apprise(title: str, message: str, user_id: str | None = None):
+    """Send notification via Apprise (supports Gotify, ntfy, Discord, Pushover, and 50+ more)."""
+    url = get_setting("apprise_url", user_id=user_id)
+    if not url:
+        return
+
+    try:
+        import apprise
+        a = apprise.Apprise()
+        a.add(url)
+        a.notify(title=title, body=message)
+    except Exception:
+        pass
+
+
 def send_notification(
     notification_type: str,
     title: str,
@@ -201,9 +314,10 @@ def send_notification(
     track_count: int = None,
     failed_count: int = None,
     skipped_count: int = None,
-    playlist_name: str = None
+    playlist_name: str = None,
+    user_id: str | None = None,
 ):
-    """Send notifications to all configured channels (Telegram, Email).
+    """Send notifications to all configured channels (Telegram, Email, Apprise, webhook).
 
     Args:
         notification_type: One of 'single', 'playlist', 'bulk', 'error'
@@ -216,8 +330,11 @@ def send_notification(
         failed_count: Number of failed tracks
         skipped_count: Number of skipped tracks
         playlist_name: Name of playlist (for playlist downloads)
+        user_id: User whose notification settings to use (None = global)
     """
-    if not _should_notify(notification_type, status, error):
+    if notification_type == "error" and getattr(_failure_hold, "active", False):
+        return
+    if not _should_notify(notification_type, status, error, user_id=user_id):
         return
 
     message, subject = _build_notification_message(
@@ -225,128 +342,11 @@ def send_notification(
         error, track_count, failed_count, skipped_count, playlist_name
     )
 
-    _send_telegram(message)
-    _send_email(subject, message)
+    _send_telegram(message, user_id=user_id)
+    _send_email(subject, message, user_id=user_id)
+    _send_apprise(subject, message, user_id=user_id)
     _send_webhook(
         notification_type, title, artist, source, status,
-        error, track_count, failed_count, skipped_count, playlist_name
+        error, track_count, failed_count, skipped_count, playlist_name,
+        user_id=user_id,
     )
-
-
-def send_audio_to_telegram(job_id: str):
-    """Send downloaded audio file to Telegram user who requested it."""
-    try:
-        with sqlite3.connect(DB_PATH) as conn:
-            conn.row_factory = sqlite3.Row
-            job = conn.execute(
-                "SELECT artist, title, telegram_chat_id, file_path FROM jobs WHERE id = ?",
-                (job_id,)
-            ).fetchone()
-
-            if not job:
-                return
-
-            chat_id = job["telegram_chat_id"]
-            if not chat_id:
-                return
-
-            file_path = job["file_path"]
-            if not file_path:
-                return
-
-            # Resolve full path
-            if not Path(file_path).is_absolute():
-                file_path = MUSIC_DIR / file_path
-
-            audio_file = Path(file_path)
-            print(f"Notifications: send_audio_to_telegram called: job_id={job_id}, chat_id={chat_id}, file={file_path}")
-            if not audio_file.exists():
-                print(f"Notifications: File not found: {audio_file}")
-                return
-
-            artist = job["artist"] or "Unknown"
-            title = job["title"] or "Unknown"
-            size_mb = audio_file.stat().st_size / (1024 * 1024)
-
-            if size_mb > 50:
-                print(f"Notifications: File too large for Telegram: {size_mb:.1f}MB")
-                return
-
-            # Convert to MP3 if needed (controlled by setting, default True)
-            audio_path = str(audio_file)
-            is_flac = audio_file.suffix.lower() == '.flac'
-            is_opus = audio_file.suffix.lower() == '.opus'
-            is_m4a = audio_file.suffix.lower() == '.m4a'
-            temp_mp3 = None
-            filename = audio_file.name
-
-            # Default to True for Telegram - always convert to MP3
-            convert_to_mp3 = get_setting_bool("telegram_convert_to_mp3", True)
-
-            if convert_to_mp3 and (is_flac or is_opus or is_m4a):
-                temp_mp3 = tempfile.NamedTemporaryFile(suffix='.mp3', delete=False)
-                temp_mp3.close()
-                try:
-                    subprocess.run([
-                        'ffmpeg', '-i', audio_path,
-                        '-b:a', '320k',
-                        '-y', temp_mp3.name
-                    ], check=True, capture_output=True, timeout=60)
-                    audio_path = temp_mp3.name
-                    filename = audio_file.stem + '.mp3'
-                except subprocess.TimeoutExpired:
-                    print(f"Notifications: FFmpeg timeout for {filename}")
-                    if temp_mp3 and os.path.exists(temp_mp3.name):
-                        os.unlink(temp_mp3.name)
-                    return
-                except subprocess.CalledProcessError as e:
-                    print(f"Notifications: FFmpeg conversion failed: {e}")
-                    if temp_mp3 and os.path.exists(temp_mp3.name):
-                        os.unlink(temp_mp3.name)
-                    return
-
-            # Send audio via Telegram Bot API using curl with longer timeout
-            bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
-            if not bot_token:
-                return
-
-            # Use curl for better compatibility with longer timeout
-            caption = f"🎵 {title}\n🎤 {artist}\n\n✅ Скачано MusicGrabber"
-
-            # Use 30 minute timeout for large files (slow upload speeds)
-            # Specify filename to ensure Telegram recognizes it as audio
-            try:
-                # Build curl command with optional proxy
-                curl_cmd = [
-                    'curl', '-s', '-X', 'POST',
-                    f'https://api.telegram.org/bot{bot_token}/sendAudio',
-                    '-F', f'chat_id={chat_id}',
-                    '-F', f'title={title}',
-                    '-F', f'performer={artist}',
-                    '-F', f'caption={caption}',
-                    '-F', f'audio=@{audio_path};type=audio/mpeg'
-                ]
-
-                # Add proxy if configured
-                https_proxy = os.getenv('HTTPS_PROXY') or os.getenv('https_proxy')
-                if https_proxy:
-                    curl_cmd.extend(['--proxy', https_proxy])
-                    print(f"Notifications: Using proxy: {https_proxy}")
-
-                result = subprocess.run(curl_cmd, capture_output=True, text=True, timeout=1800)
-
-                if '"ok":true' in result.stdout:
-                    print(f"Notifications: Sent audio to {chat_id}: {artist} - {title}")
-                else:
-                    print(f"Notifications: Failed to send audio: stdout={result.stdout[:500] if result.stdout else 'empty'}, stderr={result.stderr[:200] if result.stderr else 'empty'}, returncode={result.returncode}")
-            except subprocess.TimeoutExpired:
-                print(f"Notifications: Timeout sending audio to {chat_id}")
-            except Exception as e:
-                print(f"Notifications: Error sending audio: {e}")
-
-            # Cleanup temp file
-            if temp_mp3 and os.path.exists(temp_mp3.name):
-                os.unlink(temp_mp3.name)
-
-    except Exception as e:
-        print(f"Notifications: Error sending audio: {e}")

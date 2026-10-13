@@ -13,9 +13,14 @@ from pathlib import Path
 
 from fastapi import HTTPException
 
-from constants import TIMEOUT_AMAZON_BROWSER
+from constants import (
+    AMAZON_ALBUM_TITLE_WAIT,
+    TIMEOUT_AMAZON_ALBUM_BROWSER,
+    TIMEOUT_AMAZON_BROWSER,
+)
 
 _BROWSER_SCRIPT = Path(__file__).parent / "amazonpl.py"
+_ALBUM_SCRIPT = Path(__file__).parent / "amazonalbum.py"
 
 
 def fetch_amazon_playlist(url: str) -> dict:
@@ -46,7 +51,7 @@ def fetch_amazon_playlist(url: str) -> dict:
     except subprocess.TimeoutExpired:
         raise HTTPException(
             status_code=504,
-            detail="Timeout fetching Amazon Music playlist — the page took too long to load"
+            detail="Timeout fetching Amazon Music playlist; the page took too long to load"
         )
 
     if result.returncode != 0:
@@ -86,3 +91,69 @@ def fetch_amazon_playlist(url: str) -> dict:
         "playlist_name": playlist_name,
         "count": len(tracks)
     }
+
+
+def fetch_amazon_album_info(url: str) -> dict:
+    """Name an Amazon Music album page: {"artist": ..., "album": ...}.
+
+    Runs amazonalbum.py as a subprocess, same as the playlist path, but that
+    script drives SeleniumBase rather than Playwright.  Album pages hand
+    Playwright a shell of skeleton rows that never fill in; under undetected
+    mode Amazon at least sets a document title naming the record, which is all
+    the album pipeline wants.  See amazonalbum.py for the full story.
+
+    Raises HTTPException on failure, so a dead ASIN surfaces as an honest
+    error rather than a confidently wrong album.
+    """
+    print(f"Naming Amazon Music album via headless browser: {url}")
+
+    env = {
+        **os.environ,
+        "AMAZON_ALBUM_URL": url,
+        "AMAZON_ALBUM_TIMEOUT": str(AMAZON_ALBUM_TITLE_WAIT),
+    }
+
+    try:
+        result = subprocess.run(
+            ["python3", str(_ALBUM_SCRIPT)],
+            capture_output=True,
+            text=True,
+            timeout=TIMEOUT_AMAZON_ALBUM_BROWSER,
+            env=env,
+        )
+    except subprocess.TimeoutExpired:
+        raise HTTPException(
+            status_code=504,
+            detail="Timeout naming Amazon Music album; the page took too long to load",
+        )
+
+    if result.stderr:
+        print(f"Amazon album script stderr: {result.stderr[:500]}")
+
+    # SeleniumBase chatters on stdout, so take the last line that parses as the
+    # JSON payload rather than assuming the script had the stream to itself.
+    data = None
+    for line in reversed((result.stdout or "").strip().splitlines()):
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        try:
+            data = json.loads(line)
+            break
+        except json.JSONDecodeError:
+            continue
+
+    if data is None:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Invalid response from Amazon album script: {(result.stdout or '')[:200]}",
+        )
+
+    if not data.get("success"):
+        raise HTTPException(
+            status_code=502,
+            detail=f"Failed to name Amazon album: {data.get('error', 'Unknown error')}",
+        )
+
+    print(f"Amazon album resolved: {data.get('artist')} - {data.get('album')}")
+    return {"artist": data.get("artist"), "album": data.get("album")}
