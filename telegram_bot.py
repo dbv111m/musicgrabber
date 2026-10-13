@@ -52,6 +52,8 @@ logging.basicConfig(
     level=logging.INFO
 )
 logger = logging.getLogger(__name__)
+# httpx logs full request URLs (incl. bot token) at INFO — keep it quiet
+logging.getLogger("httpx").setLevel(logging.WARNING)
 
 # =============================================================================
 # Database helpers
@@ -459,9 +461,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     log_bot_action(chat_id, "start")
 
 
-async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle /help command."""
-    text = """❓ <b>Помощь</b>
+HELP_TEXT = """❓ <b>Помощь</b>
 
 <b>Команды:</b>
 /start - Главное меню
@@ -489,8 +489,18 @@ async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 Вопросы и предложения: https://github.com/dbv111m/musicgrabber"""
 
-    await update.message.reply_text(text, parse_mode="HTML")
+
+async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /help command."""
+    await update.message.reply_text(HELP_TEXT, parse_mode="HTML")
     log_bot_action(update.effective_chat.id, "help")
+
+
+async def callback_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle help menu callback."""
+    query = update.callback_query
+    await query.answer()
+    await query.edit_message_text(HELP_TEXT, parse_mode="HTML", reply_markup=build_main_keyboard())
 
 
 async def cmd_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -937,8 +947,9 @@ def setup_bot():
     # Init database tables
     init_telegram_tables()
 
-    # Create application
-    app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+    # Create application. concurrent_updates: a slow handler (httpx to the app,
+    # up to 30s timeout) must not block answering other button presses.
+    app = Application.builder().token(TELEGRAM_BOT_TOKEN).concurrent_updates(True).build()
 
     # Command handlers
     app.add_handler(CommandHandler("start", cmd_start))
@@ -958,6 +969,7 @@ def setup_bot():
     app.add_handler(CallbackQueryHandler(callback_queue, pattern="^menu_queue$"))
     app.add_handler(CallbackQueryHandler(callback_stats, pattern="^menu_stats$"))
     app.add_handler(CallbackQueryHandler(callback_settings, pattern="^menu_settings$"))
+    app.add_handler(CallbackQueryHandler(callback_help, pattern="^menu_help$"))
     app.add_handler(CallbackQueryHandler(callback_set_source, pattern="^set_source$"))
     app.add_handler(CallbackQueryHandler(callback_set_quality, pattern="^set_quality$"))
     app.add_handler(CallbackQueryHandler(callback_download, pattern="^download_\\d+$"))
@@ -965,7 +977,7 @@ def setup_bot():
     app.add_handler(CallbackQueryHandler(callback_search_cancel, pattern="^search_cancel$"))
     app.add_handler(CallbackQueryHandler(callback_queue_refresh, pattern="^queue_refresh$"))
     app.add_handler(CallbackQueryHandler(callback_retry, pattern="^retry_"))
-    app.add_handler(CallbackQueryHandler(callback_noop, pattern="^set_folder$|^cancel_"))
+    app.add_handler(CallbackQueryHandler(callback_noop, pattern="^set_folder$|^cancel_|^noop$"))
 
     return app
 
