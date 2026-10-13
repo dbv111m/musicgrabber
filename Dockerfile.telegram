@@ -1,0 +1,11 @@
+# Standalone Telegram module for MusicGrabber. Deliberately separate from the
+# upstream Dockerfile: this image only needs the bot + HTTP, so upstream image
+# changes never affect it and merges stay conflict-free.
+FROM python:3.12-slim
+
+RUN pip install --no-cache-dir "python-telegram-bot~=21.10" "httpx~=0.28"
+
+WORKDIR /app
+COPY telegram_bot.py .
+
+CMD ["python", "telegram_bot.py"]

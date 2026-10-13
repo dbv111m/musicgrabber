@@ -483,3 +483,31 @@ TEST_CHAT_ID=123456789 docker exec music-grabber python test_e2e.py
    Проверьте /queue — статус должен быть "queued"
    ```
 
+
+---
+
+## Телеграм-бот (standalone-модуль)
+
+`telegram_bot.py` — отдельный процесс, не импортирует код приложения: общается
+с MusicGrabber только по HTTP API и хранит своё состояние в собственном sqlite
+(`TELEGRAM_BOT_DB`). Благодаря этому слияния с upstream не задевают бота, а
+обновление приложения не ломает его.
+
+Переменные окружения:
+
+- `TELEGRAM_BOT_TOKEN` — токен бота (обязателен)
+- `MUSICGRABBER_API_URL` — адрес приложения (по умолчанию `http://localhost:8080`)
+- `MUSICGRABBER_API_KEY` — ключ `api_key` из настроек приложения (если включена авторизация)
+- `TELEGRAM_ALLOWED_USERS` — разрешённые chat_id через запятую (пусто — все)
+- `TELEGRAM_BOT_DB` — путь к sqlite бота (по умолчанию `telegram_bot.db`)
+
+Запуск локально: `python telegram_bot.py`.
+В Docker — оверлей поверх основного compose:
+
+```
+docker compose -f docker-compose.yml -f docker-compose.telegram.yml up -d
+```
+
+Совместимо с приложением v4.3.1: поиск `/api/search`, загрузка `/api/download`
+(`convert_audio`), статусы `/api/jobs/*`, статистика `/api/stats`. Проверка
+дубликатов происходит на сервере (library index), отдельный запрос боту не нужен.

@@ -25,14 +25,23 @@ from telegram.ext import (
 )
 import httpx
 
-from constants import VERSION, MUSIC_DIR, DB_PATH
-from settings import get_setting, get_setting_bool, set_setting
+# Standalone module: talks to the MusicGrabber app purely over its HTTP API
+# (MUSICGRABBER_API_URL + MUSICGRABBER_API_KEY), keeps its own sqlite for
+# per-chat state. No imports from the app codebase -> merges with upstream
+# never conflict.
 
 # Telegram settings
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_ALLOWED_USERS = os.getenv("TELEGRAM_ALLOWED_USERS", "")
 # API base URL - configurable for different deployments
 API_BASE_URL = os.getenv("MUSICGRABBER_API_URL", "http://localhost:8080")
+API_KEY = os.getenv("MUSICGRABBER_API_KEY", "")
+VERSION = os.getenv("TELEGRAM_BOT_VERSION", "standalone")
+BOT_DB_PATH = os.getenv("TELEGRAM_BOT_DB", "telegram_bot.db")
+
+
+def _api_headers() -> dict:
+    return {"X-API-Key": API_KEY} if API_KEY else {}
 
 # User context storage (simple dict)
 user_contexts = {}
@@ -49,8 +58,8 @@ logger = logging.getLogger(__name__)
 # =============================================================================
 
 def get_db_connection():
-    """Get database connection."""
-    conn = sqlite3.connect(DB_PATH)
+    """Get database connection (bot's own sqlite, not the app's)."""
+    conn = sqlite3.connect(BOT_DB_PATH)
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -77,11 +86,17 @@ def init_telegram_tables():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
-    # Add telegram_chat_id to jobs if not exists
-    try:
-        conn.execute("ALTER TABLE jobs ADD COLUMN telegram_chat_id INTEGER")
-    except sqlite3.OperationalError:
-        pass  # Column already exists
+    # Own job registry: chat_id -> app job_id (the app's jobs table is not
+    # touched from here anymore)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS bot_jobs (
+            job_id TEXT PRIMARY KEY,
+            chat_id INTEGER,
+            title TEXT,
+            artist TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
     conn.commit()
     conn.close()
 
@@ -202,8 +217,9 @@ async def search_music(query: str, source: str, limit: int = 10) -> list:
     try:
         async with httpx.AsyncClient(timeout=30) as client:
             response = await client.post(
- f"{API_BASE_URL}/api/search",
-                json={"query": query, "source": source, "limit": limit}
+                f"{API_BASE_URL}/api/search",
+                json={"query": query, "source": source, "limit": limit},
+                headers=_api_headers(),
             )
             response.raise_for_status()
             data = response.json()
@@ -216,181 +232,7 @@ async def search_music(query: str, source: str, limit: int = 10) -> list:
 async def download_track(video_id: str, title: str, artist: str, source: str,
                         convert_to_flac: bool, chat_id: int, source_url: str = None,
                         update: Update = None) -> Optional[dict]:
-    """Queue track download and return job ID.
-
-    If file already exists, returns 'existing' status with file info.
-    Otherwise queues download and returns job ID.
-
-    If update is provided, sends message to Telegram (for existing files).
-    """
-    # First check if file already exists
-    try:
-        async with httpx.AsyncClient(timeout=30) as client:  # Increased timeout
-            check_response = await client.get(
- f"{API_BASE_URL}/api/check-file",
-                params={"artist": artist, "title": title}
-            )
-            if check_response.status_code == 200:
-                check_data = check_response.json()
-                if check_data.get("exists"):
-                    # File exists! Send it to user
-                    file_path = check_data.get("full_path")
-                    filename = check_data.get("filename")
-                    size = check_data.get("size", 0)
-                    size_mb = size / (1024 * 1024)
-
-                    if update:
-                        metadata = check_data.get("metadata", {})
-                        audio_quality = metadata.get("audio_quality", "Unknown") if metadata else "Unknown"
-
-                        # Send audio file via direct HTTP API with extended timeout
-                        from pathlib import Path
-                        audio_file = Path(file_path)
-                        if audio_file.exists():
-                            try:
-                                # For large files (>50MB), send text only
-                                if size_mb > 50:
-                                    text = f"""✅ <b>Уже загружен</b>
-
-🎵 {title}
-🎤 {artist}
-
-📁 Файл: {filename}
-🎼 Качество: {audio_quality}
-📦 Размер: {size_mb:.1f} MB
-
-⚠️ Файл слишком большой для отправки в Telegram.
-Используйте Navidrome/Jellyfin для прослушивания."""
-
-                                    await update.effective_message.reply_text(text, parse_mode="HTML")
-                                else:
-                                    import asyncio
-                                    import httpx as httpx_client
-                                    import subprocess
-                                    import tempfile
-                                    import os
-
-                                    bot_token = os.getenv("TELEGRAM_BOT_TOKEN")
-                                    send_url = f"https://api.telegram.org/bot{bot_token}/sendAudio"
-
-                                    # Convert to MP3 if needed (controlled by setting, default True)
-                                    audio_path = str(audio_file)
-                                    is_flac = audio_file.suffix.lower() == '.flac'
-                                    is_opus = audio_file.suffix.lower() == '.opus'
-                                    is_m4a = audio_file.suffix.lower() == '.m4a'
-                                    temp_mp3 = None
-
-                                    # Default to True - always convert to MP3
-                                    convert_to_mp3 = os.getenv("TELEGRAM_CONVERT_TO_MP3", "true").lower() == "true"
-
-                                    if convert_to_mp3 and (is_flac or is_opus or is_m4a):
-                                        # Convert to MP3 using ffmpeg
-                                        temp_mp3 = tempfile.NamedTemporaryFile(suffix='.mp3', delete=False)
-                                        temp_mp3.close()
-                                        try:
-                                            subprocess.run([
-                                                'ffmpeg', '-i', audio_path,
-                                                '-b:a', '320k',
-                                                '-y', temp_mp3.name
-                                            ], check=True, capture_output=True)
-                                            audio_path = temp_mp3.name
-                                            filename = filename.replace('.flac', '.mp3').replace('.opus', '.mp3').replace('.m4a', '.mp3')
-                                            content_type = "audio/mpeg"
-                                        except subprocess.CalledProcessError as e:
-                                            logger.error(f"FFmpeg conversion failed: {e}")
-                                            await update.effective_message.reply_text(
-                                                f"❌ Ошибка конвертации файла: {str(e)}",
-                                                parse_mode="HTML"
-                                            )
-                                            return
-                                    else:
-                                        content_type = "audio/mpeg"
-
-                                    # Prepare multipart form data
-                                    data = {
-                                        "chat_id": str(chat_id),
-                                        "filename": filename.replace('.flac', '.mp3') if is_flac else filename,
-                                        "title": title,
-                                        "performer": artist,
-                                        "caption": f"🎵 {title}\n🎤 {artist}\n\n✅ Из вашей библиотеки MusicGrabber"
-                                    }
-
-                                    try:
-                                        async with httpx_client.AsyncClient(timeout=1800.0) as api_client:
-                                            with open(audio_path, 'rb') as f:
-                                                files = {"audio": (filename.replace('.flac', '.mp3') if is_flac else filename, f, content_type)}
-                                                response = await api_client.post(send_url, data=data, files=files)
-                                                response.raise_for_status()
-                                    finally:
-                                        # Clean up temp file
-                                        if temp_mp3 and os.path.exists(temp_mp3.name):
-                                            os.unlink(temp_mp3.name)
-
-                                    # Send success message
-                                    text = f"""✅ <b>Уже загружен</b>
-
-🎵 {title}
-🎤 {artist}
-
-📁 Файл: {filename}
-🎼 Качество: {audio_quality}
-📦 Размер: {size_mb:.1f} MB
-
-Файл отправлен из вашей библиотеки!"""
-
-                                    await update.effective_message.reply_text(text, parse_mode="HTML")
-
-                            except asyncio.TimeoutError:
-                                logger.error(f"Timeout sending audio file: {filename}")
-                                # Fallback to text only
-                                text = f"""✅ <b>Уже загружен</b>
-
-🎵 {title}
-🎤 {artist}
-
-📁 Файл: {filename}
-🎼 Качество: {audio_quality}
-📦 Размер: {size_mb:.1f} MB
-
-⚠️ Файл не отправлен (timeout).
-Найдите его в вашей музыкальной библиотеке."""
-
-                                await update.effective_message.reply_text(text, parse_mode="HTML")
-
-                            except Exception as e:
-                                logger.error(f"Error sending audio file: {e}")
-                                # Fallback to text only
-                                text = f"""✅ <b>Уже загружен</b>
-
-🎵 {title}
-🎤 {artist}
-
-📁 Файл: {filename}
-🎼 Качество: {audio_quality}
-📦 Размер: {size_mb:.1f} MB
-
-⚠️ Ошибка отправки: {str(e)}
-Найдите файл в вашей музыкальной библиотеке."""
-
-                                await update.effective_message.reply_text(text, parse_mode="HTML")
-                        else:
-                            # File not found on disk
-                            text = f"""❌ <b>Файл не найден</b>
-
-🎵 {title}
-🎤 {artist}
-
-⚠️ Файл указан в базе, но отсутствует на диске.
-Будет загружен заново."""
-
-                            await update.effective_message.reply_text(text, parse_mode="HTML")
-
-
-                    return {"status": "existing", "file": file_path}
-    except Exception as e:
-        logger.error(f"Error checking existing file: {e}")
-        # Continue to download if check fails
-
+    """Queue track download via the app API and return the job ID."""
     # Queue download
     try:
         async with httpx.AsyncClient(timeout=30) as client:  # Increased timeout
@@ -399,21 +241,29 @@ async def download_track(video_id: str, title: str, artist: str, source: str,
                 "title": title,
                 "artist": artist,
                 "source": source,
-                "convert_to_flac": convert_to_flac,
-                "telegram_chat_id": chat_id
+                "convert_audio": convert_to_flac,
             }
             # Add source_url for non-YouTube sources
             if source_url and source in ["soundcloud", "monochrome"]:
                 payload["source_url"] = source_url
 
             response = await client.post(
- f"{API_BASE_URL}/api/download",
-                json=payload
+                f"{API_BASE_URL}/api/download",
+                json=payload,
+                headers=_api_headers(),
             )
             response.raise_for_status()
             data = response.json()
 
             job_id = data.get("job_id")
+            if job_id:
+                conn = get_db_connection()
+                conn.execute(
+                    "INSERT OR REPLACE INTO bot_jobs (job_id, chat_id, title, artist) VALUES (?, ?, ?, ?)",
+                    (job_id, chat_id, title, artist),
+                )
+                conn.commit()
+                conn.close()
 
             return {"status": "queued", "job_id": job_id}
 
@@ -426,7 +276,7 @@ async def get_job_status(job_id: str) -> Optional[dict]:
     """Get job status."""
     try:
         async with httpx.AsyncClient(timeout=10) as client:
-            response = await client.get(f"{API_BASE_URL}/api/jobs/{job_id}")
+            response = await client.get(f"{API_BASE_URL}/api/jobs/{job_id}", headers=_api_headers())
             if response.status_code == 200:
                 return response.json()
     except Exception as e:
@@ -435,25 +285,31 @@ async def get_job_status(job_id: str) -> Optional[dict]:
 
 
 async def get_user_jobs(chat_id: int, limit: int = 10) -> list:
-    """Get user's jobs."""
-    try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            response = await client.get(f"{API_BASE_URL}/api/jobs?limit={limit}")
-            if response.status_code == 200:
-                data = response.json()
-                # Filter by chat_id
-                jobs = data.get("jobs", [])
-                return [j for j in jobs if j.get("telegram_chat_id") == chat_id]
-    except Exception as e:
-        logger.error(f"Get jobs error: {e}")
-    return []
+    """Get this chat's jobs: own bot_jobs registry enriched with live status."""
+    conn = get_db_connection()
+    rows = conn.execute(
+        "SELECT job_id, title, artist FROM bot_jobs WHERE chat_id = ? ORDER BY created_at DESC LIMIT ?",
+        (chat_id, limit),
+    ).fetchall()
+    conn.close()
+
+    jobs = []
+    for row in rows:
+        job = {"id": row["job_id"], "title": row["title"], "artist": row["artist"]}
+        status = await get_job_status(row["job_id"])
+        if status:
+            job.update({k: status.get(k) for k in ("status", "progress", "error") if status.get(k) is not None})
+        else:
+            job["status"] = "unknown"
+        jobs.append(job)
+    return jobs
 
 
 async def get_stats() -> Optional[dict]:
     """Get global stats."""
     try:
         async with httpx.AsyncClient(timeout=10) as client:
-            response = await client.get(f"{API_BASE_URL}/api/stats")
+            response = await client.get(f"{API_BASE_URL}/api/stats", headers=_api_headers())
             if response.status_code == 200:
                 return response.json()
     except Exception as e:

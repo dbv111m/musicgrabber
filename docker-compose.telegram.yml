@@ -1,0 +1,21 @@
+# Overlay for the Telegram bot module: run together with the main compose file:
+#   docker compose -f docker-compose.yml -f docker-compose.telegram.yml up -d
+# Separate file on purpose: upstream's docker-compose.yml stays untouched.
+services:
+  telegram-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile.telegram
+    container_name: music-grabber-telegram
+    restart: unless-stopped
+    environment:
+      - MUSICGRABBER_API_URL=http://music-grabber:8080
+      # Set the same API key as the app's api_key setting (empty = auth off)
+      - MUSICGRABBER_API_KEY=${MUSICGRABBER_API_KEY:-}
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_ALLOWED_USERS=${TELEGRAM_ALLOWED_USERS:-}
+      - TELEGRAM_BOT_DB=/data/telegram_bot.db
+    volumes:
+      - ./data:/data
+    depends_on:
+      - music-grabber
