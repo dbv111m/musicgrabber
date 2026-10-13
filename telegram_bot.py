@@ -977,7 +977,13 @@ def setup_bot():
 
     # Create application. concurrent_updates: a slow handler (httpx to the app,
     # up to 30s timeout) must not block answering other button presses.
-    app = Application.builder().token(TELEGRAM_BOT_TOKEN).concurrent_updates(True).build()
+    builder = Application.builder().token(TELEGRAM_BOT_TOKEN).concurrent_updates(True)
+    # Local Bot API stand (e.g. tgfake) for e2e tests without real Telegram
+    api_url = os.getenv("TELEGRAM_API_URL")
+    if api_url:
+        # PTB expects the full prefix incl. /bot (default https://api.telegram.org/bot)
+        builder = builder.base_url(api_url.rstrip("/") + "/bot")
+    app = builder.build()
 
     # Command handlers
     app.add_handler(CommandHandler("start", cmd_start))
