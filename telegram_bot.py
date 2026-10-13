@@ -5,6 +5,8 @@ Simple functional Telegram bot for searching and downloading music.
 No classes, no over-engineering - just functions.
 """
 
+import asyncio
+import html
 import logging
 import os
 import sqlite3
@@ -799,6 +801,30 @@ async def callback_set_quality(update: Update, context: ContextTypes.DEFAULT_TYP
     log_bot_action(chat_id, "settings", f"flac: {settings['convert_to_flac']}")
 
 
+async def _watch_job(job_id: str, chat_id: int, message, title: str,
+                     interval: float = 5.0, max_polls: int = 180):
+    """Poll a queued job until it completes/fails, then notify the chat.
+    Fire-and-forget: without it the user never learns the outcome (looks
+    like a hang). ~15 min cap at 5s."""
+    status = "unknown"
+    for _ in range(max_polls):
+        await asyncio.sleep(interval)
+        data = await get_job_status(job_id)
+        if not data:
+            continue
+        status = data.get("status", "unknown")
+        if status in ("completed", "failed"):
+            break
+    safe_title = html.escape(title)
+    if status == "completed":
+        await message.chat.send_message(f"✅ <b>Загружено</b>\n\n🎵 {safe_title}", parse_mode="HTML")
+    elif status == "failed":
+        err = html.escape((data or {}).get("error") or "неизвестная ошибка")
+        await message.chat.send_message(f"❌ <b>Ошибка загрузки</b>\n\n🎵 {safe_title}\nПричина: {err}", parse_mode="HTML")
+    else:
+        logger.info(f"job {job_id}: watcher gave up after {max_polls} polls (last: {status})")
+
+
 async def callback_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle download callback."""
     query = update.callback_query
@@ -855,7 +881,9 @@ async def callback_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
 🎵 {track.get('title', 'Unknown')}
 🎤 {track.get('artist') or track.get('channel', 'Unknown')}
 
-Используйте /queue для отслеживания прогресса."""
+Придёт уведомление о результате (или /queue для прогресса)."""
+
+    asyncio.create_task(_watch_job(job_id, chat_id, query.message, track.get('title', 'Unknown')))
 
     await query.edit_message_text(text, parse_mode="HTML")
     log_bot_action(chat_id, "download", f"{track.get('title')}, job: {job_id}")

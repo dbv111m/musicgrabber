@@ -66,6 +66,38 @@ def main():
 
     assert app.concurrent_updates, "concurrent_updates выключен: медленный хендлер блокирует остальные кнопки"
 
+    # _watch_job уведомляет чат об итоге (иначе провал выглядит как зависание)
+    import asyncio
+
+    class FakeChat:
+        def __init__(self):
+            self.sent = []
+
+        async def send_message(self, text, **kw):
+            self.sent.append(text)
+
+    class FakeMessage:
+        def __init__(self):
+            self.chat = FakeChat()
+
+    async def run_case(status_json, expect):
+        msg = FakeMessage()
+        tb.get_job_status = lambda job_id: _async_ret(status_json)
+        await tb._watch_job("j", 1, msg, "T<i>tle", interval=0, max_polls=2)
+        if expect is None:
+            assert not msg.chat.sent, f"не должно быть отправок, а было: {msg.chat.sent}"
+        else:
+            assert msg.chat.sent and expect in msg.chat.sent[0], f"ожидалось '{expect}', отправлено: {msg.chat.sent}"
+            assert "<i>" not in msg.chat.sent[0], "HTML в title не экранирован"
+
+    async def _async_ret(v):
+        return v
+
+    asyncio.run(run_case({"status": "completed"}, "✅"))
+    asyncio.run(run_case({"status": "failed", "error": "DRM"}, "❌"))
+    asyncio.run(run_case({"status": "downloading"}, None))  # не завершился — молча
+    print("OK: watcher шлёт ✅/❌ по итогу задания")
+
     print(f"OK: все {len(all_callback_datas())} видов callback_data покрыты хендлерами, concurrent_updates включён")
 
 
