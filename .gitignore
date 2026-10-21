@@ -57,3 +57,4 @@ tests/.test-credentials
 tests/fixtures/mb_corpus_cache.json
 .env
 data/
+.venv-bot/

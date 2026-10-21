@@ -1,8 +1,11 @@
 # Overlay for the Telegram bot module: run together with the main compose file:
 #   docker compose -f docker-compose.yml -f docker-compose.telegram.yml up -d
 # Separate file on purpose: upstream's docker-compose.yml stays untouched.
+# С 2026-10-21 бот запускается на хосте (systemd --user musicgrabber-bot),
+# поэтому контейнерная версия за профилем: не стартует без --profile docker.
 services:
   telegram-bot:
+    profiles: ["docker"]
     build:
       context: .
       dockerfile: Dockerfile.telegram
