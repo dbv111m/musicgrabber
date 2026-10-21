@@ -1,0 +1,6 @@
+# Pass the API key (web password, single-user mode) into the app container.
+# Keep in sync with MUSICGRABBER_API_KEY for the telegram bot.
+services:
+  music-grabber:
+    environment:
+      - API_KEY=${API_KEY}

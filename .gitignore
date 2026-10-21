@@ -55,3 +55,5 @@ tests/.test-credentials
 # regenerable with tests/tools/refresh_mb_corpus.py. The small committed fixture
 # in tests/fixtures/mb_lookup_fixture.json is what the test suite actually reads.
 tests/fixtures/mb_corpus_cache.json
+.env
+data/
