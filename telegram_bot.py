@@ -219,7 +219,9 @@ def clear_user_context(chat_id: int):
 async def search_music(query: str, source: str, limit: int = 10) -> list:
     """Search music via API."""
     try:
-        async with httpx.AsyncClient(timeout=30) as client:
+        # 'all' waits for every source; a stalling one (zvu4no from some IPs)
+        # can push the total past 30s, which used to abort as an empty ReadTimeout.
+        async with httpx.AsyncClient(timeout=90) as client:
             response = await client.post(
                 f"{API_BASE_URL}/api/search",
                 json={"query": query, "source": source, "limit": limit},
@@ -367,10 +369,10 @@ def build_results_keyboard(results: list, page: int = 0, per_page: int = 5):
     for i, result in enumerate(results[start:end]):
         idx = start + i + 1
         source_emoji = {
-            "youtube": "🎞",
-            "soundcloud": "🎧",
+            "youtube": "▶️",
+            "soundcloud": "☁️",
             "monochrome": "💿",
-            "soulseek": "🎶",
+            "soulseek": "🎧",
         }.get(result.get("source", "youtube"), "🎵")
 
         quality_raw = result.get("quality", "N/A")
@@ -479,10 +481,10 @@ HELP_TEXT = """❓ <b>Помощь</b>
 4. Файл автоматически загрузится и придёт в чат
 
 <b>Источники:</b>
-🎞 YouTube
-🎧 SoundCloud
+▶️ YouTube
+☁️ SoundCloud
 💿 Monochrome (Lossless FLAC)
-🎶 Soulseek (если настроен)
+🎧 Soulseek (если настроен)
 
 <b>Настройки:</b>
 • Выбор источника поиска
@@ -771,8 +773,8 @@ async def callback_set_source(update: Update, context: ContextTypes.DEFAULT_TYPE
     save_user_settings(chat_id, settings)
 
     source_labels = {
-        "youtube": "YouTube 🎞",
-        "soundcloud": "SoundCloud 🎧",
+        "youtube": "YouTube ▶️",
+        "soundcloud": "SoundCloud ☁️",
         "monochrome": "Monochrome 💿",
         "all": "Все источники 🎯"
     }
