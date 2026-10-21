@@ -367,11 +367,11 @@ def build_results_keyboard(results: list, page: int = 0, per_page: int = 5):
     for i, result in enumerate(results[start:end]):
         idx = start + i + 1
         source_emoji = {
-            "youtube": "🔴",
-            "soundcloud": "🟠",
-            "monochrome": "🟣",
-            "soulseek": "🟢",
-        }.get(result.get("source", "youtube"), "⚪")
+            "youtube": "🎞",
+            "soundcloud": "🎧",
+            "monochrome": "💿",
+            "soulseek": "🎶",
+        }.get(result.get("source", "youtube"), "🎵")
 
         quality_raw = result.get("quality", "N/A")
         # Map quality to user-friendly names
@@ -479,10 +479,10 @@ HELP_TEXT = """❓ <b>Помощь</b>
 4. Файл автоматически загрузится и придёт в чат
 
 <b>Источники:</b>
-🔴 YouTube
-🟠 SoundCloud
-🟣 Monochrome (Lossless FLAC)
-🟢 Soulseek (если настроен)
+🎞 YouTube
+🎧 SoundCloud
+💿 Monochrome (Lossless FLAC)
+🎶 Soulseek (если настроен)
 
 <b>Настройки:</b>
 • Выбор источника поиска
@@ -771,9 +771,9 @@ async def callback_set_source(update: Update, context: ContextTypes.DEFAULT_TYPE
     save_user_settings(chat_id, settings)
 
     source_labels = {
-        "youtube": "YouTube 🔴",
-        "soundcloud": "SoundCloud 🟠",
-        "monochrome": "Monochrome 🟣",
+        "youtube": "YouTube 🎞",
+        "soundcloud": "SoundCloud 🎧",
+        "monochrome": "Monochrome 💿",
         "all": "Все источники 🎯"
     }
 
