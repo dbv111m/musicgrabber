@@ -316,6 +316,9 @@ SETTINGS_SCHEMA = {
     "webhook_url": {"type": "str", "default": "", "env": "WEBHOOK_URL"},
     # Downloads
     "max_concurrent_downloads": {"type": "int", "default": 3, "env": "MAX_CONCURRENT_DOWNLOADS"},
+    # Proxy for sources that need it (see proxy.py)
+    "proxy_enabled": {"type": "bool", "default": False, "env": "PROXY_ENABLED"},
+    "proxy_url": {"type": "str", "default": "", "env": "PROXY_URL", "sensitive": True},
     # Security
     "api_key": {"type": "str", "default": "", "env": "API_KEY", "sensitive": True},
 }

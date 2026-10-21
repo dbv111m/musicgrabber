@@ -62,7 +62,8 @@ def search_zvu4no(query: str, limit: int) -> list[dict]:
     """Search the current zvu4no host and return normalised result dicts."""
     try:
         url = f"{_BASE_URL}/tracks/{quote(query)}"
-        resp = httpx.get(url, headers=_HEADERS, timeout=TIMEOUT_ZVU4NO_SEARCH, follow_redirects=True)
+        from proxy import get_proxy
+        resp = httpx.get(url, headers=_HEADERS, timeout=TIMEOUT_ZVU4NO_SEARCH, follow_redirects=True, proxy=get_proxy())
         resp.raise_for_status()
 
         results = []
@@ -129,12 +130,14 @@ def download_zvu4no_track(download_url: str, output_path: Path) -> None:
     """Stream a zvu4no track directly to output_path."""
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
+    from proxy import get_proxy
     with httpx.stream(
         "GET",
         download_url,
         headers=_HEADERS,
         timeout=TIMEOUT_ZVU4NO_DOWNLOAD,
         follow_redirects=True,
+        proxy=get_proxy(),
     ) as resp:
         resp.raise_for_status()
         expected_size = int(resp.headers.get("content-length", 0))

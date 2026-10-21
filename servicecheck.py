@@ -101,6 +101,15 @@ def _check_soundcloud() -> tuple[bool, str]:
 
 def _check_zvu4no() -> tuple[bool, str]:
     from zvu4no import _BASE_URL
+    from proxy import get_proxy
+    proxy = get_proxy()
+    if proxy:
+        # zvu4no throttles datacenter IPs; the proxy leg is the one that matters.
+        try:
+            resp = httpx.get(_BASE_URL, headers=_HEADERS, timeout=SERVICECHECK_TIMEOUT, follow_redirects=True, proxy=proxy)
+            return (resp.status_code < 500, "" if resp.status_code < 500 else f"HTTP {resp.status_code}")
+        except Exception as exc:
+            return False, f"unreachable via proxy ({exc})"
     return _http_ok(_BASE_URL)
 
 
