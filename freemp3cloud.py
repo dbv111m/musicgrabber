@@ -14,6 +14,11 @@ nothing better exists.
 
 The download URL carries its own session_key + hash, so it works later from the
 download thread with no cookie needed; only the search step needs the session.
+
+The search AND-matches every query word and keeps some artists (e.g. the
+Beatles) out of the index entirely, so a natural "artist - title" query can
+return zero rows even though the title alone has plenty. search_freemp3cloud
+therefore retries with progressively relaxed query variants before giving up.
 """
 
 import hashlib
@@ -43,6 +48,7 @@ _RE_TITLE  = re.compile(r'class="s-title">(.*?)</div>', re.DOTALL)
 _RE_TIME   = re.compile(r'class="s-time">(.*?)</div>', re.DOTALL)
 _RE_HREF   = re.compile(r'class="downl">\s*<a href="(https://[^"]+\.mp3[^"]*)"', re.DOTALL)
 _RE_HQ     = re.compile(r'class="s-hq"')
+_RE_NO_RESULTS = re.compile(r'No results found for: (.*?)</span>', re.DOTALL)
 _RE_TAGS   = re.compile(r"<[^>]+>")
 
 
@@ -61,6 +67,34 @@ def _duration_to_secs(dur: str) -> int:
     except (ValueError, AttributeError):
         pass
     return 0
+
+
+def _relaxed_queries(query: str) -> list[str]:
+    """Query variants from strictest to loosest, deduped and capped.
+
+    The site requires every word to hit its index, so the artist name is the
+    usual killer (scrubbed/censored artists, featured guests, typos). Dropping
+    words from the front recovers "the beatles let it be" -> "let it be";
+    dropping the tail recovers queries with trailing junk ("adele hello xyzzy"
+    -> "adele hello"); the first-two-words variant catches long queries where
+    the title lives up front. Capped at 5 POSTs, only paid on empty results.
+    """
+    words = query.split()
+    candidates = [" ".join(words)]
+    if len(words) > 1:
+        candidates += [
+            " ".join(words[1:]),
+            " ".join(words[2:]),
+            " ".join(words[:-1]),
+            " ".join(words[:2]),
+        ]
+    seen: set[str] = set()
+    ordered: list[str] = []
+    for cand in candidates:
+        if cand and cand not in seen:
+            seen.add(cand)
+            ordered.append(cand)
+    return ordered[:5]
 
 
 def search_freemp3cloud(query: str, limit: int) -> list[dict]:
@@ -88,19 +122,31 @@ def search_freemp3cloud(query: str, limit: int) -> list[dict]:
                 return []
 
             # Step 2: post the search; cookie travels on the client automatically.
-            resp = client.post(
-                str(landing.url),
-                data={
-                    "searchSong": query,
-                    "__RequestVerificationToken": token_m.group(1),
-                },
-                headers={"Content-Type": "application/x-www-form-urlencoded"},
-            )
-            resp.raise_for_status()
+            # The token stays valid for repeated POSTs on the same session, so
+            # relaxed retries cost one extra roundtrip each, nothing more.
+            results_html = None
+            attempts = 0
+            for candidate in _relaxed_queries(query):
+                attempts += 1
+                resp = client.post(
+                    str(landing.url),
+                    data={
+                        "searchSong": candidate,
+                        "__RequestVerificationToken": token_m.group(1),
+                    },
+                    headers={"Content-Type": "application/x-www-form-urlencoded"},
+                )
+                resp.raise_for_status()
+                if '<div class="play-item">' in resp.text:
+                    results_html = resp.text
+                    break
+            if results_html is None:
+                print(f"freemp3cloud: no results for {query!r} after {attempts} attempt(s)")
+                return []
 
         results = []
         seen_urls = set()
-        for block in resp.text.split('<div class="play-item">')[1:]:
+        for block in results_html.split('<div class="play-item">')[1:]:
             artist_m = _RE_ARTIST.search(block)
             title_m  = _RE_TITLE.search(block)
             href_m   = _RE_HREF.search(block)
