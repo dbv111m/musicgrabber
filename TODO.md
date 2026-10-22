@@ -529,3 +529,17 @@ def broadcast_message(message: BroadcastRequest):
 - [Telegram Bot API](https://core.telegram.org/bots/api)
 - [Inline keyboards](https://docs.python-telegram-bot.org/en/20.7/telegram.inlinekeyboardbutton.html)
 - [Callback queries](https://docs.python-telegram-bot.org/en/20.7/telegram.callbackquery.html)
+
+## Возврат позже (2026-10-21)
+
+1. **FreeMp3Cloud: сломан парсер.** Сайт сменил разметку: POST поиска
+   отвечает 200, но блоков `play-item` больше нет (маркеры song/mp3 есть —
+   разметка другая). search_leg молча возвращает []. Чинить по сырой
+   разметке: `docker exec -w /app music-grabber python -c ...` (см.
+   check_sources.py). Поймано скриптом check_sources.py.
+2. **TG-бот: защита от спама (rate limits).** Бот публичный с 2026-10-21
+   (TELEGRAM_ALLOWED_USERS пуст), ограничения по числу запросов на
+   пользователя нет. Ограничить до того как найдут посторонние.
+3. **zvu4no медленный с IP основного VPS** (timeout при прямом заходе,
+   через резидентные прокси ~2с; поиск/докачка при этом проходят).
+   Вариант: прокси для источника — в приложении поддержки прокси нет.
