@@ -369,10 +369,10 @@ def build_results_keyboard(results: list, page: int = 0, per_page: int = 5):
     for i, result in enumerate(results[start:end]):
         idx = start + i + 1
         source_emoji = {
-            "youtube": "🎞",
-            "soundcloud": "🎧",
+            "youtube": "▶️",
+            "soundcloud": "☁️",
             "monochrome": "💿",
-            "soulseek": "🎶",
+            "soulseek": "🎧",
         }.get(result.get("source", "youtube"), "🎵")
 
         quality_raw = result.get("quality", "N/A")
@@ -481,10 +481,10 @@ HELP_TEXT = """❓ <b>Помощь</b>
 4. Файл автоматически загрузится и придёт в чат
 
 <b>Источники:</b>
-🎞 YouTube
-🎧 SoundCloud
+▶️ YouTube
+☁️ SoundCloud
 💿 Monochrome (Lossless FLAC)
-🎶 Soulseek (если настроен)
+🎧 Soulseek (если настроен)
 
 <b>Настройки:</b>
 • Выбор источника поиска
@@ -773,8 +773,8 @@ async def callback_set_source(update: Update, context: ContextTypes.DEFAULT_TYPE
     save_user_settings(chat_id, settings)
 
     source_labels = {
-        "youtube": "YouTube 🎞",
-        "soundcloud": "SoundCloud 🎧",
+        "youtube": "YouTube ▶️",
+        "soundcloud": "SoundCloud ☁️",
         "monochrome": "Monochrome 💿",
         "all": "Все источники 🎯"
     }
@@ -803,6 +803,31 @@ async def callback_set_quality(update: Update, context: ContextTypes.DEFAULT_TYP
     log_bot_action(chat_id, "settings", f"flac: {settings['convert_to_flac']}")
 
 
+async def _send_track_file(chat, job_id: str, job: Optional[dict], title: str) -> bool:
+    """Fetch the finished file from the app and send it into the chat.
+
+    Falls back to False (caller sends a text notice) on any failure, so a
+    broken file delivery never masks a successful download."""
+    try:
+        async with httpx.AsyncClient(timeout=300) as client:
+            resp = await client.get(
+                f"{API_BASE_URL}/api/jobs/{job_id}/download", headers=_api_headers()
+            )
+        if resp.status_code != 200:
+            logger.warning(f"job {job_id}: download endpoint returned {resp.status_code}")
+            return False
+        if len(resp.content) > 49 * 1024 * 1024:  # Telegram bot API sendDocument cap
+            logger.warning(f"job {job_id}: file {len(resp.content)} bytes over 50MB cap")
+            return False
+        filename = os.path.basename((job or {}).get("final_path") or "") or "track.mp3"
+        await chat.send_document(document=resp.content, filename=filename,
+                                 caption=f"🎵 {title}")
+        return True
+    except Exception as exc:
+        logger.warning(f"job {job_id}: sending file failed: {exc}")
+        return False
+
+
 async def _watch_job(job_id: str, chat_id: int, message, title: str,
                      interval: float = 5.0, max_polls: int = 180):
     """Poll a queued job until it completes/fails, then notify the chat.
@@ -819,6 +844,9 @@ async def _watch_job(job_id: str, chat_id: int, message, title: str,
             break
     safe_title = html.escape(title)
     if status == "completed":
+        delivered = await _send_track_file(message.chat, job_id, data, title)
+        if delivered:
+            return
         await message.chat.send_message(f"✅ <b>Загружено</b>\n\n🎵 {safe_title}", parse_mode="HTML")
     elif status == "failed":
         err = html.escape((data or {}).get("error") or "неизвестная ошибка")
