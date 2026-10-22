@@ -1,6 +1,9 @@
 # Pass the API key (web password, single-user mode) into the app container.
 # Keep in sync with MUSICGRABBER_API_KEY for the telegram bot.
+# PROXY_* — резидентный прокси для источников, режущих IP датацентров (zvu4no).
 services:
   music-grabber:
     environment:
       - API_KEY=${API_KEY}
+      - PROXY_ENABLED=${PROXY_ENABLED:-false}
+      - PROXY_URL=${PROXY_URL}

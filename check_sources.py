@@ -17,7 +17,7 @@ import httpx
 
 import servicecheck
 from search import SOURCE_REGISTRY
-from settings import get_setting
+from settings import get_setting, get_setting_bool
 
 QUERY = "the beatles let it be"
 RANGE_BYTES = 65536
@@ -76,6 +76,9 @@ def main() -> int:
     any_fail = False
     for sid, meta in SOURCE_REGISTRY.items():
         if only and sid not in only:
+            continue
+        if not get_setting_bool(f"source_{sid}_enabled", meta.get("default_enabled", True)):
+            print(f"{meta['label']:12} SKIP (выключен в настройках)")
             continue
         if sid == "soulseek":
             from slskd import slskd_enabled
