@@ -101,6 +101,12 @@ def init_telegram_tables():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
+    # delivered=1: файл реально ушёл в чат. Watcher живёт в памяти и умирает
+    # при рестарте контейнера — очередь (queue view) досылает completed&&undelivered.
+    try:
+        conn.execute("ALTER TABLE bot_jobs ADD COLUMN delivered INTEGER DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass  # колонка уже есть
     conn.commit()
     conn.close()
 
@@ -291,24 +297,48 @@ async def get_job_status(job_id: str) -> Optional[dict]:
 
 
 async def get_user_jobs(chat_id: int, limit: int = 10) -> list:
-    """Get this chat's jobs: own bot_jobs registry enriched with live status."""
+    """Get this chat's jobs: own bot_jobs registry enriched with live status.
+    Дубликаты одного трека (повторные загрузки/ретраи) схлопываются — берётся свежей."""
     conn = get_db_connection()
     rows = conn.execute(
-        "SELECT job_id, title, artist FROM bot_jobs WHERE chat_id = ? ORDER BY created_at DESC LIMIT ?",
-        (chat_id, limit),
+        "SELECT job_id, title, artist, delivered FROM bot_jobs WHERE chat_id = ? "
+        "ORDER BY created_at DESC LIMIT ?",
+        (chat_id, limit * 3),
     ).fetchall()
     conn.close()
 
     jobs = []
+    seen = set()
     for row in rows:
-        job = {"id": row["job_id"], "title": row["title"], "artist": row["artist"]}
+        key = ((row["artist"] or "").lower(), (row["title"] or "").lower())
+        if key in seen:
+            continue
+        seen.add(key)
+        job = {"id": row["job_id"], "title": row["title"], "artist": row["artist"],
+               "delivered": bool(row["delivered"])}
         status = await get_job_status(row["job_id"])
         if status:
             job.update({k: status.get(k) for k in ("status", "progress", "error") if status.get(k) is not None})
         else:
             job["status"] = "unknown"
         jobs.append(job)
+        if len(jobs) >= limit:
+            break
     return jobs
+
+
+async def _redeliver_missed(chat, jobs: list):
+    """Self-healing delivery: re-send completed files the chat never got
+    (in-memory watcher dies on container restart). Marks delivered via
+    _send_track_file."""
+    for job in jobs:
+        if job.get("status") != "completed" or job.get("delivered"):
+            continue
+        data = await get_job_status(job["id"])
+        if not data or data.get("status") != "completed":
+            continue
+        if await _send_track_file(chat, job["id"], data, job.get("title", "Unknown")):
+            log_bot_action(chat.id, "redeliver", job["id"])
 
 
 async def get_stats() -> Optional[dict]:
@@ -412,7 +442,6 @@ def build_queue_keyboard(jobs: list):
     """Build queue management keyboard."""
     keyboard = []
     for job in jobs[:5]:  # Max 5 jobs
-        job_id = job["id"][:8]
         status = job["status"]
         title = job.get("title", "Unknown")[:25]
 
@@ -425,13 +454,14 @@ def build_queue_keyboard(jobs: list):
 
         label = f"{status_emoji} {title}"
         if status == "failed":
-            callback = f"retry_{job_id}"
+            callback = f"retry_{job['id']}"  # полный id: retry-эндпоинт ищет по точному совпадению
         else:
             callback = "noop"
 
         keyboard.append([InlineKeyboardButton(label, callback_data=callback)])
 
-    keyboard.append([InlineKeyboardButton("🔄 Обновить", callback_data="queue_refresh")])
+    keyboard.append([InlineKeyboardButton("🔄 Обновить", callback_data="queue_refresh"),
+                     InlineKeyboardButton("🗑 Очистить", callback_data="queue_clear")])
     keyboard.append([InlineKeyboardButton("◀️ Главное меню", callback_data="menu_main")])
 
     return InlineKeyboardMarkup(keyboard)
@@ -548,6 +578,7 @@ async def cmd_queue(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     text = f"📋 <b>Мои загрузки</b>\n\nВсего: {len(jobs)}"
     await update.message.reply_text(text, parse_mode="HTML", reply_markup=build_queue_keyboard(jobs))
+    asyncio.create_task(_redeliver_missed(update.effective_chat, jobs))
     log_bot_action(chat_id, "queue_view")
 
 
@@ -712,6 +743,7 @@ async def callback_queue(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     text = f"📋 <b>Мои загрузки</b>\n\nВсего: {len(jobs)}"
     await query.edit_message_text(text, parse_mode="HTML", reply_markup=build_queue_keyboard(jobs))
+    asyncio.create_task(_redeliver_missed(query.message.chat, jobs))
 
 
 async def callback_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -822,6 +854,10 @@ async def _send_track_file(chat, job_id: str, job: Optional[dict], title: str) -
         filename = os.path.basename((job or {}).get("final_path") or "") or "track.mp3"
         await chat.send_document(document=resp.content, filename=filename,
                                  caption=f"🎵 {title}")
+        conn = get_db_connection()
+        conn.execute("UPDATE bot_jobs SET delivered = 1 WHERE job_id = ?", (job_id,))
+        conn.commit()
+        conn.close()
         return True
     except Exception as exc:
         logger.warning(f"job {job_id}: sending file failed: {exc}")
@@ -970,14 +1006,35 @@ async def callback_queue_refresh(update: Update, context: ContextTypes.DEFAULT_T
         await query.edit_message_text(text, parse_mode="HTML", reply_markup=build_queue_keyboard(jobs))
     except Exception:
         pass  # nothing changed -> Telegram rejects identical edits
+    asyncio.create_task(_redeliver_missed(query.message.chat, jobs))
+
+
+async def callback_queue_clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Drop this chat's job registry (app-side library/downloads untouched)."""
+    query = update.callback_query
+    chat_id = query.message.chat_id
+    conn = get_db_connection()
+    conn.execute("DELETE FROM bot_jobs WHERE chat_id = ?", (chat_id,))
+    conn.commit()
+    conn.close()
+    await query.answer("Очередь очищена")
+    await query.edit_message_text(
+        "🗑 <b>Очередь очищена</b>\n\nИстория загрузок убрана, файлы в библиотеке не тронуты.",
+        parse_mode="HTML")
+    log_bot_action(chat_id, "queue_clear")
 
 
 async def callback_retry(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Retry a failed job via the app API, then refresh the queue view."""
+    """Retry a failed job via the app API and watch it to deliver the file."""
     query = update.callback_query
     chat_id = query.message.chat_id
     job_id = query.data.split("_", 1)[1]
     await query.answer()
+
+    conn = get_db_connection()
+    row = conn.execute("SELECT title FROM bot_jobs WHERE job_id = ?", (job_id,)).fetchone()
+    conn.close()
+    title = (row["title"] if row else None) or "Трек"
 
     try:
         async with httpx.AsyncClient(timeout=30) as client:
@@ -986,10 +1043,16 @@ async def callback_retry(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 headers=_api_headers(),
             )
             response.raise_for_status()
-            await query.edit_message_text("🔄 Задача поставлена на повтор.", parse_mode="HTML")
     except Exception as e:
         logger.error(f"Retry error: {e}")
         await query.edit_message_text(f"❌ Не удалось повторить: {e}", parse_mode="HTML")
+        return
+
+    asyncio.create_task(_watch_job(job_id, chat_id, query.message, title))
+    await query.edit_message_text(
+        f"🔄 <b>Повтор запущен</b>\n\n🎵 {html.escape(title)}\n\nПридёт уведомление о результате.",
+        parse_mode="HTML")
+    log_bot_action(chat_id, "retry", job_id)
 
 
 # =============================================================================
@@ -1040,6 +1103,7 @@ def setup_bot():
     app.add_handler(CallbackQueryHandler(callback_page, pattern="^page_\\d+$"))
     app.add_handler(CallbackQueryHandler(callback_search_cancel, pattern="^search_cancel$"))
     app.add_handler(CallbackQueryHandler(callback_queue_refresh, pattern="^queue_refresh$"))
+    app.add_handler(CallbackQueryHandler(callback_queue_clear, pattern="^queue_clear$"))
     app.add_handler(CallbackQueryHandler(callback_retry, pattern="^retry_"))
     app.add_handler(CallbackQueryHandler(callback_noop, pattern="^set_folder$|^cancel_|^noop$"))
 
