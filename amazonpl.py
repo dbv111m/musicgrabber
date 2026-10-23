@@ -356,7 +356,9 @@ def main() -> None:
 
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
+            browser = p.chromium.connect_over_cdp(
+                os.environ.get("BROWSER_ENDPOINT", "http://host.docker.internal:3000")
+            )
             context = browser.new_context(
                 user_agent=(
                     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "

@@ -3,10 +3,12 @@ services:
     build: .
     container_name: music-grabber
     restart: unless-stopped
-    # Browser fallbacks need shared memory: Spotify playlists and Monochrome authentication can fail without this.
-    shm_size: '2gb'
+    # Браузер теперь внешний (browserless) — shared memory не нужен большим.
+    shm_size: '256mb'
     ports:
       - "38274:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       # Mount your music library - adjust path as needed
       - /mnt/music:/music
@@ -33,6 +35,8 @@ services:
       # - PGID=1000
       # Optional: slskd downloads path (if using Soulseek)
       - SLSKD_DOWNLOADS_PATH=/downloads
+      # External browserless (CDP) for Spotify/Amazon headless scraping
+      - BROWSER_ENDPOINT=http://host.docker.internal:3000
       # Optional: increase timeouts for long tracks (DJ mixes, symphonies) or slow connections
       # - TIMEOUT_YTDLP_DOWNLOAD=300      # yt-dlp download (default 5 min)
       # - TIMEOUT_FFMPEG_CONVERT=120      # ffmpeg format conversion (default 2 min)
