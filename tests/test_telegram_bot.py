@@ -30,6 +30,12 @@ def tmp_db(tmp_path):
     db = tmp_path / "test_bot.db"
     os.environ["TELEGRAM_BOT_DB"] = str(db)
     telegram_bot.init_telegram_tables()
+    # Reset cache stats to clean state
+    conn = telegram_bot.get_db_connection()
+    conn.execute("DELETE FROM cache_stats")
+    conn.execute("INSERT INTO cache_stats (id, search_requests, cache_hits) VALUES (1, 0, 0)")
+    conn.commit()
+    conn.close()
     yield db
 
 
@@ -261,3 +267,84 @@ def test_clear_expired_cache_does_not_remove_cdn_links(tmp_db):
     conn.close()
     telegram_bot.clear_expired_cache()
     assert telegram_bot.get_cached_cdn_link("v1") == "cdn"
+
+
+# ============================================================================
+# Job cleanup
+# ============================================================================
+
+def test_cleanup_old_jobs_removes_old(tmp_db):
+    import time as _time
+    import uuid
+    uid = str(uuid.uuid4())[:8]
+    conn = telegram_bot.get_db_connection()
+    # Insert an old job (31 days ago)
+    old_ts = _time.time() - 31 * 86400
+    conn.execute(
+        "INSERT INTO bot_jobs (job_id, chat_id, title, artist, video_id, query, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, datetime(?, 'unixepoch'))",
+        (f"old_job_{uid}", 123, "Old Track", "Old Artist", "old_video", "old query", old_ts),
+    )
+    # Insert a recent job
+    recent_ts = _time.time()
+    conn.execute(
+        "INSERT INTO bot_jobs (job_id, chat_id, title, artist, video_id, query, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, datetime(?, 'unixepoch'))",
+        (f"recent_job_{uid}", 123, "Recent Track", "Recent Artist", "recent_video", "recent query", recent_ts),
+    )
+    conn.commit()
+    conn.close()
+
+    deleted = telegram_bot.cleanup_old_jobs()
+    assert deleted == 1
+
+    # Verify recent job still exists
+    conn = telegram_bot.get_db_connection()
+    row = conn.execute(
+        "SELECT job_id FROM bot_jobs WHERE job_id = ?", (f"recent_job_{uid}",)
+    ).fetchone()
+    conn.close()
+    assert row is not None
+
+
+def test_cleanup_old_jobs_keeps_recent(tmp_db):
+    import time as _time
+    import uuid
+    uid = str(uuid.uuid4())[:8]
+    conn = telegram_bot.get_db_connection()
+    recent_ts = _time.time()
+    conn.execute(
+        "INSERT INTO bot_jobs (job_id, chat_id, title, artist, video_id, query, created_at) "
+        "VALUES (?, ?, ?, ?, ?, ?, datetime(?, 'unixepoch'))",
+        (f"recent_job_{uid}", 123, "Recent Track", "Recent Artist", "recent_video", "recent query", recent_ts),
+    )
+    conn.commit()
+    conn.close()
+
+    deleted = telegram_bot.cleanup_old_jobs()
+    assert deleted == 0
+
+
+# ============================================================================
+# Cache stats
+# ============================================================================
+
+def test_record_search_request_and_stats(tmp_db):
+    telegram_bot.record_search_request(cache_hit=True)
+    telegram_bot.record_search_request(cache_hit=True)
+    telegram_bot.record_search_request(cache_hit=False)
+
+    stats = telegram_bot.get_cache_stats()
+    assert stats["search_requests"] == 3
+    assert stats["cache_hits"] == 2
+    assert stats["cache_misses"] == 1
+    assert stats["hit_rate"] == pytest.approx(66.67, rel=0.01)
+
+
+def test_record_search_request_empty_stats(tmp_db):
+    stats = telegram_bot.get_cache_stats()
+    assert stats["search_requests"] == 0
+    assert stats["cache_hits"] == 0
+    assert stats["cache_misses"] == 0
+    assert stats["hit_rate"] == 0.0
+

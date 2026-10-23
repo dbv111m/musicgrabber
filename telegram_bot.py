@@ -12,6 +12,7 @@ import logging
 import math
 import os
 import re
+import signal
 import sqlite3
 from datetime import datetime, timezone
 from typing import Any
@@ -247,6 +248,21 @@ def init_telegram_tables():
             conn.execute("ALTER TABLE cdn_links_new RENAME TO cdn_links")
     except Exception:
         pass
+    # Cache hit/miss statistics
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS cache_stats (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            search_requests INTEGER DEFAULT 0,
+            cache_hits INTEGER DEFAULT 0,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    # Ensure a single row exists
+    conn.execute("""
+        INSERT INTO cache_stats (id, search_requests, cache_hits)
+        SELECT 1, 0, 0
+        WHERE NOT EXISTS (SELECT 1 FROM cache_stats WHERE id = 1)
+    """)
     conn.commit()
     conn.close()
 
@@ -755,6 +771,71 @@ def clear_expired_cache() -> None:
         logger.warning(f"Cache cleanup failed: {exc}")
 
 
+def record_search_request(cache_hit: bool) -> None:
+    """Record a search request and whether it was served from cache."""
+    try:
+        conn = get_db_connection()
+        conn.execute(
+            "UPDATE cache_stats SET search_requests = search_requests + 1, "
+            "cache_hits = cache_hits + ?, updated_at = CURRENT_TIMESTAMP "
+            "WHERE id = 1",
+            (1 if cache_hit else 0,),
+        )
+        conn.commit()
+        conn.close()
+    except Exception as exc:
+        logger.warning(f"Failed to record search request: {exc}")
+
+
+def get_cache_stats() -> dict:
+    """Return cache hit/miss statistics."""
+    try:
+        conn = get_db_connection()
+        row = conn.execute(
+            "SELECT search_requests, cache_hits FROM cache_stats WHERE id = 1"
+        ).fetchone()
+        conn.close()
+        if row:
+            total = row["search_requests"]
+            hits = row["cache_hits"]
+            hit_rate = (hits / total * 100) if total > 0 else 0.0
+            return {
+                "search_requests": total,
+                "cache_hits": hits,
+                "cache_misses": total - hits,
+                "hit_rate": hit_rate,
+            }
+    except Exception as exc:
+        logger.warning(f"Failed to read cache stats: {exc}")
+    return {"search_requests": 0, "cache_hits": 0, "cache_misses": 0, "hit_rate": 0.0}
+
+
+# =============================================================================
+# Job registry cleanup
+# =============================================================================
+
+JOB_CLEANUP_DAYS = int(os.getenv("TELEGRAM_JOB_CLEANUP_DAYS", "30"))
+
+
+def cleanup_old_jobs() -> int:
+    """Remove bot_jobs entries older than JOB_CLEANUP_DAYS days.
+    Returns number of deleted rows."""
+    cutoff = _now() - JOB_CLEANUP_DAYS * 3600 * 24
+    try:
+        conn = get_db_connection()
+        cursor = conn.execute(
+            "DELETE FROM bot_jobs WHERE created_at < datetime(?, 'unixepoch')",
+            (cutoff,),
+        )
+        deleted = cursor.rowcount or 0
+        conn.commit()
+        conn.close()
+        return deleted
+    except Exception as exc:
+        logger.warning(f"Failed to cleanup old jobs: {exc}")
+        return 0
+
+
 # =============================================================================
 # Context management
 # =============================================================================
@@ -1145,6 +1226,7 @@ HELP_TEXT = """❓ <b>Помощь</b>
 /whoami - Ваш chat_id
 /ping - Проверка работоспособности
 /cancel - Отмена текущего действия
+/clearcache - Очистить кэш поиска (админ)
 
 <b>Как пользоваться:</b>
 1. Нажмите "🎵 Поиск музыки"
@@ -1354,6 +1436,11 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     storage_gb = stats.get("storage_bytes", 0) / (1024**3)
     file_count = stats.get("file_count", 0)
 
+    cache = get_cache_stats()
+    cache_hits = cache["cache_hits"]
+    cache_misses = cache["cache_misses"]
+    cache_rate = cache["hit_rate"]
+
     success_rate = (completed / total * 100) if total > 0 else 0
 
     text = f"""📊 <b>Статистика</b>
@@ -1364,6 +1451,11 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 📦 Место на диске: {storage_gb:.2f} GB
 🎧 Треков: {file_count}
+
+🔍 Поисковый кэш:
+   Всего запросов: {cache['search_requests']}
+   Из кэша: {cache_hits} ({cache_rate:.1f}%)
+   Прямых API-запросов: {cache_misses}
 
 Остальная статистика доступна в веб-интерфейсе."""
 
@@ -1401,6 +1493,44 @@ async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     assert message is not None
     clear_user_context(chat_id)
     await message.reply_text("❌ Отменено.", reply_markup=build_main_keyboard())
+
+
+async def cmd_clearcache(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /clearcache command — clear search and CDN caches (admin only)."""
+    chat = update.effective_chat
+    assert chat is not None
+    chat_id = chat.id
+    message = update.message
+    assert message is not None
+
+    if not is_admin(chat_id):
+        await message.reply_text("❌ Только для администратора.")
+        return
+
+    # Access check
+    allowed, reason = check_access(chat_id, "clearcache")
+    if not allowed:
+        await message.reply_text(f"⏳ {reason}")
+        return
+    record_action(chat_id, "clearcache")
+
+    try:
+        conn = get_db_connection()
+        conn.execute("DELETE FROM search_cache")
+        conn.execute("DELETE FROM cdn_links")
+        conn.execute(
+            "UPDATE cache_stats SET search_requests = 0, cache_hits = 0, "
+            "updated_at = CURRENT_TIMESTAMP WHERE id = 1"
+        )
+        conn.commit()
+        conn.close()
+    except Exception as exc:
+        logger.error(f"Clear cache error: {exc}")
+        await message.reply_text("❌ Не удалось очистить кэш.")
+        return
+
+    await message.reply_text("🗑 Кэш поиска и CDN-ссылок очищен.", parse_mode="HTML")
+    log_bot_action(chat_id, "clearcache")
 
 
 async def cmd_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1720,9 +1850,11 @@ async def handle_search_query(update: Update, context: ContextTypes.DEFAULT_TYPE
     if cached:
         results = cached
         used_query = query
+        record_search_request(cache_hit=True)
         logger.info(f"Search cache hit for query {query!r}: {len(results)} results")
     else:
         results, used_query = await search_music_fuzzy(query, source, limit=20)
+        record_search_request(cache_hit=False)
         if results:
             save_search_results(used_query, source, results)
 
@@ -2055,6 +2187,14 @@ async def _send_track_file(chat, job_id: str, job: dict | None, title: str) -> b
             if tmp_path is None:
                 # CDN link is dead: remove from cache and do a fresh search
                 logger.warning(f"job {job_id}: CDN link dead, refreshing via search")
+                try:
+                    await chat.send_message(
+                        "⚠️ <b>Ссылка на трек устарела</b>\n\n"
+                        "Обновляю источник, подождите немного...",
+                        parse_mode="HTML",
+                    )
+                except Exception:
+                    pass
                 try:
                     conn = get_db_connection()
                     conn.execute("DELETE FROM cdn_links WHERE video_id = ?", (video_id,))
@@ -2478,6 +2618,10 @@ def setup_bot():
     init_telegram_tables()
     # Clean expired cache entries
     clear_expired_cache()
+    # Remove old job registry entries
+    deleted_jobs = cleanup_old_jobs()
+    if deleted_jobs:
+        logger.info(f"Cleaned up {deleted_jobs} old job(s) from registry")
 
     # Create application. concurrent_updates: a slow handler (httpx to the app,
     # up to 30s timeout) must not block answering other button presses.
@@ -2502,6 +2646,7 @@ def setup_bot():
     app.add_handler(CommandHandler("debug", cmd_debug))
     app.add_handler(CommandHandler("broadcast", cmd_broadcast))
     app.add_handler(CommandHandler("cancel", cmd_cancel))
+    app.add_handler(CommandHandler("clearcache", cmd_clearcache))
 
     # Message handlers
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_search_query))
@@ -2531,18 +2676,31 @@ def setup_bot():
 
 
 def run_bot():
-    """Run bot (blocking, polling mode)."""
+    """Run bot (blocking, polling mode) with graceful shutdown on SIGTERM/SIGINT."""
     app = setup_bot()
     if not app:
         logger.error("Failed to setup bot")
         return
 
+    _shutdown_requested = False
+
+    def _handle_signal(signum, frame):
+        nonlocal _shutdown_requested
+        logger.info(f"Received signal {signum}, shutting down gracefully...")
+        _shutdown_requested = True
+
+    # Register signal handlers for graceful shutdown
+    signal.signal(signal.SIGTERM, _handle_signal)
+    signal.signal(signal.SIGINT, _handle_signal)
+
     logger.info("Starting MusicGrabber Telegram bot (polling)...")
     app.run_polling(allowed_updates=["message", "callback_query"])
 
+    logger.info("Bot polling stopped.")
+
 
 async def run_bot_async():
-    """Run bot asynchronously (for integration with FastAPI)."""
+    """Run bot asynchronously (for integration with FastAPI) with graceful shutdown."""
     app = setup_bot()
     if not app:
         logger.error("Failed to setup bot")
@@ -2552,6 +2710,17 @@ async def run_bot_async():
     await app.initialize()
     await app.start()
     await app.updater.start_polling(drop_pending_updates=True)
+
+    # Keep running until cancelled
+    try:
+        while True:
+            await asyncio.sleep(3600)
+    except asyncio.CancelledError:
+        logger.info("Async bot cancelled, stopping gracefully...")
+        await app.updater.stop()
+        await app.stop()
+        await app.shutdown()
+        logger.info("Async bot stopped.")
 
 
 def run_bot_process():

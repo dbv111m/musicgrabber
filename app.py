@@ -3231,6 +3231,8 @@ def cancel_job(job_id: str, http_request: Request):
         conn.commit()
 
     return {"job_id": job_id, "status": "cancelled"}
+
+
 def _rescue_context(job_id: str, user_id: str | None, is_admin: bool) -> tuple[dict, dict]:
     """Load an owned failed job and its durable automatic-acquisition target."""
     with db_conn() as conn:
