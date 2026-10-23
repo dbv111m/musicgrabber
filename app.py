@@ -3197,6 +3197,40 @@ def retry_job(job_id: str, http_request: Request):
     return {"job_id": job_id, "status": "queued"}
 
 
+@app.post("/api/jobs/{job_id}/cancel")
+def cancel_job(job_id: str, http_request: Request):
+    """Cancel a queued or downloading job."""
+    user_id = http_request.state.user_id
+    is_admin = http_request.state.is_admin
+    with db_conn() as conn:
+        conn.row_factory = sqlite3.Row
+        _scope_frag, _scope_params = _user_scope(user_id, is_admin)
+        cursor = conn.execute(
+            f"SELECT * FROM jobs WHERE id = ? AND {_scope_frag}",
+            (job_id, *_scope_params)
+        )
+        row = cursor.fetchone()
+
+        if not row:
+            raise HTTPException(status_code=404, detail="Job not found")
+
+        job = dict(row)
+
+        # Only queued/downloading jobs can be cancelled
+        if job["status"] not in ("queued", "downloading"):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Cannot cancel job with status '{job['status']}'"
+            )
+
+        conn.execute(
+            "UPDATE jobs SET status = 'cancelled', error = 'cancelled by user', "
+            "completed_at = datetime('now') WHERE id = ?",
+            (job_id,)
+        )
+        conn.commit()
+
+    return {"job_id": job_id, "status": "cancelled"}
 def _rescue_context(job_id: str, user_id: str | None, is_admin: bool) -> tuple[dict, dict]:
     """Load an owned failed job and its durable automatic-acquisition target."""
     with db_conn() as conn:

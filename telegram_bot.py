@@ -687,7 +687,9 @@ def build_queue_keyboard(jobs: list):
 
         label = f"{status_emoji} {title}"
         if status == "failed":
-            callback = f"retry_{job['id']}"  # полный id: retry-эндпоинт ищет по точному совпадению
+            callback = f"retry_{job['id']}"  # retry failed job
+        elif status in ("queued", "downloading"):
+            callback = f"cancel_{job['id']}"  # cancel active job
         else:
             callback = "noop"
 
@@ -1765,6 +1767,39 @@ async def callback_retry(update: Update, context: ContextTypes.DEFAULT_TYPE):
     log_bot_action(chat_id, "retry", job_id)
 
 
+async def callback_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Cancel a queued/downloading job via the app API."""
+    query = update.callback_query
+    chat_id = query.message.chat_id
+
+    # Access check
+    allowed, reason = check_access(chat_id, "download")
+    if not allowed:
+        await query.answer(f"⏳ {reason}")
+        return
+    record_action(chat_id, "download")
+
+    job_id = query.data.split("_", 1)[1]
+    await query.answer()
+
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.post(
+                f"{API_BASE_URL}/api/jobs/{job_id}/cancel",
+                headers=_api_headers(),
+            )
+            response.raise_for_status()
+    except Exception as e:
+        logger.error(f"Cancel error: {e}")
+        await query.edit_message_text(f"❌ Не удалось отменить: {e}", parse_mode="HTML")
+        return
+
+    await query.edit_message_text(
+        f"🛑 <b>Задание отменено</b>\n\n🎵 Job: {job_id}",
+        parse_mode="HTML")
+    log_bot_action(chat_id, "cancel", job_id)
+
+
 # =============================================================================
 # Bot setup
 # =============================================================================
@@ -1823,7 +1858,8 @@ def setup_bot():
     app.add_handler(CallbackQueryHandler(callback_queue_refresh, pattern="^queue_refresh$"))
     app.add_handler(CallbackQueryHandler(callback_queue_clear, pattern="^queue_clear$"))
     app.add_handler(CallbackQueryHandler(callback_retry, pattern="^retry_"))
-    app.add_handler(CallbackQueryHandler(callback_noop, pattern="^cancel_|^noop$"))
+    app.add_handler(CallbackQueryHandler(callback_cancel, pattern="^cancel_"))
+    app.add_handler(CallbackQueryHandler(callback_noop, pattern="^noop$"))
 
     return app
 
