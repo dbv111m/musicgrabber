@@ -615,6 +615,155 @@ def rerank_results(results: list[dict], query: str) -> list[dict]:
     return sorted(results, key=score, reverse=True)
 
 
+# =============================================================================
+# Search result deduplication across sources
+# =============================================================================
+
+SOURCE_PRIORITY = {
+    "monochrome": 0,   # Lossless FLAC — best quality
+    "soundcloud": 1,
+    "youtube": 2,
+    "freemp3cloud": 3,
+}
+
+FUZZY_DEDUP_THRESHOLD = int(os.getenv("TELEGRAM_FUZZY_DEDUP_THRESHOLD", "85"))
+
+# Dedup log: separate file, append mode, JSON lines for easy parsing
+DEDUP_LOG_PATH = os.getenv("TELEGRAM_DEDUP_LOG", "telegram_bot_dedup.log")
+dedup_logger = logging.getLogger("telegram_bot.dedup")
+dedup_logger.setLevel(logging.INFO)
+_dedup_handler_added = False
+
+
+def _ensure_dedup_handler() -> None:
+    """Add a file handler to the dedup logger once.
+
+    Reads TELEGRAM_DEDUP_LOG dynamically so tests can redirect the log to a
+    temp file after the module has already been imported.
+    """
+    global _dedup_handler_added
+    if not _dedup_handler_added:
+        try:
+            log_path = os.getenv("TELEGRAM_DEDUP_LOG", "telegram_bot_dedup.log")
+            fh = logging.FileHandler(log_path, encoding="utf-8")
+            fh.setFormatter(logging.Formatter("%(asctime)s %(levelname)s %(message)s"))
+            dedup_logger.addHandler(fh)
+            dedup_logger.propagate = False
+            _dedup_handler_added = True
+        except Exception:
+            pass  # If we can't open the log, dedup logging is silently skipped
+
+
+def _result_key(r: dict) -> tuple[str, str]:
+    """Normalized (artist, title) key for exact dedup."""
+    artist = (r.get("artist") or r.get("channel") or "").strip().lower()
+    title = (r.get("title") or "").strip().lower()
+    return (artist, title)
+
+
+def _combined_text(r: dict) -> str:
+    """Combined artist + title for fuzzy comparison."""
+    artist = r.get("artist") or r.get("channel") or ""
+    title = r.get("title") or ""
+    return f"{artist} {title}".lower()
+
+
+def _source_rank(r: dict) -> int:
+    """Lower number = preferred source."""
+    return SOURCE_PRIORITY.get(r.get("source", "youtube"), 99)
+
+
+def _sort_key(r: dict) -> tuple[float, int, int]:
+    """Sort: best relevance first, then preferred source, then title length."""
+    return (
+        -float(r.get("relevance_score") or 0),
+        _source_rank(r),
+        len(_combined_text(r)),
+    )
+
+
+def _log_dedup(query: str, before: int, after: int, removed: list[dict]) -> None:
+    """Write dedup details to the separate log file."""
+    _ensure_dedup_handler()
+    if not removed:
+        return
+    dedup_logger.info(
+        "query=%r before=%d after=%d removed=%d",
+        query, before, after, len(removed),
+    )
+    for r in removed:
+        dedup_logger.info(
+            "  removed: video_id=%s source=%s artist=%r title=%r relevance=%.2f reason=%s kept=%s",
+            r.get("video_id"),
+            r.get("source"),
+            r.get("artist") or r.get("channel"),
+            r.get("title"),
+            float(r.get("relevance_score") or 0),
+            r.get("_dedup_reason", ""),
+            r.get("_dedup_kept_video_id", ""),
+        )
+
+
+def dedup_search_results(results: list[dict], query: str = "") -> tuple[list[dict], list[dict]]:
+    """De-duplicate search results across sources.
+
+    Pass 1: exact match on (artist, title) — keep highest relevance_score,
+      tie-break by preferred source (monochrome > soundcloud > youtube > freemp3cloud).
+    Pass 2: fuzzy match with rapidfuzz token_set_ratio > FUZZY_DEDUP_THRESHOLD
+      on combined "artist title" — keep the same winner rules.
+
+    Returns (deduplicated_results, removed_details) where removed_details
+    contains dicts with the original result plus _dedup_reason and
+    _dedup_kept_video_id for debugging.
+    """
+    if not results:
+        return [], []
+
+    # Sort so the best candidate for each group comes first
+    ordered = sorted(results, key=_sort_key)
+
+    kept: list[dict] = []
+    removed: list[dict] = []
+    seen_keys: set[tuple[str, str]] = set()
+    kept_texts: list[str] = []  # combined texts of kept results (for fuzzy)
+
+    for r in ordered:
+        key = _result_key(r)
+
+        # Pass 1: exact (artist, title) match
+        if key in seen_keys and key != ("", ""):
+            r2 = dict(r)
+            r2["_dedup_reason"] = "exact_artist_title"
+            r2["_dedup_kept_video_id"] = next(
+                (k.get("video_id") for k in kept if _result_key(k) == key), ""
+            )
+            removed.append(r2)
+            continue
+        seen_keys.add(key)
+
+        # Pass 2: fuzzy match against already kept results
+        combined = _combined_text(r)
+        fuzzy_match = None
+        for kept_text in kept_texts:
+            if fuzz.token_set_ratio(combined, kept_text) >= FUZZY_DEDUP_THRESHOLD:
+                fuzzy_match = kept_text
+                break
+        if fuzzy_match is not None:
+            r2 = dict(r)
+            r2["_dedup_reason"] = f"fuzzy_match:{fuzzy_match[:40]}"
+            r2["_dedup_kept_video_id"] = next(
+                (k.get("video_id") for k in kept if _combined_text(k) == fuzzy_match), ""
+            )
+            removed.append(r2)
+            continue
+
+        kept_texts.append(combined)
+        kept.append(r)
+
+    _log_dedup(query, len(results), len(kept), removed)
+    return kept, removed
+
+
 def search_with_fallback(query: str, source: str, limit: int = 20) -> tuple[list[dict], str]:
     """Search with fuzzy fallback: if the original query returns empty,
     try normalized and reduced variants. Re-ranks results by fuzzy similarity.
@@ -1851,11 +2000,26 @@ async def handle_search_query(update: Update, context: ContextTypes.DEFAULT_TYPE
         results = cached
         used_query = query
         record_search_request(cache_hit=True)
+        # De-duplicate cached results too (in case they were cached before dedup)
+        if results:
+            results, removed = dedup_search_results(results, query)
+            if removed:
+                logger.info(
+                    f"Search dedup (cached) for query {query!r}: {len(results)} kept, "
+                    f"{len(removed)} removed as duplicates"
+                )
         logger.info(f"Search cache hit for query {query!r}: {len(results)} results")
     else:
         results, used_query = await search_music_fuzzy(query, source, limit=20)
         record_search_request(cache_hit=False)
+        # De-duplicate across sources before caching and showing to user
         if results:
+            results, removed = dedup_search_results(results, query)
+            if removed:
+                logger.info(
+                    f"Search dedup for query {query!r}: {len(results)} kept, "
+                    f"{len(removed)} removed as duplicates"
+                )
             save_search_results(used_query, source, results)
 
     if not results:

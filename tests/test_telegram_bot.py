@@ -348,3 +348,139 @@ def test_record_search_request_empty_stats(tmp_db):
     assert stats["cache_misses"] == 0
     assert stats["hit_rate"] == 0.0
 
+
+# ============================================================================
+# Search result deduplication
+# ============================================================================
+
+def _mk_result(video_id: str, title: str, artist: str, source: str,
+               relevance_score: float = 50.0) -> dict:
+    return {
+        "video_id": video_id,
+        "title": title,
+        "artist": artist,
+        "source": source,
+        "source_url": "",
+        "quality": "",
+        "duration": "",
+        "relevance_score": relevance_score,
+    }
+
+
+def test_dedup_exact_artist_title_keeps_highest_relevance():
+    results = [
+        _mk_result("v1", "Let It Be", "The Beatles", "youtube", 40.0),
+        _mk_result("v2", "Let It Be", "The Beatles", "monochrome", 90.0),
+        _mk_result("v3", "Let It Be", "The Beatles", "soundcloud", 70.0),
+    ]
+    kept, removed = telegram_bot.dedup_search_results(results, "let it be")
+    assert len(kept) == 1
+    assert kept[0]["video_id"] == "v2"
+    assert kept[0]["relevance_score"] == 90.0
+    assert len(removed) == 2
+    removed_ids = {r["video_id"] for r in removed}
+    assert removed_ids == {"v1", "v3"}
+
+
+def test_dedup_exact_artist_title_keeps_preferred_source_on_tie():
+    results = [
+        _mk_result("v1", "Let It Be", "The Beatles", "youtube", 50.0),
+        _mk_result("v2", "Let It Be", "The Beatles", "soundcloud", 50.0),
+        _mk_result("v3", "Let It Be", "The Beatles", "monochrome", 50.0),
+    ]
+    kept, removed = telegram_bot.dedup_search_results(results, "let it be")
+    assert len(kept) == 1
+    assert kept[0]["video_id"] == "v3"  # monochrome preferred
+    assert kept[0]["source"] == "monochrome"
+    assert len(removed) == 2
+
+
+def test_dedup_different_titles_are_kept():
+    results = [
+        _mk_result("v1", "Let It Be", "The Beatles", "youtube", 50.0),
+        _mk_result("v2", "Hey Jude", "The Beatles", "youtube", 50.0),
+    ]
+    kept, removed = telegram_bot.dedup_search_results(results, "beatles")
+    assert len(kept) == 2
+    assert len(removed) == 0
+
+
+def test_dedup_empty_results():
+    kept, removed = telegram_bot.dedup_search_results([], "query")
+    assert kept == []
+    assert removed == []
+
+
+def test_dedup_single_result():
+    results = [_mk_result("v1", "Let It Be", "The Beatles", "youtube", 50.0)]
+    kept, removed = telegram_bot.dedup_search_results(results, "query")
+    assert len(kept) == 1
+    assert len(removed) == 0
+
+
+def test_dedup_fuzzy_similar_titles(tmp_path):
+    # "The Beatles - Let It Be" vs "Beatles - Let It Be" should be fuzzy-dupes
+    results = [
+        _mk_result("v1", "Let It Be", "The Beatles", "youtube", 90.0),
+        _mk_result("v2", "Let It Be", "Beatles", "monochrome", 85.0),
+    ]
+    kept, removed = telegram_bot.dedup_search_results(results, "let it be")
+    assert len(kept) == 1
+    assert kept[0]["video_id"] == "v1"  # higher relevance
+    assert len(removed) == 1
+    assert removed[0]["video_id"] == "v2"
+    assert removed[0]["_dedup_reason"].startswith("fuzzy_match:")
+
+
+def test_dedup_not_too_aggressive():
+    # Two genuinely different songs should not be merged
+    results = [
+        _mk_result("v1", "Let It Be", "The Beatles", "youtube", 50.0),
+        _mk_result("v2", "Hey Jude", "The Beatles", "youtube", 50.0),
+        _mk_result("v3", "Come Together", "The Beatles", "youtube", 50.0),
+    ]
+    kept, removed = telegram_bot.dedup_search_results(results, "beatles")
+    assert len(kept) == 3
+    assert len(removed) == 0
+
+
+def test_dedup_log_file_created(tmp_path, monkeypatch):
+    """Verify dedup writes to the separate log file."""
+    log_file = tmp_path / "dedup.log"
+    monkeypatch.setenv("TELEGRAM_DEDUP_LOG", str(log_file))
+    # Re-import to pick up new env var? The logger is module-level with
+    # _ensure_dedup_handler() called lazily, so just changing env is enough
+    # because _ensure_dedup_handler reads the env var at call time.
+    telegram_bot.dedup_logger.handlers.clear()
+    telegram_bot._dedup_handler_added = False
+
+    results = [
+        _mk_result("v1", "Let It Be", "The Beatles", "youtube", 40.0),
+        _mk_result("v2", "Let It Be", "The Beatles", "monochrome", 90.0),
+    ]
+    telegram_bot.dedup_search_results(results, "let it be")
+
+    assert log_file.exists()
+    content = log_file.read_text(encoding="utf-8")
+    assert "before=2 after=1 removed=1" in content
+    assert "v1" in content
+    assert "v2" in content
+
+
+def test_dedup_source_priority_order():
+    # soundcloud vs youtube: soundcloud preferred
+    results = [
+        _mk_result("v1", "Song A", "Artist X", "youtube", 50.0),
+        _mk_result("v2", "Song A", "Artist X", "soundcloud", 50.0),
+    ]
+    kept, removed = telegram_bot.dedup_search_results(results, "song a")
+    assert kept[0]["source"] == "soundcloud"
+
+    # freemp3cloud vs youtube: youtube preferred
+    results = [
+        _mk_result("v1", "Song B", "Artist Y", "freemp3cloud", 50.0),
+        _mk_result("v2", "Song B", "Artist Y", "youtube", 50.0),
+    ]
+    kept, removed = telegram_bot.dedup_search_results(results, "song b")
+    assert kept[0]["source"] == "youtube"
+
