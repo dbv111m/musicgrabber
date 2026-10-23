@@ -158,11 +158,10 @@ def init_telegram_tables():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
-    # Cached search results: chat_id + query -> list of tracks (no files stored)
+    # Cached search results: query -> list of tracks (global cache, no chat_id, no files stored)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS search_cache (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            chat_id INTEGER NOT NULL,
             query TEXT NOT NULL,
             source TEXT NOT NULL,
             video_id TEXT NOT NULL,
@@ -175,13 +174,47 @@ def init_telegram_tables():
         )
     """)
     conn.execute("""
-        CREATE INDEX IF NOT EXISTS idx_search_cache_chat_query
-        ON search_cache(chat_id, query)
+        CREATE INDEX IF NOT EXISTS idx_search_cache_query
+        ON search_cache(query)
     """)
     conn.execute("""
         CREATE INDEX IF NOT EXISTS idx_search_cache_video
         ON search_cache(video_id)
     """)
+    # Backfill: drop chat_id column if it exists from older schema
+    try:
+        cols = [r["name"] for r in conn.execute("PRAGMA table_info(search_cache)").fetchall()]
+        if "chat_id" in cols:
+            conn.execute("""
+                CREATE TABLE search_cache_new (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    query TEXT NOT NULL,
+                    source TEXT NOT NULL,
+                    video_id TEXT NOT NULL,
+                    title TEXT,
+                    artist TEXT,
+                    source_url TEXT,
+                    quality TEXT,
+                    duration TEXT,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            conn.execute("""
+                INSERT INTO search_cache_new (id, query, source, video_id, title, artist, source_url, quality, duration, created_at)
+                SELECT id, query, source, video_id, title, artist, source_url, quality, duration, created_at FROM search_cache
+            """)
+            conn.execute("DROP TABLE search_cache")
+            conn.execute("ALTER TABLE search_cache_new RENAME TO search_cache")
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_search_cache_query
+                ON search_cache(query)
+            """)
+            conn.execute("""
+                CREATE INDEX IF NOT EXISTS idx_search_cache_video
+                ON search_cache(video_id)
+            """)
+    except Exception:
+        pass
     # Cached CDN / download links by video_id (no files stored, only URLs)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS cdn_links (
@@ -445,8 +478,8 @@ def format_error(raw_error: str) -> str:
 # Search cache + CDN link cache (no files stored, only URLs and metadata)
 # =============================================================================
 
-SEARCH_CACHE_TTL_HOURS = int(os.getenv("TELEGRAM_SEARCH_CACHE_TTL", "24"))
-CDN_LINK_TTL_HOURS = int(os.getenv("TELEGRAM_CDN_LINK_TTL", "168"))  # 7 days
+SEARCH_CACHE_TTL_HOURS = int(os.getenv("TELEGRAM_SEARCH_CACHE_TTL", "720"))  # 30 days
+CDN_LINK_TTL_HOURS = int(os.getenv("TELEGRAM_CDN_LINK_TTL", "720"))  # 30 days
 
 
 def _normalize_query(query: str) -> str:
@@ -454,19 +487,19 @@ def _normalize_query(query: str) -> str:
     return " ".join(query.strip().lower().split())
 
 
-def get_cached_search(chat_id: int, query: str) -> list[dict] | None:
-    """Return cached search results for chat_id + query if within TTL.
-    Returns None if no cache or cache expired."""
+def get_cached_search(query: str) -> list[dict] | None:
+    """Return cached search results for query if within TTL.
+    Returns None if no cache or cache expired. Global cache (no chat_id)."""
     norm = _normalize_query(query)
     cutoff = _now() - SEARCH_CACHE_TTL_HOURS * 3600
     try:
         conn = get_db_connection()
         rows = conn.execute(
             "SELECT video_id, title, artist, source_url, quality, duration, source "
-            "FROM search_cache WHERE chat_id = ? AND query = ? "
+            "FROM search_cache WHERE query = ? "
             "AND created_at >= datetime(?, 'unixepoch') "
             "ORDER BY id ASC",
-            (chat_id, norm, cutoff),
+            (norm, cutoff),
         ).fetchall()
         conn.close()
     except Exception as exc:
@@ -490,15 +523,16 @@ def get_cached_search(chat_id: int, query: str) -> list[dict] | None:
     return results
 
 
-def save_search_results(chat_id: int, query: str, source: str, results: list[dict]) -> None:
-    """Save search results to cache and cache CDN links for each track."""
+def save_search_results(query: str, source: str, results: list[dict]) -> None:
+    """Save search results to cache and cache CDN links for each track.
+    Global cache (no chat_id)."""
     norm = _normalize_query(query)
     try:
         conn = get_db_connection()
-        # Clear old cache for this chat+query
+        # Clear old cache for this query
         conn.execute(
-            "DELETE FROM search_cache WHERE chat_id = ? AND query = ?",
-            (chat_id, norm),
+            "DELETE FROM search_cache WHERE query = ?",
+            (norm,),
         )
         for r in results:
             video_id = r.get("video_id", "")
@@ -510,9 +544,9 @@ def save_search_results(chat_id: int, query: str, source: str, results: list[dic
             src = r.get("source", source)
             conn.execute(
                 "INSERT INTO search_cache "
-                "(chat_id, query, source, video_id, title, artist, source_url, quality, duration) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                (chat_id, norm, src, video_id, title, artist, source_url, quality, duration),
+                "(query, source, video_id, title, artist, source_url, quality, duration) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (norm, src, video_id, title, artist, source_url, quality, duration),
             )
             # Cache CDN link if we have a source_url
             if source_url:
@@ -1412,14 +1446,14 @@ async def handle_search_query(update: Update, context: ContextTypes.DEFAULT_TYPE
     source = settings["search_source"]
 
     # Search: check cache first, then API
-    cached = get_cached_search(chat_id, query)
+    cached = get_cached_search(query)
     if cached:
         results = cached
-        logger.info(f"Search cache hit for chat {chat_id}: {len(results)} results")
+        logger.info(f"Search cache hit for query {query!r}: {len(results)} results")
     else:
         results = await search_music(query, source, limit=20)
         if results:
-            save_search_results(chat_id, query, source, results)
+            save_search_results(query, source, results)
 
     if not results:
         await status_msg.edit_text("❌ Ничего не найдено. Попробуйте другой запрос.")
