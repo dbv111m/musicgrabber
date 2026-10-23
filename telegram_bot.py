@@ -7,27 +7,27 @@ No classes, no over-engineering - just functions.
 
 import asyncio
 import html
+import json
 import logging
 import math
 import os
 import re
 import sqlite3
-import json
-from datetime import datetime
-from typing import Any, Optional
+from datetime import datetime, timezone
+from typing import Any
 
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+import httpx
+from rapidfuzz import fuzz
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.constants import ChatAction
 from telegram.ext import (
     Application,
-    CommandHandler,
     CallbackQueryHandler,
+    CommandHandler,
+    ContextTypes,
     MessageHandler,
     filters,
-    ContextTypes,
 )
-import httpx
-from rapidfuzz import fuzz
 
 # Standalone module: talks to the MusicGrabber app purely over its HTTP API
 # (MUSICGRABBER_API_URL + MUSICGRABBER_API_KEY), keeps its own sqlite for
@@ -288,7 +288,7 @@ def save_user_settings(chat_id: int, settings: dict):
     conn.close()
 
 
-def update_user_last_active(chat_id: int, username: str = None, first_name: str = None):
+def update_user_last_active(chat_id: int, username: str | None = None, first_name: str | None = None):
     """Update user last active time."""
     conn = get_db_connection()
     if username or first_name:
@@ -309,7 +309,7 @@ def update_user_last_active(chat_id: int, username: str = None, first_name: str 
     conn.close()
 
 
-def log_bot_action(chat_id: int, action: str, details: str = None):
+def log_bot_action(chat_id: int, action: str, details: str | None = None):
     """Log bot action."""
     conn = get_db_connection()
     conn.execute(
@@ -346,7 +346,7 @@ def is_admin(chat_id: int) -> bool:
 # =============================================================================
 
 def _now() -> float:
-    return datetime.now().timestamp()
+    return datetime.now(timezone.utc).timestamp()
 
 
 def record_action(chat_id: int, action: str) -> None:
@@ -506,7 +506,7 @@ _RE_YOUTUBE_SHORT = re.compile(r'youtube\.com/shorts/([a-zA-Z0-9_-]{11})')
 _RE_SOUNDCLOUD = re.compile(r'soundcloud\.com/([^/\?]+)(?:/([^/\?]+))?')
 
 
-def extract_url_source(query: str) -> Optional[tuple[str, str, str]]:
+def extract_url_source(query: str) -> tuple[str, str, str] | None:
     """Detect if query is a YouTube or SoundCloud URL.
     Returns (source, video_id, source_url) or None."""
     q = query.strip()
@@ -803,8 +803,7 @@ def get_user_context(chat_id: int, key: str, default=None):
 
 def clear_user_context(chat_id: int):
     """Clear user context (memory + SQLite)."""
-    if chat_id in user_contexts:
-        del user_contexts[chat_id]
+    user_contexts.pop(chat_id, None)
     try:
         conn = get_db_connection()
         conn.execute("DELETE FROM user_contexts WHERE chat_id = ?", (chat_id,))
@@ -839,8 +838,8 @@ async def search_music(query: str, source: str, limit: int = 10) -> list:
 
 
 async def download_track(video_id: str, title: str, artist: str, source: str,
-                        convert_to_flac: bool, chat_id: int, source_url: str = None,
-                        update: Update = None, query: str = None) -> Optional[dict]:
+                        convert_to_flac: bool, chat_id: int, source_url: str | None = None,
+                        update: Update | None = None, query: str | None = None) -> dict | None:
     """Queue track download via the app API and return the job ID."""
     # Queue download
     try:
@@ -890,7 +889,7 @@ async def download_track(video_id: str, title: str, artist: str, source: str,
         return None
 
 
-async def get_job_status(job_id: str) -> Optional[dict]:
+async def get_job_status(job_id: str) -> dict | None:
     """Get job status."""
     try:
         async with httpx.AsyncClient(timeout=10) as client:
@@ -956,7 +955,7 @@ async def _redeliver_missed(chat, jobs: list):
             log_bot_action(chat.id, "redeliver", job["id"])
 
 
-async def get_stats() -> Optional[dict]:
+async def get_stats() -> dict | None:
     """Get global stats."""
     try:
         async with httpx.AsyncClient(timeout=10) as client:
@@ -1092,17 +1091,28 @@ def build_queue_keyboard(jobs: list):
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /start command."""
-    chat_id = update.effective_chat.id
+    chat = update.effective_chat
+    if chat is None:
+        return
+    chat_id = chat.id
     user = update.effective_user
+    if user is None:
+        return
+    message = update.message
+    if message is None:
+        return
+    message = update.message
+    if message is None:
+        return
 
     if not is_user_allowed(chat_id):
-        await update.message.reply_text("❌ У вас нет доступа к этому боту.")
+        await message.reply_text("❌ У вас нет доступа к этому боту.")
         return
 
     # Access check
     allowed, reason = check_access(chat_id, "start")
     if not allowed:
-        await update.message.reply_text(f"⏳ {reason}")
+        await message.reply_text(f"⏳ {reason}")
         return
     record_action(chat_id, "start")
 
@@ -1119,7 +1129,7 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 Выберите действие в меню ниже:"""
 
-    await update.message.reply_text(text, parse_mode="HTML", reply_markup=build_main_keyboard(admin=admin))
+    await message.reply_text(text, parse_mode="HTML", reply_markup=build_main_keyboard(admin=admin))
     log_bot_action(chat_id, "start")
 
 
@@ -1162,21 +1172,36 @@ HELP_TEXT = """❓ <b>Помощь</b>
 
 async def cmd_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /help command."""
-    await update.message.reply_text(HELP_TEXT, parse_mode="HTML")
-    log_bot_action(update.effective_chat.id, "help")
+    chat = update.effective_chat
+    assert chat is not None
+    user = update.effective_user
+    assert user is not None
+    message = update.message
+    assert message is not None
+    assert message.chat is not None
+    await message.reply_text(HELP_TEXT, parse_mode="HTML")
+    log_bot_action(chat.id, "help")
 
 
 async def callback_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle help menu callback."""
     query = update.callback_query
+    assert query is not None
     await query.answer()
-    await query.edit_message_text(HELP_TEXT, parse_mode="HTML", reply_markup=build_main_keyboard(admin=is_admin(query.message.chat_id)))
+    message = query.message
+    assert message is not None
+    assert message.chat is not None
+    await query.edit_message_text(HELP_TEXT, parse_mode="HTML", reply_markup=build_main_keyboard(admin=is_admin(message.chat.id)))
 
 
 async def callback_menu_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle admin debug menu callback."""
     query = update.callback_query
-    chat_id = query.message.chat_id
+    assert query is not None
+    message = query.message
+    assert message is not None
+    assert message.chat is not None
+    chat_id = message.chat.id
 
     if not is_admin(chat_id):
         await query.answer("❌ Только для администратора.")
@@ -1191,7 +1216,7 @@ async def callback_menu_debug(update: Update, context: ContextTypes.DEFAULT_TYPE
             "SELECT action, details, created_at FROM bot_logs ORDER BY created_at DESC LIMIT 15",
         ).fetchall()
         # Rate limit stats
-        blocked = len([c for c, t in _bot_blocks.items() if t > datetime.now().timestamp()])
+        blocked = len([c for c, t in _bot_blocks.items() if t > datetime.now(timezone.utc).timestamp()])
         conn.close()
     except Exception:
         rows = []
@@ -1212,7 +1237,11 @@ user_contexts в памяти: {len(user_contexts)}
 async def callback_menu_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle admin broadcast menu callback."""
     query = update.callback_query
-    chat_id = query.message.chat_id
+    assert query is not None
+    message = query.message
+    assert message is not None
+    assert message.chat is not None
+    chat_id = message.chat.id
 
     if not is_admin(chat_id):
         await query.answer("❌ Только для администратора.")
@@ -1231,7 +1260,11 @@ async def callback_menu_broadcast(update: Update, context: ContextTypes.DEFAULT_
 
 async def cmd_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /search command."""
-    chat_id = update.effective_chat.id
+    chat = update.effective_chat
+    assert chat is not None
+    chat_id = chat.id
+    message = update.message
+    assert message is not None
 
     if not is_user_allowed(chat_id):
         return
@@ -1239,7 +1272,7 @@ async def cmd_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Access check
     allowed, reason = check_access(chat_id, "search")
     if not allowed:
-        await update.message.reply_text(f"⏳ {reason}")
+        await message.reply_text(f"⏳ {reason}")
         return
     record_action(chat_id, "search")
 
@@ -1257,13 +1290,17 @@ async def cmd_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 Для отмены отправьте /cancel"""
 
-    await update.message.reply_text(text, parse_mode="HTML")
+    await message.reply_text(text, parse_mode="HTML")
     log_bot_action(chat_id, "search_init")
 
 
 async def cmd_queue(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /queue command."""
-    chat_id = update.effective_chat.id
+    chat = update.effective_chat
+    assert chat is not None
+    chat_id = chat.id
+    message = update.message
+    assert message is not None
 
     if not is_user_allowed(chat_id):
         return
@@ -1271,7 +1308,7 @@ async def cmd_queue(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Access check
     allowed, reason = check_access(chat_id, "queue")
     if not allowed:
-        await update.message.reply_text(f"⏳ {reason}")
+        await message.reply_text(f"⏳ {reason}")
         return
     record_action(chat_id, "queue")
 
@@ -1279,18 +1316,22 @@ async def cmd_queue(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not jobs:
         text = "📋 <b>Мои загрузки</b>\n\nПока нет загрузок. Используйте /search для загрузки музыки."
-        await update.message.reply_text(text, parse_mode="HTML")
+        await message.reply_text(text, parse_mode="HTML")
         return
 
     text = f"📋 <b>Мои загрузки</b>\n\nВсего: {len(jobs)}"
-    await update.message.reply_text(text, parse_mode="HTML", reply_markup=build_queue_keyboard(jobs))
+    await message.reply_text(text, parse_mode="HTML", reply_markup=build_queue_keyboard(jobs))
     asyncio.create_task(_redeliver_missed(update.effective_chat, jobs))
     log_bot_action(chat_id, "queue_view")
 
 
 async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /stats command."""
-    chat_id = update.effective_chat.id
+    chat = update.effective_chat
+    assert chat is not None
+    chat_id = chat.id
+    message = update.message
+    assert message is not None
 
     if not is_user_allowed(chat_id):
         return
@@ -1298,13 +1339,13 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Access check
     allowed, reason = check_access(chat_id, "stats")
     if not allowed:
-        await update.message.reply_text(f"⏳ {reason}")
+        await message.reply_text(f"⏳ {reason}")
         return
     record_action(chat_id, "stats")
 
     stats = await get_stats()
     if not stats:
-        await update.message.reply_text("❌ Не удалось получить статистику.")
+        await message.reply_text("❌ Не удалось получить статистику.")
         return
 
     total = stats.get("total_jobs", 0)
@@ -1326,13 +1367,17 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 Остальная статистика доступна в веб-интерфейсе."""
 
-    await update.message.reply_text(text, parse_mode="HTML")
+    await message.reply_text(text, parse_mode="HTML")
     log_bot_action(chat_id, "stats_view")
 
 
 async def cmd_settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /settings command."""
-    chat_id = update.effective_chat.id
+    chat = update.effective_chat
+    assert chat is not None
+    chat_id = chat.id
+    message = update.message
+    assert message is not None
 
     if not is_user_allowed(chat_id):
         return
@@ -1343,20 +1388,28 @@ async def cmd_settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 Выберите параметр для изменения:"""
 
-    await update.message.reply_text(text, parse_mode="HTML", reply_markup=build_settings_keyboard(settings))
+    await message.reply_text(text, parse_mode="HTML", reply_markup=build_settings_keyboard(settings))
     log_bot_action(chat_id, "settings_view")
 
 
 async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /cancel command."""
-    chat_id = update.effective_chat.id
+    chat = update.effective_chat
+    assert chat is not None
+    chat_id = chat.id
+    message = update.message
+    assert message is not None
     clear_user_context(chat_id)
-    await update.message.reply_text("❌ Отменено.", reply_markup=build_main_keyboard())
+    await message.reply_text("❌ Отменено.", reply_markup=build_main_keyboard())
 
 
 async def cmd_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /history command — recent downloads for this chat."""
-    chat_id = update.effective_chat.id
+    chat = update.effective_chat
+    assert chat is not None
+    chat_id = chat.id
+    message = update.message
+    assert message is not None
 
     if not is_user_allowed(chat_id):
         return
@@ -1364,13 +1417,13 @@ async def cmd_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Access check
     allowed, reason = check_access(chat_id, "queue")
     if not allowed:
-        await update.message.reply_text(f"⏳ {reason}")
+        await message.reply_text(f"⏳ {reason}")
         return
     record_action(chat_id, "queue")
 
     jobs = await get_user_jobs(chat_id, limit=20)
     if not jobs:
-        await update.message.reply_text("📜 <b>История</b>\n\nПока нет загрузок.", parse_mode="HTML")
+        await message.reply_text("📜 <b>История</b>\n\nПока нет загрузок.", parse_mode="HTML")
         return
 
     lines = ["📜 <b>Последние загрузки</b>\n"]
@@ -1386,19 +1439,26 @@ async def cmd_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
         artist = job.get("artist", "Unknown")
         lines.append(f"{status_emoji} {artist} — {title}")
 
-    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    await message.reply_text("\n".join(lines), parse_mode="HTML")
     log_bot_action(chat_id, "history")
 
 
 async def cmd_whoami(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /whoami — show user's chat_id."""
-    chat_id = update.effective_chat.id
+    chat = update.effective_chat
+    assert chat is not None
+    chat_id = chat.id
     user = update.effective_user
+    if user is None:
+        return
+    message = update.message
+    if message is None:
+        return
 
     # Access check
     allowed, reason = check_access(chat_id, "default")
     if not allowed:
-        await update.message.reply_text(f"⏳ {reason}")
+        await message.reply_text(f"⏳ {reason}")
         return
     record_action(chat_id, "default")
 
@@ -1409,13 +1469,17 @@ chat_id: <code>{chat_id}</code>{admin_marker}
 username: {user.username or '—'}
 first_name: {user.first_name or '—'}
 """
-    await update.message.reply_text(text, parse_mode="HTML")
+    await message.reply_text(text, parse_mode="HTML")
     log_bot_action(chat_id, "whoami")
 
 
 async def cmd_ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /ping — bot health check."""
-    chat_id = update.effective_chat.id
+    chat = update.effective_chat
+    assert chat is not None
+    chat_id = chat.id
+    message = update.message
+    assert message is not None
 
     if not is_user_allowed(chat_id):
         return
@@ -1423,7 +1487,7 @@ async def cmd_ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Access check
     allowed, reason = check_access(chat_id, "default")
     if not allowed:
-        await update.message.reply_text(f"⏳ {reason}")
+        await message.reply_text(f"⏳ {reason}")
         return
     record_action(chat_id, "default")
 
@@ -1437,7 +1501,7 @@ async def cmd_ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
         pass
 
     admin_marker = " <b>(администратор)</b>" if is_admin(chat_id) else ""
-    blocked = len([c for c, t in _bot_blocks.items() if t > datetime.now().timestamp()])
+    blocked = len([c for c, t in _bot_blocks.items() if t > datetime.now(timezone.utc).timestamp()])
     text = f"""🏓 <b>Pong!</b>{admin_marker}
 
 Бот работает.
@@ -1445,22 +1509,26 @@ API MusicGrabber: {'✅ доступен' if api_ok else '❌ недоступе
 Заблокировано ботов: {blocked}
 Контекстов в памяти: {len(user_contexts)}
 """
-    await update.message.reply_text(text, parse_mode="HTML")
+    await message.reply_text(text, parse_mode="HTML")
     log_bot_action(chat_id, "ping")
 
 
 async def cmd_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /debug — bot internals (admin only)."""
-    chat_id = update.effective_chat.id
+    chat = update.effective_chat
+    assert chat is not None
+    chat_id = chat.id
+    message = update.message
+    assert message is not None
 
     if not is_admin(chat_id):
-        await update.message.reply_text("❌ Только для администратора.")
+        await message.reply_text("❌ Только для администратора.")
         return
 
     # Access check
     allowed, reason = check_access(chat_id, "debug")
     if not allowed:
-        await update.message.reply_text(f"⏳ {reason}")
+        await message.reply_text(f"⏳ {reason}")
         return
     record_action(chat_id, "debug")
 
@@ -1472,7 +1540,7 @@ async def cmd_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "ORDER BY created_at DESC LIMIT 10",
             (chat_id,),
         ).fetchall()
-        blocked = len([c for c, t in _bot_blocks.items() if t > datetime.now().timestamp()])
+        blocked = len([c for c, t in _bot_blocks.items() if t > datetime.now(timezone.utc).timestamp()])
         conn.close()
     except Exception:
         rows = []
@@ -1490,27 +1558,31 @@ rate_limit_human_base: {RATE_LIMIT_HUMAN_BASE} (макс {RATE_LIMIT_HUMAN_MAX_C
 Последние действия:
 {chr(10).join(log_lines) if log_lines else '—'}
 """
-    await update.message.reply_text(text, parse_mode="HTML")
+    await message.reply_text(text, parse_mode="HTML")
     log_bot_action(chat_id, "debug")
 
 
 async def cmd_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /broadcast <text> — send message to all known users (admin only)."""
-    chat_id = update.effective_chat.id
+    chat = update.effective_chat
+    assert chat is not None
+    chat_id = chat.id
+    message = update.message
+    assert message is not None
 
     if not is_admin(chat_id):
-        await update.message.reply_text("❌ Только для администратора.")
+        await message.reply_text("❌ Только для администратора.")
         return
 
     # Access check
     allowed, reason = check_access(chat_id, "broadcast")
     if not allowed:
-        await update.message.reply_text(f"⏳ {reason}")
+        await message.reply_text(f"⏳ {reason}")
         return
     record_action(chat_id, "broadcast")
 
     if not context.args:
-        await update.message.reply_text("❌ Использование: /broadcast <текст>", parse_mode="HTML")
+        await message.reply_text("❌ Использование: /broadcast <текст>", parse_mode="HTML")
         return
 
     message_text = " ".join(context.args)
@@ -1532,7 +1604,7 @@ async def cmd_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception:
             pass
 
-    await update.message.reply_text(f"📢 Отправлено {sent} пользователям.", parse_mode="HTML")
+    await message.reply_text(f"📢 Отправлено {sent} пользователям.", parse_mode="HTML")
     log_bot_action(chat_id, "broadcast", f"sent:{sent}")
 
 
@@ -1542,19 +1614,23 @@ async def cmd_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def handle_search_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle search query message."""
-    chat_id = update.effective_chat.id
+    chat = update.effective_chat
+    assert chat is not None
+    chat_id = chat.id
+    message = update.message
+    assert message is not None
 
     # Access check
     allowed, reason = check_access(chat_id, "search")
     if not allowed:
-        await update.message.reply_text(f"⏳ {reason}")
+        await message.reply_text(f"⏳ {reason}")
         return
     record_action(chat_id, "search")
 
     # If admin is in broadcast mode, treat message as broadcast content
     if is_admin(chat_id) and get_user_context(chat_id, "awaiting_broadcast"):
         clear_user_context(chat_id)
-        message_text = update.message.text.strip()
+        message_text = (message.text or "").strip()
         try:
             conn = get_db_connection()
             rows = conn.execute("SELECT DISTINCT chat_id FROM telegram_users").fetchall()
@@ -1571,11 +1647,11 @@ async def handle_search_query(update: Update, context: ContextTypes.DEFAULT_TYPE
             except Exception:
                 pass
 
-        await update.message.reply_text(f"📢 Отправлено {sent} пользователям.", parse_mode="HTML")
+        await message.reply_text(f"📢 Отправлено {sent} пользователям.", parse_mode="HTML")
         log_bot_action(chat_id, "broadcast", f"sent:{sent}")
         return
 
-    query = update.message.text.strip()
+    query = (message.text or "").strip()
 
     # --- URL detection: YouTube / SoundCloud -> direct download ---
     url_info = extract_url_source(query)
@@ -1594,7 +1670,7 @@ async def handle_search_query(update: Update, context: ContextTypes.DEFAULT_TYPE
         except Exception:
             existing = None
         if existing:
-            await update.message.reply_text(
+            await message.reply_text(
                 f"⚠️ <b>Уже в очереди</b>\n\nЗадание #{existing['job_id'][:8]} уже имеет статус '{existing['status']}'.",
                 parse_mode="HTML")
             return
@@ -1612,13 +1688,13 @@ async def handle_search_query(update: Update, context: ContextTypes.DEFAULT_TYPE
             query=query,
         )
         if not download_result:
-            await update.message.reply_text("❌ Ошибка при добавлении в очередь.")
+            await message.reply_text("❌ Ошибка при добавлении в очередь.")
             return
         job_id = download_result.get("job_id")
         if not job_id:
-            await update.message.reply_text("❌ Ошибка при добавлении в очередь.")
+            await message.reply_text("❌ Ошибка при добавлении в очередь.")
             return
-        await update.message.reply_text(
+        await message.reply_text(
             f"⏳ <b>Добавлено в очередь по ссылке</b>\n\n🔗 {html.escape(query)}\n\nПридёт уведомление о результате (или /queue для прогресса).",
             parse_mode="HTML")
         asyncio.create_task(_watch_job(job_id, chat_id, update.message, query))
@@ -1633,7 +1709,7 @@ async def handle_search_query(update: Update, context: ContextTypes.DEFAULT_TYPE
     await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
 
     # Send searching message
-    status_msg = await update.message.reply_text(f"🔍 Ищу: <b>{query}</b>...", parse_mode="HTML")
+    status_msg = await message.reply_text(f"🔍 Ищу: <b>{query}</b>...", parse_mode="HTML")
 
     # Get user settings
     settings = get_user_settings(chat_id)
@@ -1680,9 +1756,13 @@ async def handle_search_query(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def callback_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle main menu callback."""
     query = update.callback_query
+    assert query is not None
     await query.answer()
 
-    chat_id = query.message.chat_id
+    message = query.message
+    assert message is not None
+    assert message.chat is not None
+    chat_id = message.chat.id
     admin = is_admin(chat_id)
 
     text = f"""🎵 <b>MusicGrabber Bot</b>
@@ -1695,9 +1775,13 @@ async def callback_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE)
 async def callback_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle search menu callback."""
     query = update.callback_query
+    assert query is not None
     await query.answer()
 
-    chat_id = query.message.chat_id
+    message = query.message
+    assert message is not None
+    assert message.chat is not None
+    chat_id = message.chat.id
 
     # Access check
     allowed, reason = check_access(chat_id, "search")
@@ -1721,7 +1805,11 @@ async def callback_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def callback_queue(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle queue menu callback."""
     query = update.callback_query
-    chat_id = query.message.chat_id
+    assert query is not None
+    message = query.message
+    assert message is not None
+    assert message.chat is not None
+    chat_id = message.chat.id
 
     # Access check
     allowed, reason = check_access(chat_id, "queue")
@@ -1732,7 +1820,10 @@ async def callback_queue(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await query.answer()
 
-    chat_id = query.message.chat_id
+    message = query.message
+    assert message is not None
+    assert message.chat is not None
+    chat_id = message.chat.id
     jobs = await get_user_jobs(chat_id)
 
     if not jobs:
@@ -1742,12 +1833,13 @@ async def callback_queue(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     text = f"📋 <b>Мои загрузки</b>\n\nВсего: {len(jobs)}"
     await query.edit_message_text(text, parse_mode="HTML", reply_markup=build_queue_keyboard(jobs))
-    asyncio.create_task(_redeliver_missed(query.message.chat, jobs))
+    asyncio.create_task(_redeliver_missed(message.chat, jobs))
 
 
 async def callback_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle stats menu callback."""
     query = update.callback_query
+    assert query is not None
     await query.answer()
 
     stats = await get_stats()
@@ -1776,7 +1868,11 @@ async def callback_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def callback_settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle settings menu callback."""
     query = update.callback_query
-    chat_id = query.message.chat_id
+    assert query is not None
+    message = query.message
+    assert message is not None
+    assert message.chat is not None
+    chat_id = message.chat.id
 
     # Access check
     allowed, reason = check_access(chat_id, "settings")
@@ -1797,7 +1893,11 @@ async def callback_settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def callback_set_source(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle source setting callback."""
     query = update.callback_query
-    chat_id = query.message.chat_id
+    assert query is not None
+    message = query.message
+    assert message is not None
+    assert message.chat is not None
+    chat_id = message.chat.id
 
     # Access check
     allowed, reason = check_access(chat_id, "settings")
@@ -1808,7 +1908,10 @@ async def callback_set_source(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     await query.answer()
 
-    chat_id = query.message.chat_id
+    message = query.message
+    assert message is not None
+    assert message.chat is not None
+    chat_id = message.chat.id
     settings = get_user_settings(chat_id)
 
     # Cycle through sources
@@ -1834,7 +1937,11 @@ async def callback_set_source(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def callback_set_quality(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle quality setting callback."""
     query = update.callback_query
-    chat_id = query.message.chat_id
+    assert query is not None
+    message = query.message
+    assert message is not None
+    assert message.chat is not None
+    chat_id = message.chat.id
 
     # Access check
     allowed, reason = check_access(chat_id, "settings")
@@ -1861,7 +1968,11 @@ async def callback_set_quality(update: Update, context: ContextTypes.DEFAULT_TYP
 async def callback_set_folder(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle folder setting callback."""
     query = update.callback_query
-    chat_id = query.message.chat_id
+    assert query is not None
+    message = query.message
+    assert message is not None
+    assert message.chat is not None
+    chat_id = message.chat.id
 
     # Access check
     allowed, reason = check_access(chat_id, "settings")
@@ -1890,7 +2001,7 @@ async def callback_set_folder(update: Update, context: ContextTypes.DEFAULT_TYPE
     log_bot_action(chat_id, "settings", f"folder: {settings['download_folder']}")
 
 
-async def _send_track_file(chat, job_id: str, job: Optional[dict], title: str) -> bool:
+async def _send_track_file(chat, job_id: str, job: dict | None, title: str) -> bool:
     """Fetch the finished file from the chat and send it into the chat.
 
     Tries cached CDN link first (direct URL, no app round-trip). If the CDN
@@ -2010,7 +2121,8 @@ async def _send_track_file(chat, job_id: str, job: Optional[dict], title: str) -
     except Exception as exc:
         logger.warning(f"job {job_id}: sending file failed: {exc}")
         try:
-            os.unlink(tmp_path)  # type: ignore[name-defined]
+            if tmp_path:
+                os.unlink(tmp_path)
         except Exception:
             pass
         return False
@@ -2063,7 +2175,11 @@ async def _watch_job(job_id: str, chat_id: int, message, title: str,
 async def callback_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle download callback."""
     query = update.callback_query
-    chat_id = query.message.chat_id
+    assert query is not None
+    message = query.message
+    assert message is not None
+    assert message.chat is not None
+    chat_id = message.chat.id
 
     # Access check
     allowed, reason = check_access(chat_id, "download")
@@ -2074,7 +2190,7 @@ async def callback_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Per-user cooldown between downloads (admin bypasses)
     if not is_admin(chat_id):
-        now = datetime.now().timestamp()
+        now = datetime.now(timezone.utc).timestamp()
         last = _last_download.get(chat_id, 0)
         if now - last < DOWNLOAD_COOLDOWN_SEC:
             remaining = int(DOWNLOAD_COOLDOWN_SEC - (now - last))
@@ -2084,6 +2200,7 @@ async def callback_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await query.answer("⏳ Добавлено в очередь...")
 
+    assert query.data is not None
     result_idx = int(query.data.split("_")[1])
 
     # Get result
@@ -2166,9 +2283,14 @@ async def callback_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def callback_page(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle page navigation callback."""
     query = update.callback_query
+    assert query is not None
     await query.answer()
 
-    chat_id = query.message.chat_id
+    message = query.message
+    assert message is not None
+    assert message.chat is not None
+    chat_id = message.chat.id
+    assert query.data is not None
     page = int(query.data.split("_")[1])
 
     results = get_user_context(chat_id, "search_results", [])
@@ -2192,21 +2314,29 @@ async def callback_page(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def callback_search_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle search cancel callback."""
     query = update.callback_query
+    assert query is not None
     await query.answer()
 
-    clear_user_context(query.message.chat_id)
+    assert query.message is not None
+    clear_user_context(query.message.chat.id)
     await query.edit_message_text("❌ Поиск отменен.", reply_markup=build_main_keyboard())
 
 
 async def callback_noop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle no-op callback."""
-    await update.callback_query.answer()
+    query = update.callback_query
+    assert query is not None
+    await query.answer()
 
 
 async def callback_queue_refresh(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Re-render the queue keyboard with fresh statuses."""
     query = update.callback_query
-    chat_id = query.message.chat_id
+    assert query is not None
+    message = query.message
+    assert message is not None
+    assert message.chat is not None
+    chat_id = message.chat.id
 
     # Access check
     allowed, reason = check_access(chat_id, "queue")
@@ -2222,13 +2352,17 @@ async def callback_queue_refresh(update: Update, context: ContextTypes.DEFAULT_T
         await query.edit_message_text(text, parse_mode="HTML", reply_markup=build_queue_keyboard(jobs))
     except Exception:
         pass  # nothing changed -> Telegram rejects identical edits
-    asyncio.create_task(_redeliver_missed(query.message.chat, jobs))
+    asyncio.create_task(_redeliver_missed(message.chat, jobs))
 
 
 async def callback_queue_clear(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Drop this chat's job registry (app-side library/downloads untouched)."""
     query = update.callback_query
-    chat_id = query.message.chat_id
+    assert query is not None
+    message = query.message
+    assert message is not None
+    assert message.chat is not None
+    chat_id = message.chat.id
 
     # Access check
     allowed, reason = check_access(chat_id, "queue")
@@ -2251,7 +2385,11 @@ async def callback_queue_clear(update: Update, context: ContextTypes.DEFAULT_TYP
 async def callback_retry(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Retry a failed job via the app API and watch it to deliver the file."""
     query = update.callback_query
-    chat_id = query.message.chat_id
+    assert query is not None
+    message = query.message
+    assert message is not None
+    assert message.chat is not None
+    chat_id = message.chat.id
 
     # Access check
     allowed, reason = check_access(chat_id, "download")
@@ -2260,6 +2398,7 @@ async def callback_retry(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     record_action(chat_id, "download")
 
+    assert query.data is not None
     job_id = query.data.split("_", 1)[1]
     await query.answer()
 
@@ -2290,7 +2429,11 @@ async def callback_retry(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def callback_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Cancel a queued/downloading job via the app API."""
     query = update.callback_query
-    chat_id = query.message.chat_id
+    assert query is not None
+    message = query.message
+    assert message is not None
+    assert message.chat is not None
+    chat_id = message.chat.id
 
     # Access check
     allowed, reason = check_access(chat_id, "download")
@@ -2299,6 +2442,7 @@ async def callback_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     record_action(chat_id, "download")
 
+    assert query.data is not None
     job_id = query.data.split("_", 1)[1]
     await query.answer()
 

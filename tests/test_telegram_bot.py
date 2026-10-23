@@ -18,8 +18,7 @@ os.environ["MUSICGRABBER_API_URL"] = "http://127.0.0.1:1"
 os.environ["TELEGRAM_API_URL"] = ""
 os.environ["ADMIN_CHAT_ID"] = "12345"
 
-import telegram_bot  # noqa: E402
-
+import telegram_bot
 
 # ============================================================================
 # Fixtures

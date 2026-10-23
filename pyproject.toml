@@ -1,0 +1,22 @@
+[tool.ruff.lint]
+select = ["E", "F", "B", "UP", "I"]
+ignore = ["E501"]
+
+[tool.ruff.lint.per-file-ignores]
+"telegram_bot.py" = [
+    # BLE001: Blind except: Exception — intentional in bot to prevent
+    # one bad source/API/DB call from killing the whole polling loop.
+    "BLE001",
+    # S110: try-except-pass — same rationale as BLE001.
+    "S110",
+    # SIM117: Nested with statements where the inner one depends on
+    # the outer (httpx.AsyncClient + client.stream()) — cannot merge.
+    "SIM117",
+    # ASYNC230: Blocking open() in async function — file is small (<50MB)
+    # and read once per file delivery; acceptable trade-off.
+    "ASYNC230",
+]
+"tests/test_telegram_bot.py" = [
+    "I001",
+    "F401",
+]
