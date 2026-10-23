@@ -28,8 +28,12 @@ rather than a confident wrong answer.
 import json
 import os
 import re
-import shutil
 import time
+
+try:
+    from playwright.sync_api import sync_playwright
+except ModuleNotFoundError:
+    sync_playwright = None
 
 # "Play Dai Dai by Shakira & Burna Boy on Amazon Music Unlimited".  The album
 # is GREEDY and the artist lazy, so the split lands on the LAST " by " rather
@@ -73,20 +77,6 @@ def parse_album_title(title: str) -> tuple[str | None, str | None]:
     return (artist or None), (album or None)
 
 
-def _browser_options() -> dict:
-    options = {
-        "uc": True,
-        "test": True,
-        "xvfb": True,
-        "locale": "en",
-        "chromium_arg": "no-sandbox,disable-dev-shm-usage",
-    }
-    if not shutil.which("google-chrome") and shutil.which("chromium"):
-        options["use_chromium"] = True
-        options["binary_location"] = shutil.which("chromium")
-    return options
-
-
 def main() -> None:
     url = os.environ.get("AMAZON_ALBUM_URL", "").strip()
     if not url:
@@ -98,19 +88,32 @@ def main() -> None:
     except ValueError:
         timeout = 45
 
-    try:
-        from seleniumbase import SB
-    except Exception as exc:
-        print(json.dumps({"success": False, "error": f"SeleniumBase unavailable: {exc}"}))
+    if sync_playwright is None:
+        print(json.dumps({
+            "success": False,
+            "error": "Playwright is not installed in this environment",
+        }))
         return
 
+    browser_endpoint = os.environ.get("BROWSER_ENDPOINT", "http://host.docker.internal:3000")
+
     try:
-        with SB(**_browser_options()) as sb:
-            sb.activate_cdp_mode(url)
+        with sync_playwright() as p:
+            browser = p.chromium.connect_over_cdp(browser_endpoint)
+            context = browser.new_context(
+                user_agent=(
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/131.0.0.0 Safari/537.36"
+                ),
+                viewport={"width": 1280, "height": 800},
+            )
+            page = context.new_page()
+            page.goto(url, timeout=60000, wait_until="domcontentloaded")
             time.sleep(3)
 
             try:
-                sb.execute_script(_ACCEPT_COOKIES_JS)
+                page.evaluate(_ACCEPT_COOKIES_JS)
                 time.sleep(1.5)
             except Exception:
                 # No banner, or it moved. The title check below is the real test.
@@ -123,12 +126,15 @@ def main() -> None:
             artist = album = None
             while time.time() < deadline:
                 try:
-                    artist, album = parse_album_title(sb.execute_script(_TITLE_JS))
+                    title = page.evaluate(_TITLE_JS)
+                    artist, album = parse_album_title(title)
                 except Exception:
                     artist = album = None
                 if artist and album:
                     break
                 time.sleep(1.5)
+
+            browser.close()
 
             if not (artist and album):
                 print(json.dumps({
