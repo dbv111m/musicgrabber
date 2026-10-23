@@ -648,7 +648,7 @@ def build_settings_keyboard(settings: dict, admin: bool = False):
 
 
 def build_results_keyboard(results: list, page: int = 0, per_page: int = 5):
-    """Build search results keyboard. Each result: [⬇️ download] [🎧 preview]."""
+    """Build search results keyboard. Each result: [⬇️ download]."""
     keyboard = []
     start = page * per_page
     end = start + per_page
@@ -673,14 +673,11 @@ def build_results_keyboard(results: list, page: int = 0, per_page: int = 5):
         }
         quality = quality_map.get(quality_raw, quality_raw) if quality_raw else ""
         quality_str = f" [{quality}]" if quality else ""
-        title = (result.get("title") or "Unknown")[:22]
-        artist = (result.get("artist") or result.get("channel") or "Unknown")[:16]
+        title = (result.get("title") or "Unknown")[:30]
+        artist = (result.get("artist") or result.get("channel") or "Unknown")[:20]
 
         label = f"⬇️ {idx}. {source_emoji} {artist} - {title}{quality_str}"
-        keyboard.append([
-            InlineKeyboardButton(label, callback_data=f"download_{start + i}"),
-            InlineKeyboardButton("🎧 Предсл.", callback_data=f"preview_{start + i}"),
-        ])
+        keyboard.append([InlineKeyboardButton(label, callback_data=f"download_{start + i}")])
 
     # Navigation
     nav_row = []
@@ -1668,77 +1665,6 @@ async def callback_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
     log_bot_action(chat_id, "download", f"{track.get('title')}, job: {job_id}")
 
 
-async def callback_preview(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Fetch a preview URL from the app and send it as a clickable link."""
-    query = update.callback_query
-    chat_id = query.message.chat_id
-
-    # Access check
-    allowed, reason = check_access(chat_id, "preview")
-    if not allowed:
-        await query.answer(f"⏳ {reason}")
-        return
-    record_action(chat_id, "preview")
-
-    await query.answer("🎧 Получаю предварительный прослушивание...")
-
-    result_idx = int(query.data.split("_")[1])
-    results = get_user_context(chat_id, "search_results", [])
-    if result_idx >= len(results):
-        await query.edit_message_text("❌ Ошибка: результат не найден.")
-        return
-
-    track = results[result_idx]
-    video_id = track.get("video_id", "")
-    source = track.get("source", "youtube")
-    source_url = track.get("source_url") or ""
-    artist = track.get("artist") or track.get("channel") or "Unknown"
-    title = track.get("title") or "Unknown"
-
-    try:
-        async with httpx.AsyncClient(timeout=30) as client:
-            resp = await client.get(
-                f"{API_BASE_URL}/api/preview/{video_id}",
-                params={"source": source, "url": source_url, "artist": artist, "title": title},
-                headers=_api_headers(),
-            )
-        if resp.status_code != 200:
-            await query.edit_message_text(
-                f"❌ Не удалось получить предварительный прослушивание (HTTP {resp.status_code}).",
-                parse_mode="HTML",
-                reply_markup=build_results_keyboard(results),
-            )
-            return
-        data = resp.json()
-        preview_url = data.get("url", "")
-        if not preview_url:
-            await query.edit_message_text(
-                "❌ Предварительный прослушивание недоступен для этого трека.",
-                parse_mode="HTML",
-                reply_markup=build_results_keyboard(results),
-            )
-            return
-
-        safe_title = html.escape(title)
-        safe_artist = html.escape(artist)
-        text = f"""🎧 <b>Предварительный прослушивание</b>
-
-🎤 {safe_artist}
-🎵 {safe_title}
-
-Нажмите ссылку ниже, чтобы прослушать фрагмент:
-{preview_url}
-
-Примечание: фрагмент ~30 секунд (или весь трек для прямых источников)."""
-        await query.edit_message_text(text, parse_mode="HTML", reply_markup=build_results_keyboard(results))
-        log_bot_action(chat_id, "preview", f"{artist} - {title}")
-    except Exception as e:
-        logger.error(f"Preview error: {e}")
-        await query.edit_message_text(
-            f"❌ Ошибка получения предварительного прослушивания: {e}",
-            parse_mode="HTML",
-            reply_markup=build_results_keyboard(results),
-        )
 
 
 async def callback_page(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1951,7 +1877,6 @@ def setup_bot():
     app.add_handler(CallbackQueryHandler(callback_set_quality, pattern="^set_quality$"))
     app.add_handler(CallbackQueryHandler(callback_set_folder, pattern="^set_folder$"))
     app.add_handler(CallbackQueryHandler(callback_download, pattern="^download_\\d+$"))
-    app.add_handler(CallbackQueryHandler(callback_preview, pattern="^preview_\\d+$"))
     app.add_handler(CallbackQueryHandler(callback_page, pattern="^page_\\d+$"))
     app.add_handler(CallbackQueryHandler(callback_search_cancel, pattern="^search_cancel$"))
     app.add_handler(CallbackQueryHandler(callback_queue_refresh, pattern="^queue_refresh$"))
