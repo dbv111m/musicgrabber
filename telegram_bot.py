@@ -67,6 +67,10 @@ RATE_LIMIT_DOWNLOAD_HOUR = int(os.getenv("TELEGRAM_RATE_LIMIT_DOWNLOAD_HOUR", "8
 # Bot-like blocks: chat_id -> unblock_timestamp
 _bot_blocks: dict[int, float] = {}
 
+# Per-user cooldown between downloads (seconds)
+DOWNLOAD_COOLDOWN_SEC = int(os.getenv("TELEGRAM_DOWNLOAD_COOLDOWN", "30"))
+_last_download: dict[int, float] = {}
+
 
 def _api_headers() -> dict:
     return {"X-API-Key": API_KEY} if API_KEY else {}
@@ -375,6 +379,28 @@ def check_access(chat_id: int, action: str = "default") -> tuple[bool, str]:
         return False, reason
 
     return True, ""
+
+
+def format_error(raw_error: str) -> str:
+    """Map raw app error messages to human-friendly Russian text."""
+    e = raw_error.lower()
+    if "403" in e and ("youtube" in e or "blocked" in e):
+        return "YouTube заблокировал запрос. Настройте cookies в настройках или попробуйте другой источник."
+    if "peer closed connection" in e or "connection" in e and "closed" in e:
+        return "Источник временно недоступен. Попробуйте позже или выберите другой трек."
+    if "drm" in e or "preview-only" in e:
+        return "Трек доступен только для предпрослушивания (DRM). Попробуйте другой источник."
+    if "not found" in e or "404" in e:
+        return "Трек не найден на этом источнике."
+    if "timeout" in e:
+        return "Источник не отвечает (таймаут). Попробуйте позже."
+    if "unavailable" in e:
+        return "Источник временно недоступен."
+    if "unauthorized" in e or "401" in e or "auth" in e:
+        return "Требуется авторизация на источнике."
+    # Generic: return first sentence, trimmed
+    first = raw_error.split(".")[0]
+    return first[:120] + ("…" if len(first) > 120 else "")
 
 
 # =============================================================================
@@ -749,6 +775,7 @@ HELP_TEXT = """❓ <b>Помощь</b>
 /stats - Статистика
 /settings - Настройки
 /whoami - Ваш chat_id
+/ping - Проверка работоспособности
 /cancel - Отмена текущего действия
 
 <b>Как пользоваться:</b>
@@ -1026,6 +1053,42 @@ first_name: {user.first_name or '—'}
 """
     await update.message.reply_text(text, parse_mode="HTML")
     log_bot_action(chat_id, "whoami")
+
+
+async def cmd_ping(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /ping — bot health check."""
+    chat_id = update.effective_chat.id
+
+    if not is_user_allowed(chat_id):
+        return
+
+    # Access check
+    allowed, reason = check_access(chat_id, "default")
+    if not allowed:
+        await update.message.reply_text(f"⏳ {reason}")
+        return
+    record_action(chat_id, "default")
+
+    # Check API connectivity
+    api_ok = False
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            resp = await client.get(f"{API_BASE_URL}/api/config", headers=_api_headers())
+            api_ok = resp.status_code == 200
+    except Exception:
+        pass
+
+    admin_marker = " <b>(администратор)</b>" if is_admin(chat_id) else ""
+    blocked = len([c for c, t in _bot_blocks.items() if t > datetime.now().timestamp()])
+    text = f"""🏓 <b>Pong!</b>{admin_marker}
+
+Бот работает.
+API MusicGrabber: {'✅ доступен' if api_ok else '❌ недоступен'}
+Заблокировано ботов: {blocked}
+Контекстов в памяти: {len(user_contexts)}
+"""
+    await update.message.reply_text(text, parse_mode="HTML")
+    log_bot_action(chat_id, "ping")
 
 
 async def cmd_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1496,7 +1559,7 @@ async def _watch_job(job_id: str, chat_id: int, message, title: str,
             return
         await message.chat.send_message(f"✅ <b>Загружено</b>\n\n🎵 {safe_title}", parse_mode="HTML")
     elif status == "failed":
-        err = html.escape((data or {}).get("error") or "неизвестная ошибка")
+        err = format_error((data or {}).get("error") or "неизвестная ошибка")
         await message.chat.send_message(f"❌ <b>Ошибка загрузки</b>\n\n🎵 {safe_title}\nПричина: {err}", parse_mode="HTML")
     else:
         logger.info(f"job {job_id}: watcher gave up after {max_polls} polls (last: {status})")
@@ -1518,6 +1581,16 @@ async def callback_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     record_action(chat_id, "download")
 
+    # Per-user cooldown between downloads (admin bypasses)
+    if not is_admin(chat_id):
+        now = datetime.now().timestamp()
+        last = _last_download.get(chat_id, 0)
+        if now - last < DOWNLOAD_COOLDOWN_SEC:
+            remaining = int(DOWNLOAD_COOLDOWN_SEC - (now - last))
+            await query.answer(f"⏳ Подождите {remaining} сек между скачками.")
+            return
+        _last_download[chat_id] = now
+
     await query.answer("⏳ Добавлено в очередь...")
 
     result_idx = int(query.data.split("_")[1])
@@ -1535,6 +1608,31 @@ async def callback_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Send upload_document action while downloading
     await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.UPLOAD_DOCUMENT)
+
+    # Dedup: check if user already has a non-failed job for this track
+    track_key = ((track.get("artist") or track.get("channel") or "").lower(),
+                 (track.get("title") or "").lower())
+    try:
+        conn = get_db_connection()
+        existing = conn.execute(
+            "SELECT job_id, status FROM bot_jobs WHERE chat_id = ? AND lower(title) = ? AND lower(artist) = ? "
+            "AND status != 'failed' ORDER BY created_at DESC LIMIT 1",
+            (chat_id, track_key[1], track_key[0]),
+        ).fetchone()
+        conn.close()
+    except Exception:
+        existing = None
+
+    if existing:
+        await query.edit_message_text(
+            f"⚠️ <b>Уже в очереди</b>\n\n"
+            f"🎵 {html.escape(track.get('title', 'Unknown'))}\n"
+            f"🎤 {html.escape(track.get('artist') or track.get('channel', 'Unknown'))}\n\n"
+            f"Задание #{existing['job_id'][:8]} уже имеет статус '{existing['status']}'.",
+            parse_mode="HTML",
+            reply_markup=build_results_keyboard(results),
+        )
+        return
 
     # Download
     download_result = await download_track(
@@ -1757,7 +1855,7 @@ async def callback_retry(update: Update, context: ContextTypes.DEFAULT_TYPE):
             response.raise_for_status()
     except Exception as e:
         logger.error(f"Retry error: {e}")
-        await query.edit_message_text(f"❌ Не удалось повторить: {e}", parse_mode="HTML")
+        await query.edit_message_text(f"❌ Не удалось повторить: {format_error(str(e))}", parse_mode="HTML")
         return
 
     asyncio.create_task(_watch_job(job_id, chat_id, query.message, title))
@@ -1832,6 +1930,7 @@ def setup_bot():
     app.add_handler(CommandHandler("settings", cmd_settings))
     app.add_handler(CommandHandler("history", cmd_history))
     app.add_handler(CommandHandler("whoami", cmd_whoami))
+    app.add_handler(CommandHandler("ping", cmd_ping))
     app.add_handler(CommandHandler("debug", cmd_debug))
     app.add_handler(CommandHandler("broadcast", cmd_broadcast))
     app.add_handler(CommandHandler("cancel", cmd_cancel))
