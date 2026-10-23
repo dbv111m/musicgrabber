@@ -99,7 +99,18 @@ def main() -> None:
 
     try:
         with sync_playwright() as p:
-            browser = p.chromium.connect_over_cdp(browser_endpoint)
+            try:
+                browser = p.chromium.connect_over_cdp(browser_endpoint)
+            except Exception as exc:
+                print(
+                    json.dumps(
+                        {
+                            "success": False,
+                            "error": f"browser_unavailable: {exc}",
+                        }
+                    )
+                )
+                return
             context = browser.new_context(
                 user_agent=(
                     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "

@@ -165,6 +165,16 @@ def fetch_spotify_playlist_via_browser(
 
     if not data.get("success"):
         error = data.get("error", "Unknown error")
+        # Browser unavailable — degrade gracefully: return empty tracks so the
+        # caller can fall back to non-browser sources instead of 502-ing the
+        # whole request.
+        if error.startswith("browser_unavailable"):
+            print(f"Spotify browser unavailable, degrading to no-browser path: {error}")
+            return {
+                "tracks": [],
+                "playlist_name": None,
+                "count": 0,
+            }
         # Browser script signals expired cookies with a specific sentinel
         if error == "spotify_cookies_expired":
             if sp_dc and user_id is not None:

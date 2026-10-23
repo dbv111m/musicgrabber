@@ -70,9 +70,16 @@ def fetch_amazon_playlist(url: str) -> dict:
         )
 
     if not data.get("success"):
+        error = data.get("error", "Unknown error")
+        # Browser unavailable — degrade gracefully: return empty tracks so the
+        # caller can fall back to non-browser sources instead of 502-ing the
+        # whole request.
+        if error.startswith("browser_unavailable"):
+            print(f"Amazon browser unavailable, degrading: {error}")
+            return {"tracks": [], "playlist_name": None}
         raise HTTPException(
             status_code=502,
-            detail=f"Failed to scrape Amazon playlist: {data.get('error', 'Unknown error')}"
+            detail=f"Failed to scrape Amazon playlist: {error}"
         )
 
     tracks = data["tracks"]
@@ -150,9 +157,15 @@ def fetch_amazon_album_info(url: str) -> dict:
         )
 
     if not data.get("success"):
+        error = data.get("error", "Unknown error")
+        # Browser unavailable — degrade gracefully: return empty info so the
+        # album pipeline can proceed without the Amazon title.
+        if error.startswith("browser_unavailable"):
+            print(f"Amazon album browser unavailable, degrading: {error}")
+            return {"artist": None, "album": None}
         raise HTTPException(
             status_code=502,
-            detail=f"Failed to name Amazon album: {data.get('error', 'Unknown error')}",
+            detail=f"Failed to name Amazon album: {error}",
         )
 
     print(f"Amazon album resolved: {data.get('artist')} - {data.get('album')}")

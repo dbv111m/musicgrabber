@@ -91,9 +91,20 @@ _script_start = time.monotonic()
 
 try:
     with sync_playwright() as p:
-        browser = p.chromium.connect_over_cdp(
-            os.environ.get("BROWSER_ENDPOINT", "http://host.docker.internal:3000")
-        )
+        try:
+            browser = p.chromium.connect_over_cdp(
+                os.environ.get("BROWSER_ENDPOINT", "http://host.docker.internal:3000")
+            )
+        except Exception as exc:
+            print(
+                json.dumps(
+                    {
+                        "success": False,
+                        "error": f"browser_unavailable: {exc}",
+                    }
+                )
+            )
+            sys.exit(0)
         context = browser.new_context(
             user_agent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
             viewport={"width": 1280, "height": 800},

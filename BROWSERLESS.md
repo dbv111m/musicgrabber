@@ -61,6 +61,19 @@ browserless живёт только в compose проекта rsshub (`/opt/rssh
 | `Dockerfile` | `playwright install chromium --with-deps`, Chrome/Chromium, SeleniumBase, xauth/tk8.6, UC driver | удалено |
 | `docker-compose.yml` | `shm_size: 2gb` | `shm_size: 256mb`, `BROWSER_ENDPOINT`, `extra_hosts` |
 
+## Graceful degradation
+
+Если browserless недоступен (сервис упал, порт закрыт, сеть), все три браузерных
+скрипта (`spotify_browser.py`, `amazonpl.py`, `amazonalbum.py`) ловят
+`ConnectionRefusedError` на `connect_over_cdp` и выводят
+`{"success": False, "error": "browser_unavailable: ..."}` вместо необработанного
+исключения.
+
+Родительские скрипты (`spotify.py`, `amazon.py`) при такой ошибке не поднимают
+`HTTPException(502)`, а возвращают пустой результат (`tracks: []` или
+`{artist: None, album: None}`), чтобы запрос продолжился без браузерного
+скрейпинга вместо того, чтобы падать с 502.
+
 ## Ограничения
 
 - `amazonalbum.py` использует SeleniumBase с локальным Chrome. Без Chrome в образе он корректно упадёт с `SeleniumBase unavailable` (уже есть try/except) — функционал наименования альбомов Amazon временно недоступен до переноса на browserless.
