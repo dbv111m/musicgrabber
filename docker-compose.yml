@@ -5,6 +5,9 @@ services:
     restart: unless-stopped
     # Браузер теперь внешний (browserless) — shared memory не нужен большим.
     shm_size: '256mb'
+    # Ресурсные лимиты для тяжёлого контейнера (yt-dlp + ffmpeg + браузерные скрипты)
+    mem_limit: 1500m
+    cpus: '1.5'
     ports:
       - "38274:8080"
     extra_hosts:

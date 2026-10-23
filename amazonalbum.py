@@ -10,7 +10,7 @@ out of the DOM with Playwright, which works perfectly on playlist pages and
 not at all on album ones.  An album page renders twenty <music-image-row>
 skeletons that never populate, fires no JSON that carries the tracklist, and
 keeps nothing useful in window.amznMusic, so there is no row to read however
-long you wait.  Under SeleniumBase's undetected mode, though, the page sets a
+long you wait.  Driving Playwright via browserless CDP, the page sets a
 document title of the form:
 
     Play <ALBUM> by <ARTIST> on Amazon Music Unlimited

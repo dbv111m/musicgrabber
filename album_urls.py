@@ -26,7 +26,7 @@ Amazon Music album pages are the odd one out and need their own browser.
 Everything else here borrows a scraper that already worked; Amazon's album
 pages hand Playwright twenty <music-image-row> skeletons that never populate,
 fire no JSON carrying the record, and keep nothing useful in window.amznMusic.
-Under SeleniumBase's undetected mode, however, the page titles itself
+Driving Playwright via browserless CDP, the page titles itself
 "Play <ALBUM> by <ARTIST> on Amazon Music Unlimited", which is the whole job.
 That lives in amazonalbum.py; see docs/requests and bugs.md for the list of
 approaches that did not work, so nobody re-runs them.
@@ -278,7 +278,7 @@ def _parse_monochrome_release(release_id: str) -> dict:
 
 
 def _parse_amazon_album(url: str, asin: str) -> dict:
-    """Name an Amazon album by driving SeleniumBase at its page title.
+    """Name an Amazon album by driving Playwright via browserless CDP at its page title.
 
     The slowest reader here by some way, since it starts a real browser and
     waits out a consent dialog, so it deliberately sits last in the dispatch

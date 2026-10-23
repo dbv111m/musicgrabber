@@ -104,10 +104,11 @@ def fetch_amazon_album_info(url: str) -> dict:
     """Name an Amazon Music album page: {"artist": ..., "album": ...}.
 
     Runs amazonalbum.py as a subprocess, same as the playlist path, but that
-    script drives SeleniumBase rather than Playwright.  Album pages hand
-    Playwright a shell of skeleton rows that never fill in; under undetected
-    mode Amazon at least sets a document title naming the record, which is all
-    the album pipeline wants.  See amazonalbum.py for the full story.
+    script drives Playwright via browserless CDP (BROWSER_ENDPOINT) rather than
+    a local Chrome.  Album pages hand Playwright a shell of skeleton rows that
+    never fill in; under undetected mode Amazon at least sets a document title
+    naming the record, which is all the album pipeline wants.  See
+    amazonalbum.py for the full story.
 
     Raises HTTPException on failure, so a dead ASIN surfaces as an honest
     error rather than a confidently wrong album.

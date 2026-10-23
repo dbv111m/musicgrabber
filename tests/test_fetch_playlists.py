@@ -159,10 +159,9 @@ def test_fetch_amazon_playlist_over_one_hundred_tracks(api, base_url):
     assert len(d.get("tracks", [])) > 100
 
 
-# Album pages are named by amazonalbum.py driving SeleniumBase's undetected
-# mode, and SeleniumBase floats within 4.x while Chrome is whatever is current
-# at build time. This is the test that notices when one of them, or Amazon,
-# moves the goalposts, rather than the next person to paste an album link.
+# Album pages are named by amazonalbum.py driving Playwright via browserless
+# CDP (BROWSER_ENDPOINT). This is the test that notices when one of them, or
+# Amazon, moves the goalposts, rather than the next person to paste an album link.
 _AMAZON_ALBUM_URL = "https://music.amazon.co.uk/albums/B0FBGRYDM9"  # Olivia Dean, The Art of Loving
 
 
@@ -179,7 +178,7 @@ def test_amazon_album_names_itself(api, base_url):
     d = r.json()
     assert d.get("service") == "amazon"
     assert (d.get("artist"), d.get("album")) == ("Olivia Dean", "The Art of Loving"), (
-        "Amazon did not name the album; check SeleniumBase, Chrome and "
+        "Amazon did not name the album; check browserless, Playwright and "
         f"amazonalbum.py against the container logs. Got: {d}"
     )
 
