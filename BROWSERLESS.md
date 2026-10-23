@@ -31,6 +31,8 @@
 
 ### browserless (`/opt/rsshub/docker-compose.yml`)
 
+browserless живёт только в compose проекта rsshub (`/opt/rsshub/docker-compose.yml`). Отдельный стенд в `/opt/browserless/` удалён.
+
 - Образ: `ghcr.io/browserless/chromium:latest`
 - Порт: `3000:3000` (доступен хосту и другим compose-проектам через `host.docker.internal`)
 - `CONCURRENT=2` — максимум двух одновременных сессий, остальные в очереди
