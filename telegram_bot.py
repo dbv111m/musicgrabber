@@ -13,11 +13,10 @@ import os
 import re
 import sqlite3
 import json
-from datetime import datetime, timedelta
-from pathlib import Path
+from datetime import datetime
 from typing import Any, Optional
 
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputFile
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ChatAction
 from telegram.ext import (
     Application,
@@ -28,7 +27,7 @@ from telegram.ext import (
     ContextTypes,
 )
 import httpx
-from rapidfuzz import fuzz, process
+from rapidfuzz import fuzz
 
 # Standalone module: talks to the MusicGrabber app purely over its HTTP API
 # (MUSICGRABBER_API_URL + MUSICGRABBER_API_KEY), keeps its own sqlite for
@@ -137,7 +136,6 @@ def init_telegram_tables():
     """)
     # Backfill columns for older DBs that lack them
     for col_def in ("video_id TEXT", "delivered INTEGER DEFAULT 0", "query TEXT"):
-        col_name = col_def.split()[0]
         try:
             conn.execute(f"ALTER TABLE bot_jobs ADD COLUMN {col_def}")
         except sqlite3.OperationalError:
@@ -1556,7 +1554,7 @@ async def handle_search_query(update: Update, context: ContextTypes.DEFAULT_TYPE
     # If admin is in broadcast mode, treat message as broadcast content
     if is_admin(chat_id) and get_user_context(chat_id, "awaiting_broadcast"):
         clear_user_context(chat_id)
-        message_text = query
+        message_text = update.message.text.strip()
         try:
             conn = get_db_connection()
             rows = conn.execute("SELECT DISTINCT chat_id FROM telegram_users").fetchall()
@@ -1585,7 +1583,6 @@ async def handle_search_query(update: Update, context: ContextTypes.DEFAULT_TYPE
         source, video_id, source_url = url_info
         settings = get_user_settings(chat_id)
         # Dedup check
-        track_key = ("", video_id.lower())
         try:
             conn = get_db_connection()
             existing = conn.execute(
