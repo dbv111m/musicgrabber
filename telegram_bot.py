@@ -626,7 +626,9 @@ SOURCE_PRIORITY = {
     "freemp3cloud": 3,
 }
 
-FUZZY_DEDUP_THRESHOLD = int(os.getenv("TELEGRAM_FUZZY_DEDUP_THRESHOLD", "85"))
+FUZZY_DEDUP_THRESHOLD = int(os.getenv("TELEGRAM_FUZZY_DEDUP_THRESHOLD", "90"))
+FUZZY_DEDUP_TITLE_THRESHOLD = int(os.getenv("TELEGRAM_FUZZY_DEDUP_TITLE_THRESHOLD", "95"))
+FUZZY_DEDUP_MAX_LEN_DIFF = int(os.getenv("TELEGRAM_FUZZY_DEDUP_MAX_LEN_DIFF", "30"))
 
 # Dedup log: separate file, append mode, JSON lines for easy parsing
 DEDUP_LOG_PATH = os.getenv("TELEGRAM_DEDUP_LOG", "telegram_bot_dedup.log")
@@ -661,11 +663,19 @@ def _result_key(r: dict) -> tuple[str, str]:
     return (artist, title)
 
 
+def _norm_artist(r: dict) -> str:
+    """Normalized artist name for comparison."""
+    return (r.get("artist") or r.get("channel") or "").strip().lower()
+
+
+def _norm_title(r: dict) -> str:
+    """Normalized title for comparison."""
+    return (r.get("title") or "").strip().lower()
+
+
 def _combined_text(r: dict) -> str:
     """Combined artist + title for fuzzy comparison."""
-    artist = r.get("artist") or r.get("channel") or ""
-    title = r.get("title") or ""
-    return f"{artist} {title}".lower()
+    return f"{_norm_artist(r)} {_norm_title(r)}"
 
 
 def _source_rank(r: dict) -> int:
@@ -725,7 +735,9 @@ def dedup_search_results(results: list[dict], query: str = "") -> tuple[list[dic
     kept: list[dict] = []
     removed: list[dict] = []
     seen_keys: set[tuple[str, str]] = set()
-    kept_texts: list[str] = []  # combined texts of kept results (for fuzzy)
+    kept_artists: list[str] = []  # normalized artists of kept results (for fuzzy)
+    kept_titles: list[str] = []   # normalized titles of kept results (for fuzzy)
+    kept_title_lens: list[int] = []  # title lengths of kept results (for fuzzy length check)
 
     for r in ordered:
         key = _result_key(r)
@@ -741,23 +753,57 @@ def dedup_search_results(results: list[dict], query: str = "") -> tuple[list[dic
             continue
         seen_keys.add(key)
 
-        # Pass 2: fuzzy match against already kept results
-        combined = _combined_text(r)
-        fuzzy_match = None
-        for kept_text in kept_texts:
-            if fuzz.token_set_ratio(combined, kept_text) >= FUZZY_DEDUP_THRESHOLD:
-                fuzzy_match = kept_text
-                break
-        if fuzzy_match is not None:
-            r2 = dict(r)
-            r2["_dedup_reason"] = f"fuzzy_match:{fuzzy_match[:40]}"
-            r2["_dedup_kept_video_id"] = next(
-                (k.get("video_id") for k in kept if _combined_text(k) == fuzzy_match), ""
+        # Pass 2: fuzzy match — BOTH artist AND title must be similar,
+        # otherwise two different songs by the same artist would be merged.
+        norm_artist = _norm_artist(r)
+        norm_title = _norm_title(r)
+        title_len = len(norm_title)
+        fuzzy_match = False
+        for k_artist, k_title, k_title_len in zip(
+            kept_artists, kept_titles, kept_title_lens, strict=True
+        ):
+            artist_sim = (
+                fuzz.token_set_ratio(norm_artist, k_artist)
+                if norm_artist and k_artist
+                else 0
             )
+            # Use fuzz.ratio (not token_set_ratio) for titles — token_set_ratio
+            # returns 100 when one title is a subset of the other
+            # ("let it be" vs "let it be me"), which causes false merges.
+            title_sim = (
+                fuzz.ratio(norm_title, k_title)
+                if norm_title and k_title
+                else 0
+            )
+            # Skip if title lengths differ too much (e.g. "Let It Be" vs "Let It Be Me")
+            if title_len and k_title_len:
+                len_ratio = min(title_len, k_title_len) / max(title_len, k_title_len)
+                if len_ratio < 0.7:
+                    continue
+            if artist_sim >= FUZZY_DEDUP_THRESHOLD and title_sim >= FUZZY_DEDUP_TITLE_THRESHOLD:
+                fuzzy_match = True
+                break
+        if fuzzy_match:
+            r2 = dict(r)
+            r2["_dedup_reason"] = "fuzzy_match"
+            # Find which kept result it matches
+            kept_vid = ""
+            for k in kept:
+                if (
+                    fuzz.token_set_ratio(norm_artist, _norm_artist(k))
+                    >= FUZZY_DEDUP_THRESHOLD
+                    and fuzz.ratio(norm_title, _norm_title(k))
+                    >= FUZZY_DEDUP_TITLE_THRESHOLD
+                ):
+                    kept_vid = k.get("video_id", "")
+                    break
+            r2["_dedup_kept_video_id"] = kept_vid
             removed.append(r2)
             continue
 
-        kept_texts.append(combined)
+        kept_artists.append(norm_artist)
+        kept_titles.append(norm_title)
+        kept_title_lens.append(title_len)
         kept.append(r)
 
     _log_dedup(query, len(results), len(kept), removed)

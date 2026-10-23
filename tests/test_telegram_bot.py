@@ -429,7 +429,7 @@ def test_dedup_fuzzy_similar_titles(tmp_path):
     assert kept[0]["video_id"] == "v1"  # higher relevance
     assert len(removed) == 1
     assert removed[0]["video_id"] == "v2"
-    assert removed[0]["_dedup_reason"].startswith("fuzzy_match:")
+    assert removed[0]["_dedup_reason"] == "fuzzy_match"
 
 
 def test_dedup_not_too_aggressive():
