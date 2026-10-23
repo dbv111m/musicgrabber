@@ -128,15 +128,18 @@ def init_telegram_tables():
             chat_id INTEGER,
             title TEXT,
             artist TEXT,
+            video_id TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             delivered INTEGER DEFAULT 0
         )
     """)
-    # Backfill delivered column for older DBs that lack it
-    try:
-        conn.execute("ALTER TABLE bot_jobs ADD COLUMN delivered INTEGER DEFAULT 0")
-    except sqlite3.OperationalError:
-        pass  # колонка уже есть
+    # Backfill columns for older DBs that lack them
+    for col_def in ("video_id TEXT", "delivered INTEGER DEFAULT 0"):
+        col_name = col_def.split()[0]
+        try:
+            conn.execute(f"ALTER TABLE bot_jobs ADD COLUMN {col_def}")
+        except sqlite3.OperationalError:
+            pass  # колонка уже есть
     # Persisted user context (survives restarts)
     conn.execute("""
         CREATE TABLE IF NOT EXISTS user_contexts (
@@ -153,6 +156,41 @@ def init_telegram_tables():
             chat_id INTEGER,
             action TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    # Cached search results: chat_id + query -> list of tracks (no files stored)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS search_cache (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            chat_id INTEGER NOT NULL,
+            query TEXT NOT NULL,
+            source TEXT NOT NULL,
+            video_id TEXT NOT NULL,
+            title TEXT,
+            artist TEXT,
+            source_url TEXT,
+            quality TEXT,
+            duration TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_search_cache_chat_query
+        ON search_cache(chat_id, query)
+    """)
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_search_cache_video
+        ON search_cache(video_id)
+    """)
+    # Cached CDN / download links by video_id (no files stored, only URLs)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS cdn_links (
+            video_id TEXT PRIMARY KEY,
+            source_url TEXT,
+            cdn_url TEXT,
+            source TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            expires_at TIMESTAMP
         )
     """)
     conn.commit()
@@ -404,6 +442,134 @@ def format_error(raw_error: str) -> str:
 
 
 # =============================================================================
+# Search cache + CDN link cache (no files stored, only URLs and metadata)
+# =============================================================================
+
+SEARCH_CACHE_TTL_HOURS = int(os.getenv("TELEGRAM_SEARCH_CACHE_TTL", "24"))
+CDN_LINK_TTL_HOURS = int(os.getenv("TELEGRAM_CDN_LINK_TTL", "168"))  # 7 days
+
+
+def _normalize_query(query: str) -> str:
+    """Normalize query for cache lookup: lowercase, strip, collapse spaces."""
+    return " ".join(query.strip().lower().split())
+
+
+def get_cached_search(chat_id: int, query: str) -> list[dict] | None:
+    """Return cached search results for chat_id + query if within TTL.
+    Returns None if no cache or cache expired."""
+    norm = _normalize_query(query)
+    cutoff = _now() - SEARCH_CACHE_TTL_HOURS * 3600
+    try:
+        conn = get_db_connection()
+        rows = conn.execute(
+            "SELECT video_id, title, artist, source_url, quality, duration, source "
+            "FROM search_cache WHERE chat_id = ? AND query = ? "
+            "AND created_at >= datetime(?, 'unixepoch') "
+            "ORDER BY id ASC",
+            (chat_id, norm, cutoff),
+        ).fetchall()
+        conn.close()
+    except Exception as exc:
+        logger.warning(f"Search cache read failed: {exc}")
+        return None
+
+    if not rows:
+        return None
+
+    results = []
+    for row in rows:
+        results.append({
+            "video_id": row["video_id"],
+            "title": row["title"],
+            "artist": row["artist"] or row.get("channel") or "Unknown",
+            "source": row["source"],
+            "source_url": row["source_url"],
+            "quality": row["quality"] or "",
+            "duration": row["duration"] or "",
+        })
+    return results
+
+
+def save_search_results(chat_id: int, query: str, source: str, results: list[dict]) -> None:
+    """Save search results to cache and cache CDN links for each track."""
+    norm = _normalize_query(query)
+    try:
+        conn = get_db_connection()
+        # Clear old cache for this chat+query
+        conn.execute(
+            "DELETE FROM search_cache WHERE chat_id = ? AND query = ?",
+            (chat_id, norm),
+        )
+        for r in results:
+            video_id = r.get("video_id", "")
+            title = r.get("title", "")
+            artist = r.get("artist", "")
+            source_url = r.get("source_url", "") or ""
+            quality = r.get("quality", "")
+            duration = r.get("duration", "")
+            src = r.get("source", source)
+            conn.execute(
+                "INSERT INTO search_cache "
+                "(chat_id, query, source, video_id, title, artist, source_url, quality, duration) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (chat_id, norm, src, video_id, title, artist, source_url, quality, duration),
+            )
+            # Cache CDN link if we have a source_url
+            if source_url:
+                save_cdn_link(conn, video_id, source_url, source_url, src)
+        conn.commit()
+        conn.close()
+    except Exception as exc:
+        logger.warning(f"Search cache write failed: {exc}")
+
+
+def save_cdn_link(conn, video_id: str, source_url: str, cdn_url: str, source: str) -> None:
+    """Save/update a CDN link in the cache (within existing transaction)."""
+    cutoff = _now() - CDN_LINK_TTL_HOURS * 3600
+    conn.execute(
+        "DELETE FROM cdn_links WHERE video_id = ? AND (expires_at IS NULL OR expires_at < datetime(?, 'unixepoch'))",
+        (video_id, cutoff),
+    )
+    conn.execute(
+        "INSERT OR REPLACE INTO cdn_links (video_id, source_url, cdn_url, source, created_at, expires_at) "
+        "VALUES (?, ?, ?, ?, datetime('now'), datetime('now', '+' || ? || ' hours'))",
+        (video_id, source_url, cdn_url, source, CDN_LINK_TTL_HOURS),
+    )
+
+
+def get_cached_cdn_link(video_id: str) -> str | None:
+    """Return cached CDN URL for video_id if not expired."""
+    cutoff = _now() - CDN_LINK_TTL_HOURS * 3600
+    try:
+        conn = get_db_connection()
+        row = conn.execute(
+            "SELECT cdn_url FROM cdn_links WHERE video_id = ? "
+            "AND (expires_at IS NULL OR expires_at > datetime(?, 'unixepoch')) "
+            "ORDER BY created_at DESC LIMIT 1",
+            (video_id, cutoff),
+        ).fetchone()
+        conn.close()
+    except Exception as exc:
+        logger.warning(f"CDN link cache read failed: {exc}")
+        return None
+    return row["cdn_url"] if row else None
+
+
+def clear_expired_cache() -> None:
+    """Remove expired search cache and CDN link entries."""
+    search_cutoff = _now() - SEARCH_CACHE_TTL_HOURS * 3600
+    cdn_cutoff = _now() - CDN_LINK_TTL_HOURS * 3600
+    try:
+        conn = get_db_connection()
+        conn.execute("DELETE FROM search_cache WHERE created_at < datetime(?, 'unixepoch')", (search_cutoff,))
+        conn.execute("DELETE FROM cdn_links WHERE expires_at IS NOT NULL AND expires_at < datetime(?, 'unixepoch')", (cdn_cutoff,))
+        conn.commit()
+        conn.close()
+    except Exception as exc:
+        logger.warning(f"Cache cleanup failed: {exc}")
+
+
+# =============================================================================
 # Context management
 # =============================================================================
 
@@ -516,11 +682,20 @@ async def download_track(video_id: str, title: str, artist: str, source: str,
             if job_id:
                 conn = get_db_connection()
                 conn.execute(
-                    "INSERT OR REPLACE INTO bot_jobs (job_id, chat_id, title, artist) VALUES (?, ?, ?, ?)",
-                    (job_id, chat_id, title, artist),
+                    "INSERT OR REPLACE INTO bot_jobs (job_id, chat_id, title, artist, video_id) VALUES (?, ?, ?, ?, ?)",
+                    (job_id, chat_id, title, artist, video_id),
                 )
                 conn.commit()
                 conn.close()
+                # Cache CDN link if we have a source_url
+                if source_url:
+                    try:
+                        conn2 = get_db_connection()
+                        save_cdn_link(conn2, video_id, source_url, source_url, source)
+                        conn2.commit()
+                        conn2.close()
+                    except Exception:
+                        pass
 
             return {"status": "queued", "job_id": job_id}
 
@@ -1236,8 +1411,15 @@ async def handle_search_query(update: Update, context: ContextTypes.DEFAULT_TYPE
     settings = get_user_settings(chat_id)
     source = settings["search_source"]
 
-    # Search
-    results = await search_music(query, source, limit=20)
+    # Search: check cache first, then API
+    cached = get_cached_search(chat_id, query)
+    if cached:
+        results = cached
+        logger.info(f"Search cache hit for chat {chat_id}: {len(results)} results")
+    else:
+        results = await search_music(query, source, limit=20)
+        if results:
+            save_search_results(chat_id, query, source, results)
 
     if not results:
         await status_msg.edit_text("❌ Ничего не найдено. Попробуйте другой запрос.")
@@ -1481,29 +1663,68 @@ async def callback_set_folder(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def _send_track_file(chat, job_id: str, job: Optional[dict], title: str) -> bool:
     """Fetch the finished file from the app and send it into the chat.
 
-    Downloads to a temp file first (streaming) to avoid loading large files
-    entirely into memory. Falls back to False on any failure."""
+    Tries cached CDN link first (direct URL, no app round-trip), then falls
+    back to /api/jobs/{id}/download. Downloads to a temp file first
+    (streaming) to avoid loading large files entirely into memory.
+    Falls back to False on any failure."""
     import tempfile
     try:
-        async with httpx.AsyncClient(timeout=300) as client:
-            async with client.stream(
-                "GET",
-                f"{API_BASE_URL}/api/jobs/{job_id}/download",
-                headers=_api_headers(),
-            ) as resp:
-                if resp.status_code != 200:
-                    logger.warning(f"job {job_id}: download endpoint returned {resp.status_code}")
-                    return False
-                content_length = resp.headers.get("content-length")
-                if content_length and int(content_length) > 49 * 1024 * 1024:
-                    logger.warning(f"job {job_id}: file over 50MB Telegram cap")
-                    return False
-                # Stream to temp file
-                suffix = os.path.splitext((job or {}).get("final_path") or "")[1] or ".mp3"
-                with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
-                    async for chunk in resp.aiter_bytes():
-                        tmp.write(chunk)
-                    tmp_path = tmp.name
+        # Look up video_id from bot_jobs to find cached CDN link
+        video_id = None
+        try:
+            conn = get_db_connection()
+            row = conn.execute(
+                "SELECT video_id FROM bot_jobs WHERE job_id = ?", (job_id,)
+            ).fetchone()
+            conn.close()
+            if row:
+                video_id = row["video_id"]
+        except Exception:
+            pass
+
+        # Try cached CDN link first
+        cdn_url = None
+        if video_id:
+            cdn_url = get_cached_cdn_link(video_id)
+
+        if cdn_url:
+            async with httpx.AsyncClient(timeout=300) as client:
+                async with client.stream("GET", cdn_url) as resp:
+                    if resp.status_code != 200:
+                        logger.warning(f"job {job_id}: CDN link returned {resp.status_code}, falling back")
+                        cdn_url = None
+                    else:
+                        content_length = resp.headers.get("content-length")
+                        if content_length and int(content_length) > 49 * 1024 * 1024:
+                            logger.warning(f"job {job_id}: CDN file over 50MB cap")
+                            return False
+                        suffix = os.path.splitext((job or {}).get("final_path") or "")[1] or ".mp3"
+                        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+                            async for chunk in resp.aiter_bytes():
+                                tmp.write(chunk)
+                            tmp_path = tmp.name
+
+        if not cdn_url:
+            # Fall back to app download endpoint
+            async with httpx.AsyncClient(timeout=300) as client:
+                async with client.stream(
+                    "GET",
+                    f"{API_BASE_URL}/api/jobs/{job_id}/download",
+                    headers=_api_headers(),
+                ) as resp:
+                    if resp.status_code != 200:
+                        logger.warning(f"job {job_id}: download endpoint returned {resp.status_code}")
+                        return False
+                    content_length = resp.headers.get("content-length")
+                    if content_length and int(content_length) > 49 * 1024 * 1024:
+                        logger.warning(f"job {job_id}: file over 50MB Telegram cap")
+                        return False
+                    suffix = os.path.splitext((job or {}).get("final_path") or "")[1] or ".mp3"
+                    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+                        async for chunk in resp.aiter_bytes():
+                            tmp.write(chunk)
+                        tmp_path = tmp.name
+
         filename = os.path.basename((job or {}).get("final_path") or "") or "track.mp3"
         with open(tmp_path, "rb") as f:
             await chat.send_document(document=f, filename=filename, caption=f"🎵 {title}")
@@ -1836,6 +2057,8 @@ def setup_bot():
 
     # Init database tables
     init_telegram_tables()
+    # Clean expired cache entries
+    clear_expired_cache()
 
     # Create application. concurrent_updates: a slow handler (httpx to the app,
     # up to 30s timeout) must not block answering other button presses.
