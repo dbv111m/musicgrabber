@@ -10,6 +10,7 @@ import html
 import logging
 import math
 import os
+import re
 import sqlite3
 import json
 from datetime import datetime, timedelta
@@ -27,6 +28,7 @@ from telegram.ext import (
     ContextTypes,
 )
 import httpx
+from rapidfuzz import fuzz, process
 
 # Standalone module: talks to the MusicGrabber app purely over its HTTP API
 # (MUSICGRABBER_API_URL + MUSICGRABBER_API_KEY), keeps its own sqlite for
@@ -493,6 +495,140 @@ def format_error(raw_error: str) -> str:
     # Generic: return first sentence, trimmed
     first = raw_error.split(".")[0]
     return first[:120] + ("…" if len(first) > 120 else "")
+
+
+# =============================================================================
+# URL detection: YouTube / SoundCloud links -> direct download
+# =============================================================================
+
+_RE_YOUTUBE_WATCH = re.compile(
+    r'(?:youtube\.com/watch\?v=|youtu\.be/|youtube\.com/embed/|youtube\.com/v/)([a-zA-Z0-9_-]{11})'
+)
+_RE_YOUTUBE_SHORT = re.compile(r'youtube\.com/shorts/([a-zA-Z0-9_-]{11})')
+_RE_SOUNDCLOUD = re.compile(r'soundcloud\.com/([^/\?]+)(?:/([^/\?]+))?')
+
+
+def extract_url_source(query: str) -> Optional[tuple[str, str, str]]:
+    """Detect if query is a YouTube or SoundCloud URL.
+    Returns (source, video_id, source_url) or None."""
+    q = query.strip()
+
+    # YouTube watch URL
+    m = _RE_YOUTUBE_WATCH.search(q)
+    if m:
+        return ("youtube", m.group(1), q)
+
+    # YouTube shorts
+    m = _RE_YOUTUBE_SHORT.search(q)
+    if m:
+        return ("youtube", m.group(1), q)
+
+    # SoundCloud URL
+    m = _RE_SOUNDCLOUD.search(q)
+    if m:
+        artist = m.group(1) or ""
+        track = m.group(2) or ""
+        source_url = q
+        # video_id for soundcloud is the full URL path
+        video_id = f"sc_{artist}_{track}".replace(" ", "_")[:64] if track else f"sc_{artist}"
+        return ("soundcloud", video_id, source_url)
+
+    return None
+
+
+# =============================================================================
+# Fuzzy search: typo correction and re-ranking with rapidfuzz
+# =============================================================================
+
+FUZZY_THRESHOLD = int(os.getenv("TELEGRAM_FUZZY_THRESHOLD", "60"))
+
+
+def normalize_query(query: str) -> str:
+    """Normalize a search query: lowercase, strip, collapse whitespace, remove
+    common punctuation that breaks source indexes."""
+    q = query.strip().lower()
+    q = re.sub(r'[^\w\s\-]', ' ', q)  # replace punctuation with spaces
+    q = re.sub(r'\s+', ' ', q).strip()
+    return q
+
+
+def fuzzy_variants(query: str) -> list[str]:
+    """Generate query variants for fuzzy retry when the original returns empty.
+    Strips stop-words, tries word subsets, removes punctuation."""
+    norm = normalize_query(query)
+    words = norm.split()
+    variants = [norm]
+
+    # Remove common stop-words
+    stop = {"the", "a", "an", "of", "and", "feat", "ft", "vs", "remix", "edit"}
+    filtered = [w for w in words if w not in stop]
+    if filtered and filtered != words:
+        variants.append(" ".join(filtered))
+
+    # First two words
+    if len(words) >= 2:
+        variants.append(" ".join(words[:2]))
+
+    # Last two words (title often at end)
+    if len(words) >= 2:
+        variants.append(" ".join(words[-2:]))
+
+    # Dedup, preserve order
+    seen: set[str] = set()
+    ordered = []
+    for v in variants:
+        if v and v not in seen:
+            seen.add(v)
+            ordered.append(v)
+    return ordered[:5]
+
+
+def rerank_results(results: list[dict], query: str) -> list[dict]:
+    """Re-rank search results by rapidfuzz similarity to the user query.
+    Tracks with higher fuzzy similarity float to the top."""
+    if not results:
+        return results
+
+    norm_q = normalize_query(query)
+
+    def score(r: dict) -> float:
+        title = r.get("title") or ""
+        artist = r.get("artist") or r.get("channel") or ""
+        combined = f"{artist} {title}"
+        # Token set ratio is robust to word order differences
+        return fuzz.token_set_ratio(norm_q, combined.lower())
+
+    return sorted(results, key=score, reverse=True)
+
+
+def search_with_fallback(query: str, source: str, limit: int = 20) -> tuple[list[dict], str]:
+    """Search with fuzzy fallback: if the original query returns empty,
+    try normalized and reduced variants. Re-ranks results by fuzzy similarity.
+    Returns (results, used_query)."""
+    # Try original query first (caller handles async)
+    return [], query
+
+
+async def search_music_fuzzy(query: str, source: str, limit: int = 20) -> tuple[list[dict], str]:
+    """Async search with fuzzy fallback.
+    If the original query returns empty, tries normalized/reduced variants.
+    Re-ranks results by rapidfuzz similarity to the original query.
+    Returns (results, used_query)."""
+    results = await search_music(query, source, limit)
+    used_query = query
+    if results:
+        return rerank_results(results, query), used_query
+
+    # Try fuzzy variants
+    for variant in fuzzy_variants(query):
+        if variant == normalize_query(query):
+            continue  # already tried
+        results = await search_music(variant, source, limit)
+        if results:
+            used_query = variant
+            return rerank_results(results, query), used_query
+
+    return [], used_query
 
 
 # =============================================================================
@@ -1443,13 +1579,56 @@ async def handle_search_query(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     query = update.message.text.strip()
 
- # Search directly on any text message - no need to click "Search" first
- # (removed awaiting_search check)
-
-    if not query:
-        await update.message.reply_text("❌ Пустой запрос. Попробуйте ещё раз:")
+    # --- URL detection: YouTube / SoundCloud -> direct download ---
+    url_info = extract_url_source(query)
+    if url_info:
+        source, video_id, source_url = url_info
+        settings = get_user_settings(chat_id)
+        # Dedup check
+        track_key = ("", video_id.lower())
+        try:
+            conn = get_db_connection()
+            existing = conn.execute(
+                "SELECT job_id, status FROM bot_jobs WHERE chat_id = ? AND video_id = ? "
+                "AND status != 'failed' ORDER BY created_at DESC LIMIT 1",
+                (chat_id, video_id),
+            ).fetchone()
+            conn.close()
+        except Exception:
+            existing = None
+        if existing:
+            await update.message.reply_text(
+                f"⚠️ <b>Уже в очереди</b>\n\nЗадание #{existing['job_id'][:8]} уже имеет статус '{existing['status']}'.",
+                parse_mode="HTML")
+            return
+        # Send download action
+        await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.UPLOAD_DOCUMENT)
+        download_result = await download_track(
+            video_id=video_id,
+            title=query,
+            artist="",
+            source=source,
+            convert_to_flac=settings["convert_to_flac"],
+            chat_id=chat_id,
+            source_url=source_url,
+            update=update,
+            query=query,
+        )
+        if not download_result:
+            await update.message.reply_text("❌ Ошибка при добавлении в очередь.")
+            return
+        job_id = download_result.get("job_id")
+        if not job_id:
+            await update.message.reply_text("❌ Ошибка при добавлении в очередь.")
+            return
+        await update.message.reply_text(
+            f"⏳ <b>Добавлено в очередь по ссылке</b>\n\n🔗 {html.escape(query)}\n\nПридёт уведомление о результате (или /queue для прогресса).",
+            parse_mode="HTML")
+        asyncio.create_task(_watch_job(job_id, chat_id, update.message, query))
+        log_bot_action(chat_id, "download_url", f"{query}, job: {job_id}")
         return
 
+    # --- Fuzzy search ---
     clear_user_context(chat_id)
     set_user_context(chat_id, "search_query", query)
 
@@ -1463,15 +1642,16 @@ async def handle_search_query(update: Update, context: ContextTypes.DEFAULT_TYPE
     settings = get_user_settings(chat_id)
     source = settings["search_source"]
 
-    # Search: check cache first, then API
+    # Search: check cache first, then fuzzy API
     cached = get_cached_search(query)
     if cached:
         results = cached
+        used_query = query
         logger.info(f"Search cache hit for query {query!r}: {len(results)} results")
     else:
-        results = await search_music(query, source, limit=20)
+        results, used_query = await search_music_fuzzy(query, source, limit=20)
         if results:
-            save_search_results(query, source, results)
+            save_search_results(used_query, source, results)
 
     if not results:
         await status_msg.edit_text("❌ Ничего не найдено. Попробуйте другой запрос.")
@@ -1484,15 +1664,16 @@ async def handle_search_query(update: Update, context: ContextTypes.DEFAULT_TYPE
     # Update message with results
     total = len(results)
     shown = min(5, total)
+    display_query = used_query if used_query != query else query
     text = f"""🎵 <b>Найдено: {total}</b>
 
 Показано: {shown}
-Запрос: {query}
+Запрос: {html.escape(display_query)}
 
 Выберите трек для загрузки:"""
 
     await status_msg.edit_text(text, parse_mode="HTML", reply_markup=build_results_keyboard(results))
-    log_bot_action(chat_id, "search", f"query: {query}, results: {total}")
+    log_bot_action(chat_id, "search", f"query: {query}, used: {used_query}, results: {total}")
 
 
 # =============================================================================
