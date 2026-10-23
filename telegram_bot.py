@@ -8,6 +8,7 @@ No classes, no over-engineering - just functions.
 import asyncio
 import html
 import logging
+import math
 import os
 import sqlite3
 import json
@@ -35,18 +36,43 @@ import httpx
 # Telegram settings
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_ALLOWED_USERS = os.getenv("TELEGRAM_ALLOWED_USERS", "")
+# Admin chat id (you). Admin gets extra menu items and bypasses some limits.
+ADMIN_CHAT_ID = int(os.getenv("ADMIN_CHAT_ID", "0")) or None
 # API base URL - configurable for different deployments
 API_BASE_URL = os.getenv("MUSICGRABBER_API_URL", "http://localhost:8080")
 API_KEY = os.getenv("MUSICGRABBER_API_KEY", "")
 VERSION = os.getenv("TELEGRAM_BOT_VERSION", "standalone")
 BOT_DB_PATH = os.getenv("TELEGRAM_BOT_DB", "telegram_bot.db")
 
+# =============================================================================
+# Rate limiting: bot detection + logarithmic human limits
+# =============================================================================
+# Bot detection: if chat performs more than BOT_MAX actions within BOT_WINDOW
+# seconds, it's flagged as bot-like and temporarily blocked.
+RATE_LIMIT_BOT_MAX = int(os.getenv("TELEGRAM_RATE_LIMIT_BOT_MAX", "8"))
+RATE_LIMIT_BOT_WINDOW = int(os.getenv("TELEGRAM_RATE_LIMIT_BOT_WINDOW", "30"))
+# Bot block duration (seconds)
+RATE_LIMIT_BOT_BLOCK_SEC = int(os.getenv("TELEGRAM_RATE_LIMIT_BOT_BLOCK", "600"))
+
+# Human limits (logarithmic scale): base allowance grows with log2 of time
+# since first recorded action. Prevents burst abuse while letting real users
+# search/download naturally.
+RATE_LIMIT_HUMAN_BASE = int(os.getenv("TELEGRAM_RATE_LIMIT_HUMAN_BASE", "3"))
+RATE_LIMIT_HUMAN_MAX_CAP = int(os.getenv("TELEGRAM_RATE_LIMIT_HUMAN_MAX", "15"))
+
+# Per-action-type limits (hard caps per hour)
+RATE_LIMIT_SEARCH_HOUR = int(os.getenv("TELEGRAM_RATE_LIMIT_SEARCH_HOUR", "20"))
+RATE_LIMIT_DOWNLOAD_HOUR = int(os.getenv("TELEGRAM_RATE_LIMIT_DOWNLOAD_HOUR", "8"))
+
+# Bot-like blocks: chat_id -> unblock_timestamp
+_bot_blocks: dict[int, float] = {}
+
 
 def _api_headers() -> dict:
     return {"X-API-Key": API_KEY} if API_KEY else {}
 
-# User context storage (simple dict)
-user_contexts = {}
+# User context storage: persisted in SQLite, cached in memory
+user_contexts: dict[int, dict[str, Any]] = {}
 
 # Setup logging
 logging.basicConfig(
@@ -98,15 +124,33 @@ def init_telegram_tables():
             chat_id INTEGER,
             title TEXT,
             artist TEXT,
-            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            delivered INTEGER DEFAULT 0
         )
     """)
-    # delivered=1: файл реально ушёл в чат. Watcher живёт в памяти и умирает
-    # при рестарте контейнера — очередь (queue view) досылает completed&&undelivered.
+    # Backfill delivered column for older DBs that lack it
     try:
         conn.execute("ALTER TABLE bot_jobs ADD COLUMN delivered INTEGER DEFAULT 0")
     except sqlite3.OperationalError:
         pass  # колонка уже есть
+    # Persisted user context (survives restarts)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS user_contexts (
+            chat_id INTEGER,
+            key TEXT,
+            value TEXT,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            PRIMARY KEY (chat_id, key)
+        )
+    """)
+    # Rate limit tracking
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS rate_limits (
+            chat_id INTEGER,
+            action TEXT,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
     conn.commit()
     conn.close()
 
@@ -196,26 +240,200 @@ def is_user_allowed(chat_id: int) -> bool:
         return True  # Invalid config, allow all
 
 
+def is_admin(chat_id: int) -> bool:
+    """Check if chat_id is the admin."""
+    return ADMIN_CHAT_ID is not None and chat_id == ADMIN_CHAT_ID
+
+
+# =============================================================================
+# Rate limiting: bot detection + logarithmic human limits
+# =============================================================================
+
+def _now() -> float:
+    return datetime.now().timestamp()
+
+
+def record_action(chat_id: int, action: str) -> None:
+    """Record an action timestamp for rate limiting."""
+    try:
+        conn = get_db_connection()
+        conn.execute(
+            "INSERT INTO rate_limits (chat_id, action, created_at) "
+            "VALUES (?, ?, datetime(?, 'unixepoch'))",
+            (chat_id, action, _now()),
+        )
+        conn.commit()
+        conn.close()
+    except Exception as exc:
+        logger.warning(f"Failed to record rate limit action: {exc}")
+
+
+def is_bot_like(chat_id: int) -> tuple[bool, str]:
+    """Detect bot-like behavior: too many actions in a short window.
+    Returns (is_bot, reason). Also checks if chat is currently blocked."""
+    now = _now()
+
+    # Check existing block
+    if chat_id in _bot_blocks and _bot_blocks[chat_id] > now:
+        remaining = int(_bot_blocks[chat_id] - now)
+        return True, f"заблокирован за ботоподобное поведение (ещё {remaining} сек)"
+
+    # Clean old entries and count recent actions
+    window_start = now - RATE_LIMIT_BOT_WINDOW
+    try:
+        conn = get_db_connection()
+        conn.execute(
+            "DELETE FROM rate_limits WHERE created_at < datetime(?, 'unixepoch')",
+            (window_start,),
+        )
+        count = conn.execute(
+            "SELECT count(*) FROM rate_limits WHERE chat_id = ? "
+            "AND created_at >= datetime(?, 'unixepoch')",
+            (chat_id, window_start),
+        ).fetchone()[0]
+        conn.close()
+    except Exception:
+        count = 0
+
+    if count > RATE_LIMIT_BOT_MAX:
+        _bot_blocks[chat_id] = now + RATE_LIMIT_BOT_BLOCK_SEC
+        return True, f"ботоподобное поведение ({count} действий за {RATE_LIMIT_BOT_WINDOW} сек), блок на {RATE_LIMIT_BOT_BLOCK_SEC // 60} мин"
+
+    return False, ""
+
+
+def check_human_limit(chat_id: int, action: str) -> tuple[bool, str]:
+    """Logarithmic scale limit for human users.
+    Base allowance grows with log2 of time since first action.
+    Returns (allowed, reason)."""
+    if is_admin(chat_id):
+        return True, ""  # Admin bypasses human limits
+
+    now = _now()
+    hour_ago = now - 3600
+
+    # Hard caps per hour
+    if action == "search":
+        hour_cap = RATE_LIMIT_SEARCH_HOUR
+    elif action == "download":
+        hour_cap = RATE_LIMIT_DOWNLOAD_HOUR
+    else:
+        hour_cap = RATE_LIMIT_HUMAN_MAX_CAP
+
+    try:
+        conn = get_db_connection()
+        # Count actions of this type in the last hour
+        count = conn.execute(
+            "SELECT count(*) FROM rate_limits WHERE chat_id = ? AND action = ? "
+            "AND created_at >= datetime(?, 'unixepoch')",
+            (chat_id, action, hour_ago),
+        ).fetchone()[0]
+        # Time since first recorded action (for log scale)
+        first_ts = conn.execute(
+            "SELECT min(created_at) FROM rate_limits WHERE chat_id = ?",
+            (chat_id,),
+        ).fetchone()[0]
+        conn.close()
+    except Exception:
+        count = 0
+        first_ts = None
+
+    # Hard cap check
+    if count >= hour_cap:
+        return False, f"лимит {hour_cap} {action}/час исчерпан"
+
+    # Logarithmic burst check: allowance = base + log2(hours_active + 1)
+    if first_ts:
+        try:
+            first_dt = datetime.fromisoformat(first_ts.replace("Z", "+00:00")) if isinstance(first_ts, str) else first_ts
+            hours_active = max((now - first_dt.timestamp()) / 3600, 0)
+        except Exception:
+            hours_active = 0
+    else:
+        hours_active = 0
+
+    allowance = RATE_LIMIT_HUMAN_BASE + int(math.log2(hours_active + 1))
+    allowance = min(allowance, RATE_LIMIT_HUMAN_MAX_CAP)
+
+    if count >= allowance:
+        return False, f"лимит {allowance} {action} (шкала времени), попробуйте позже"
+
+    return True, ""
+
+
+def check_access(chat_id: int, action: str = "default") -> tuple[bool, str]:
+    """Full access check: bot detection + human limits.
+    Returns (allowed, reason). Admin bypasses human limits but not bot detection."""
+    # Bot-like detection (applies to everyone including admin)
+    bot, reason = is_bot_like(chat_id)
+    if bot:
+        return False, reason
+
+    # Human limits (admin bypasses)
+    human, reason = check_human_limit(chat_id, action)
+    if not human:
+        return False, reason
+
+    return True, ""
+
+
 # =============================================================================
 # Context management
 # =============================================================================
 
 def set_user_context(chat_id: int, key: str, value: Any):
-    """Set value in user context."""
+    """Set value in user context (memory + SQLite)."""
     if chat_id not in user_contexts:
         user_contexts[chat_id] = {}
     user_contexts[chat_id][key] = value
+    # Persist to SQLite (survives restarts)
+    try:
+        conn = get_db_connection()
+        conn.execute(
+            "INSERT OR REPLACE INTO user_contexts (chat_id, key, value, updated_at) "
+            "VALUES (?, ?, ?, CURRENT_TIMESTAMP)",
+            (chat_id, key, json.dumps(value) if not isinstance(value, str) else value),
+        )
+        conn.commit()
+        conn.close()
+    except Exception as exc:
+        logger.warning(f"Failed to persist context for chat {chat_id}: {exc}")
 
 
 def get_user_context(chat_id: int, key: str, default=None):
-    """Get value from user context."""
-    return user_contexts.get(chat_id, {}).get(key, default)
+    """Get value from user context (memory first, then SQLite)."""
+    # Check memory first
+    if chat_id in user_contexts and key in user_contexts[chat_id]:
+        return user_contexts[chat_id][key]
+    # Fallback to SQLite
+    try:
+        conn = get_db_connection()
+        row = conn.execute(
+            "SELECT value FROM user_contexts WHERE chat_id = ? AND key = ?",
+            (chat_id, key),
+        ).fetchone()
+        conn.close()
+        if row:
+            try:
+                return json.loads(row["value"])
+            except (json.JSONDecodeError, TypeError):
+                return row["value"]
+    except Exception as exc:
+        logger.warning(f"Failed to read context for chat {chat_id}: {exc}")
+    return default
 
 
 def clear_user_context(chat_id: int):
-    """Clear user context."""
+    """Clear user context (memory + SQLite)."""
     if chat_id in user_contexts:
         del user_contexts[chat_id]
+    try:
+        conn = get_db_connection()
+        conn.execute("DELETE FROM user_contexts WHERE chat_id = ?", (chat_id,))
+        conn.commit()
+        conn.close()
+    except Exception as exc:
+        logger.warning(f"Failed to clear context for chat {chat_id}: {exc}")
 
 
 # =============================================================================
@@ -227,7 +445,8 @@ async def search_music(query: str, source: str, limit: int = 10) -> list:
     try:
         # 'all' waits for every source; a stalling one (zvu4no from some IPs)
         # can push the total past 30s, which used to abort as an empty ReadTimeout.
-        async with httpx.AsyncClient(timeout=90) as client:
+        timeout = float(os.getenv("TELEGRAM_SEARCH_TIMEOUT", "90"))
+        async with httpx.AsyncClient(timeout=timeout) as client:
             response = await client.post(
                 f"{API_BASE_URL}/api/search",
                 json={"query": query, "source": source, "limit": limit},
@@ -314,17 +533,26 @@ async def get_user_jobs(chat_id: int, limit: int = 10) -> list:
         if key in seen:
             continue
         seen.add(key)
-        job = {"id": row["job_id"], "title": row["title"], "artist": row["artist"],
-               "delivered": bool(row["delivered"])}
-        status = await get_job_status(row["job_id"])
+        jobs.append({
+            "id": row["job_id"],
+            "title": row["title"],
+            "artist": row["artist"],
+            "delivered": bool(row["delivered"]),
+        })
+        if len(jobs) >= limit:
+            break
+
+    # Enrich with live status concurrently (fixes N+1 sequential HTTP calls)
+    async def _enrich(job):
+        status = await get_job_status(job["id"])
         if status:
             job.update({k: status.get(k) for k in ("status", "progress", "error") if status.get(k) is not None})
         else:
             job["status"] = "unknown"
-        jobs.append(job)
-        if len(jobs) >= limit:
-            break
-    return jobs
+        return job
+
+    enriched = await asyncio.gather(*[_enrich(j) for j in jobs])
+    return enriched
 
 
 async def _redeliver_missed(chat, jobs: list):
@@ -357,8 +585,8 @@ async def get_stats() -> Optional[dict]:
 # Keyboard builders
 # =============================================================================
 
-def build_main_keyboard():
-    """Build main menu keyboard."""
+def build_main_keyboard(admin: bool = False):
+    """Build main menu keyboard. Admins get extra items."""
     keyboard = [
         [InlineKeyboardButton("🎵 Поиск музыки", callback_data="menu_search")],
         [InlineKeyboardButton("📋 Мои загрузки", callback_data="menu_queue")],
@@ -366,10 +594,13 @@ def build_main_keyboard():
         [InlineKeyboardButton("⚙️ Настройки", callback_data="menu_settings")],
         [InlineKeyboardButton("❓ Помощь", callback_data="menu_help")],
     ]
+    if admin:
+        keyboard.insert(2, [InlineKeyboardButton("🔧 Админ: отладка", callback_data="menu_debug")])
+        keyboard.insert(3, [InlineKeyboardButton("📢 Админ: рассылка", callback_data="menu_broadcast")])
     return InlineKeyboardMarkup(keyboard)
 
 
-def build_settings_keyboard(settings: dict):
+def build_settings_keyboard(settings: dict, admin: bool = False):
     """Build settings menu keyboard."""
     source_labels = {
         "youtube": "YouTube",
@@ -480,18 +711,27 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ У вас нет доступа к этому боту.")
         return
 
+    # Access check
+    allowed, reason = check_access(chat_id, "start")
+    if not allowed:
+        await update.message.reply_text(f"⏳ {reason}")
+        return
+    record_action(chat_id, "start")
+
     update_user_last_active(chat_id, user.username, user.first_name)
     clear_user_context(chat_id)
 
-    text = f"""🎵 <b>MusicGrabger Bot</b>
+    admin = is_admin(chat_id)
+    text = f"""🎵 <b>MusicGrabber Bot</b>
 
 Версия: {VERSION}
+{'<b>Режим: администратор</b>' if admin else ''}
 
 Поиск и загрузка музыки в лучшем качестве!
 
 Выберите действие в меню ниже:"""
 
-    await update.message.reply_text(text, parse_mode="HTML", reply_markup=build_main_keyboard())
+    await update.message.reply_text(text, parse_mode="HTML", reply_markup=build_main_keyboard(admin=admin))
     log_bot_action(chat_id, "start")
 
 
@@ -501,8 +741,11 @@ HELP_TEXT = """❓ <b>Помощь</b>
 /start - Главное меню
 /search - Поиск музыки
 /queue - Мои загрузки
+/history - История загрузок
 /stats - Статистика
 /settings - Настройки
+/whoami - Ваш chat_id
+/cancel - Отмена текущего действия
 
 <b>Как пользоваться:</b>
 1. Нажмите "🎵 Поиск музыки"
@@ -521,6 +764,10 @@ HELP_TEXT = """❓ <b>Помощь</b>
 • Качество (FLAC/оригинал)
 • Папка для сохранения
 
+<b>Ограничения:</b>
+Поиск и скачка ограничены для защиты от спама.
+Администратор имеет расширенное меню и обходит лимиты.
+
 Вопросы и предложения: https://github.com/dbv111m/musicgrabber"""
 
 
@@ -534,7 +781,63 @@ async def callback_help(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle help menu callback."""
     query = update.callback_query
     await query.answer()
-    await query.edit_message_text(HELP_TEXT, parse_mode="HTML", reply_markup=build_main_keyboard())
+    await query.edit_message_text(HELP_TEXT, parse_mode="HTML", reply_markup=build_main_keyboard(admin=is_admin(query.message.chat_id)))
+
+
+async def callback_menu_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle admin debug menu callback."""
+    query = update.callback_query
+    chat_id = query.message.chat_id
+
+    if not is_admin(chat_id):
+        await query.answer("❌ Только для администратора.")
+        return
+
+    await query.answer()
+
+    # Get recent bot logs
+    try:
+        conn = get_db_connection()
+        rows = conn.execute(
+            "SELECT action, details, created_at FROM bot_logs ORDER BY created_at DESC LIMIT 15",
+        ).fetchall()
+        # Rate limit stats
+        blocked = len([c for c, t in _bot_blocks.items() if t > datetime.now().timestamp()])
+        conn.close()
+    except Exception:
+        rows = []
+        blocked = 0
+
+    log_lines = [f"{r['created_at']} {r['action']}" + (f": {r['details']}" if r['details'] else "") for r in rows]
+    text = f"""🔧 <b>Админ: отладка</b>
+
+заблокировано ботов: {blocked}
+user_contexts в памяти: {len(user_contexts)}
+
+Последние действия:
+{chr(10).join(log_lines) if log_lines else '—'}
+"""
+    await query.edit_message_text(text, parse_mode="HTML", reply_markup=build_main_keyboard(admin=True))
+
+
+async def callback_menu_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle admin broadcast menu callback."""
+    query = update.callback_query
+    chat_id = query.message.chat_id
+
+    if not is_admin(chat_id):
+        await query.answer("❌ Только для администратора.")
+        return
+
+    await query.answer()
+    set_user_context(chat_id, "awaiting_broadcast", True)
+
+    text = """📢 <b>Админ: рассылка</b>
+
+Введите текст сообщения для рассылки всем пользователям.
+Для отмены отправьте /cancel."""
+
+    await query.edit_message_text(text, parse_mode="HTML", reply_markup=build_main_keyboard(admin=True))
 
 
 async def cmd_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -543,6 +846,13 @@ async def cmd_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not is_user_allowed(chat_id):
         return
+
+    # Access check
+    allowed, reason = check_access(chat_id, "search")
+    if not allowed:
+        await update.message.reply_text(f"⏳ {reason}")
+        return
+    record_action(chat_id, "search")
 
     clear_user_context(chat_id)
     set_user_context(chat_id, "awaiting_search", True)
@@ -569,6 +879,13 @@ async def cmd_queue(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_user_allowed(chat_id):
         return
 
+    # Access check
+    allowed, reason = check_access(chat_id, "queue")
+    if not allowed:
+        await update.message.reply_text(f"⏳ {reason}")
+        return
+    record_action(chat_id, "queue")
+
     jobs = await get_user_jobs(chat_id)
 
     if not jobs:
@@ -588,6 +905,13 @@ async def cmd_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not is_user_allowed(chat_id):
         return
+
+    # Access check
+    allowed, reason = check_access(chat_id, "stats")
+    if not allowed:
+        await update.message.reply_text(f"⏳ {reason}")
+        return
+    record_action(chat_id, "stats")
 
     stats = await get_stats()
     if not stats:
@@ -641,6 +965,152 @@ async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("❌ Отменено.", reply_markup=build_main_keyboard())
 
 
+async def cmd_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /history command — recent downloads for this chat."""
+    chat_id = update.effective_chat.id
+
+    if not is_user_allowed(chat_id):
+        return
+
+    # Access check
+    allowed, reason = check_access(chat_id, "queue")
+    if not allowed:
+        await update.message.reply_text(f"⏳ {reason}")
+        return
+    record_action(chat_id, "queue")
+
+    jobs = await get_user_jobs(chat_id, limit=20)
+    if not jobs:
+        await update.message.reply_text("📜 <b>История</b>\n\nПока нет загрузок.", parse_mode="HTML")
+        return
+
+    lines = ["📜 <b>Последние загрузки</b>\n"]
+    for job in jobs[:10]:
+        status = job.get("status", "unknown")
+        status_emoji = {
+            "queued": "⏳",
+            "downloading": "⬇️",
+            "completed": "✅",
+            "failed": "❌",
+        }.get(status, "❓")
+        title = job.get("title", "Unknown")
+        artist = job.get("artist", "Unknown")
+        lines.append(f"{status_emoji} {artist} — {title}")
+
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+    log_bot_action(chat_id, "history")
+
+
+async def cmd_whoami(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /whoami — show user's chat_id."""
+    chat_id = update.effective_chat.id
+    user = update.effective_user
+
+    # Access check
+    allowed, reason = check_access(chat_id, "default")
+    if not allowed:
+        await update.message.reply_text(f"⏳ {reason}")
+        return
+    record_action(chat_id, "default")
+
+    admin_marker = " <b>(администратор)</b>" if is_admin(chat_id) else ""
+    text = f"""👤 <b>Ваш профиль</b>
+
+chat_id: <code>{chat_id}</code>{admin_marker}
+username: {user.username or '—'}
+first_name: {user.first_name or '—'}
+"""
+    await update.message.reply_text(text, parse_mode="HTML")
+    log_bot_action(chat_id, "whoami")
+
+
+async def cmd_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /debug — bot internals (admin only)."""
+    chat_id = update.effective_chat.id
+
+    if not is_admin(chat_id):
+        await update.message.reply_text("❌ Только для администратора.")
+        return
+
+    # Access check
+    allowed, reason = check_access(chat_id, "debug")
+    if not allowed:
+        await update.message.reply_text(f"⏳ {reason}")
+        return
+    record_action(chat_id, "debug")
+
+    # Get recent bot logs
+    try:
+        conn = get_db_connection()
+        rows = conn.execute(
+            "SELECT action, details, created_at FROM bot_logs WHERE chat_id = ? "
+            "ORDER BY created_at DESC LIMIT 10",
+            (chat_id,),
+        ).fetchall()
+        blocked = len([c for c, t in _bot_blocks.items() if t > datetime.now().timestamp()])
+        conn.close()
+    except Exception:
+        rows = []
+        blocked = 0
+
+    log_lines = [f"{r['created_at']} {r['action']}" + (f": {r['details']}" if r['details'] else "") for r in rows]
+    text = f"""🔧 <b>Отладка (админ)</b>
+
+chat_id: {chat_id}
+заблокировано ботов: {blocked}
+user_contexts в памяти: {len(user_contexts)}
+rate_limit_bot_max: {RATE_LIMIT_BOT_MAX} / {RATE_LIMIT_BOT_WINDOW}с
+rate_limit_human_base: {RATE_LIMIT_HUMAN_BASE} (макс {RATE_LIMIT_HUMAN_MAX_CAP})
+
+Последние действия:
+{chr(10).join(log_lines) if log_lines else '—'}
+"""
+    await update.message.reply_text(text, parse_mode="HTML")
+    log_bot_action(chat_id, "debug")
+
+
+async def cmd_broadcast(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /broadcast <text> — send message to all known users (admin only)."""
+    chat_id = update.effective_chat.id
+
+    if not is_admin(chat_id):
+        await update.message.reply_text("❌ Только для администратора.")
+        return
+
+    # Access check
+    allowed, reason = check_access(chat_id, "broadcast")
+    if not allowed:
+        await update.message.reply_text(f"⏳ {reason}")
+        return
+    record_action(chat_id, "broadcast")
+
+    if not context.args:
+        await update.message.reply_text("❌ Использование: /broadcast <текст>", parse_mode="HTML")
+        return
+
+    message_text = " ".join(context.args)
+
+    # Get all known chat_ids
+    try:
+        conn = get_db_connection()
+        rows = conn.execute("SELECT DISTINCT chat_id FROM telegram_users").fetchall()
+        conn.close()
+    except Exception:
+        rows = []
+
+    sent = 0
+    for row in rows:
+        target = row["chat_id"]
+        try:
+            await context.bot.send_message(chat_id=target, text=f"📢 <b>Рассылка:</b>\n\n{message_text}", parse_mode="HTML")
+            sent += 1
+        except Exception:
+            pass
+
+    await update.message.reply_text(f"📢 Отправлено {sent} пользователям.", parse_mode="HTML")
+    log_bot_action(chat_id, "broadcast", f"sent:{sent}")
+
+
 # =============================================================================
 # Message handlers
 # =============================================================================
@@ -648,6 +1118,38 @@ async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def handle_search_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle search query message."""
     chat_id = update.effective_chat.id
+
+    # Access check
+    allowed, reason = check_access(chat_id, "search")
+    if not allowed:
+        await update.message.reply_text(f"⏳ {reason}")
+        return
+    record_action(chat_id, "search")
+
+    # If admin is in broadcast mode, treat message as broadcast content
+    if is_admin(chat_id) and get_user_context(chat_id, "awaiting_broadcast"):
+        clear_user_context(chat_id)
+        message_text = query
+        try:
+            conn = get_db_connection()
+            rows = conn.execute("SELECT DISTINCT chat_id FROM telegram_users").fetchall()
+            conn.close()
+        except Exception:
+            rows = []
+
+        sent = 0
+        for row in rows:
+            target = row["chat_id"]
+            try:
+                await context.bot.send_message(chat_id=target, text=f"📢 <b>Рассылка:</b>\n\n{message_text}", parse_mode="HTML")
+                sent += 1
+            except Exception:
+                pass
+
+        await update.message.reply_text(f"📢 Отправлено {sent} пользователям.", parse_mode="HTML")
+        log_bot_action(chat_id, "broadcast", f"sent:{sent}")
+        return
+
     query = update.message.text.strip()
 
  # Search directly on any text message - no need to click "Search" first
@@ -704,10 +1206,14 @@ async def callback_main_menu(update: Update, context: ContextTypes.DEFAULT_TYPE)
     query = update.callback_query
     await query.answer()
 
-    text = """🎵 <b>MusicGrabber Bot</b>
+    chat_id = query.message.chat_id
+    admin = is_admin(chat_id)
 
-Выберите действие:"""
-    await query.edit_message_text(text, parse_mode="HTML", reply_markup=build_main_keyboard())
+    text = f"""🎵 <b>MusicGrabber Bot</b>
+
+Выберите действие:{' <b>(режим администратора)</b>' if admin else ''}"""
+
+    await query.edit_message_text(text, parse_mode="HTML", reply_markup=build_main_keyboard(admin=admin))
 
 
 async def callback_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -716,6 +1222,14 @@ async def callback_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
 
     chat_id = query.message.chat_id
+
+    # Access check
+    allowed, reason = check_access(chat_id, "search")
+    if not allowed:
+        await query.answer(f"⏳ {reason}")
+        return
+    record_action(chat_id, "search")
+
     clear_user_context(chat_id)
     set_user_context(chat_id, "awaiting_search", True)
 
@@ -731,6 +1245,15 @@ async def callback_search(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def callback_queue(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle queue menu callback."""
     query = update.callback_query
+    chat_id = query.message.chat_id
+
+    # Access check
+    allowed, reason = check_access(chat_id, "queue")
+    if not allowed:
+        await query.answer(f"⏳ {reason}")
+        return
+    record_action(chat_id, "queue")
+
     await query.answer()
 
     chat_id = query.message.chat_id
@@ -777,20 +1300,36 @@ async def callback_stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def callback_settings(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle settings menu callback."""
     query = update.callback_query
-    await query.answer()
-
     chat_id = query.message.chat_id
+
+    # Access check
+    allowed, reason = check_access(chat_id, "settings")
+    if not allowed:
+        await query.answer(f"⏳ {reason}")
+        return
+    record_action(chat_id, "settings")
+
     settings = get_user_settings(chat_id)
+    admin = is_admin(chat_id)
 
     text = """⚙️ <b>Настройки</b>
 
 Выберите параметр:"""
-    await query.edit_message_text(text, parse_mode="HTML", reply_markup=build_settings_keyboard(settings))
+    await query.edit_message_text(text, parse_mode="HTML", reply_markup=build_settings_keyboard(settings, admin=admin))
 
 
 async def callback_set_source(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle source setting callback."""
     query = update.callback_query
+    chat_id = query.message.chat_id
+
+    # Access check
+    allowed, reason = check_access(chat_id, "settings")
+    if not allowed:
+        await query.answer(f"⏳ {reason}")
+        return
+    record_action(chat_id, "settings")
+
     await query.answer()
 
     chat_id = query.message.chat_id
@@ -819,9 +1358,17 @@ async def callback_set_source(update: Update, context: ContextTypes.DEFAULT_TYPE
 async def callback_set_quality(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle quality setting callback."""
     query = update.callback_query
+    chat_id = query.message.chat_id
+
+    # Access check
+    allowed, reason = check_access(chat_id, "settings")
+    if not allowed:
+        await query.answer(f"⏳ {reason}")
+        return
+    record_action(chat_id, "settings")
+
     await query.answer()
 
-    chat_id = query.message.chat_id
     settings = get_user_settings(chat_id)
 
     # Toggle FLAC
@@ -835,25 +1382,68 @@ async def callback_set_quality(update: Update, context: ContextTypes.DEFAULT_TYP
     log_bot_action(chat_id, "settings", f"flac: {settings['convert_to_flac']}")
 
 
+async def callback_set_folder(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle folder setting callback."""
+    query = update.callback_query
+    chat_id = query.message.chat_id
+
+    # Access check
+    allowed, reason = check_access(chat_id, "settings")
+    if not allowed:
+        await query.answer(f"⏳ {reason}")
+        return
+    record_action(chat_id, "settings")
+
+    await query.answer()
+
+    settings = get_user_settings(chat_id)
+    current_folder = settings.get("download_folder", "Singles")
+
+    # Cycle through common folders
+    folders = ["Singles", "Albums", "Compilations", "Incoming"]
+    if current_folder in folders:
+        next_idx = (folders.index(current_folder) + 1) % len(folders)
+        settings["download_folder"] = folders[next_idx]
+    else:
+        settings["download_folder"] = folders[0]
+
+    save_user_settings(chat_id, settings)
+
+    text = f"📁 <b>Папка: {settings['download_folder']}</b>"
+    await query.edit_message_text(text, parse_mode="HTML", reply_markup=build_settings_keyboard(settings))
+    log_bot_action(chat_id, "settings", f"folder: {settings['download_folder']}")
+
+
 async def _send_track_file(chat, job_id: str, job: Optional[dict], title: str) -> bool:
     """Fetch the finished file from the app and send it into the chat.
 
-    Falls back to False (caller sends a text notice) on any failure, so a
-    broken file delivery never masks a successful download."""
+    Downloads to a temp file first (streaming) to avoid loading large files
+    entirely into memory. Falls back to False on any failure."""
+    import tempfile
     try:
         async with httpx.AsyncClient(timeout=300) as client:
-            resp = await client.get(
-                f"{API_BASE_URL}/api/jobs/{job_id}/download", headers=_api_headers()
-            )
-        if resp.status_code != 200:
-            logger.warning(f"job {job_id}: download endpoint returned {resp.status_code}")
-            return False
-        if len(resp.content) > 49 * 1024 * 1024:  # Telegram bot API sendDocument cap
-            logger.warning(f"job {job_id}: file {len(resp.content)} bytes over 50MB cap")
-            return False
+            async with client.stream(
+                "GET",
+                f"{API_BASE_URL}/api/jobs/{job_id}/download",
+                headers=_api_headers(),
+            ) as resp:
+                if resp.status_code != 200:
+                    logger.warning(f"job {job_id}: download endpoint returned {resp.status_code}")
+                    return False
+                content_length = resp.headers.get("content-length")
+                if content_length and int(content_length) > 49 * 1024 * 1024:
+                    logger.warning(f"job {job_id}: file over 50MB Telegram cap")
+                    return False
+                # Stream to temp file
+                suffix = os.path.splitext((job or {}).get("final_path") or "")[1] or ".mp3"
+                with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+                    async for chunk in resp.aiter_bytes():
+                        tmp.write(chunk)
+                    tmp_path = tmp.name
         filename = os.path.basename((job or {}).get("final_path") or "") or "track.mp3"
-        await chat.send_document(document=resp.content, filename=filename,
-                                 caption=f"🎵 {title}")
+        with open(tmp_path, "rb") as f:
+            await chat.send_document(document=f, filename=filename, caption=f"🎵 {title}")
+        os.unlink(tmp_path)
         conn = get_db_connection()
         conn.execute("UPDATE bot_jobs SET delivered = 1 WHERE job_id = ?", (job_id,))
         conn.commit()
@@ -861,6 +1451,10 @@ async def _send_track_file(chat, job_id: str, job: Optional[dict], title: str) -
         return True
     except Exception as exc:
         logger.warning(f"job {job_id}: sending file failed: {exc}")
+        try:
+            os.unlink(tmp_path)  # type: ignore[name-defined]
+        except Exception:
+            pass
         return False
 
 
@@ -868,14 +1462,27 @@ async def _watch_job(job_id: str, chat_id: int, message, title: str,
                      interval: float = 5.0, max_polls: int = 180):
     """Poll a queued job until it completes/fails, then notify the chat.
     Fire-and-forget: without it the user never learns the outcome (looks
-    like a hang). ~15 min cap at 5s."""
+    like a hang). ~15 min cap at 5s. Shows progress updates in the message."""
     status = "unknown"
+    progress = None
+    last_progress_text = None
     for _ in range(max_polls):
         await asyncio.sleep(interval)
         data = await get_job_status(job_id)
         if not data:
             continue
         status = data.get("status", "unknown")
+        progress = data.get("progress")
+        # Update message with progress while still running
+        if status in ("queued", "downloading"):
+            prog_text = f" ({progress}%)" if progress is not None else ""
+            new_text = f"⏳ <b>Загружается</b>\n\n🎵 {html.escape(title)}{prog_text}"
+            if new_text != last_progress_text:
+                try:
+                    await message.edit_text(new_text, parse_mode="HTML")
+                    last_progress_text = new_text
+                except Exception:
+                    pass  # message not modified or other error
         if status in ("completed", "failed"):
             break
     safe_title = html.escape(title)
@@ -889,14 +1496,26 @@ async def _watch_job(job_id: str, chat_id: int, message, title: str,
         await message.chat.send_message(f"❌ <b>Ошибка загрузки</b>\n\n🎵 {safe_title}\nПричина: {err}", parse_mode="HTML")
     else:
         logger.info(f"job {job_id}: watcher gave up after {max_polls} polls (last: {status})")
+        try:
+            await message.edit_text(f"⏰ <b>Таймаут загрузки</b>\n\n🎵 {safe_title}\nПревышено время ожидания ({max_polls * interval:.0f} сек).", parse_mode="HTML")
+        except Exception:
+            pass
 
 
 async def callback_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle download callback."""
     query = update.callback_query
+    chat_id = query.message.chat_id
+
+    # Access check
+    allowed, reason = check_access(chat_id, "download")
+    if not allowed:
+        await query.answer(f"⏳ {reason}")
+        return
+    record_action(chat_id, "download")
+
     await query.answer("⏳ Добавлено в очередь...")
 
-    chat_id = query.message.chat_id
     result_idx = int(query.data.split("_")[1])
 
     # Get result
@@ -927,14 +1546,6 @@ async def callback_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if not download_result:
         await query.edit_message_text("❌ Ошибка при добавлении в очередь.")
-        return
-
-    # File already exists - messages already sent by download_track
-    if download_result.get("status") == "existing":
-        try:
-            await query.edit_message_text("✅ Файл отправлен!", parse_mode="HTML")
-        except Exception:
-            pass
         return
 
     job_id = download_result.get("job_id")
@@ -999,8 +1610,16 @@ async def callback_queue_refresh(update: Update, context: ContextTypes.DEFAULT_T
     """Re-render the queue keyboard with fresh statuses."""
     query = update.callback_query
     chat_id = query.message.chat_id
+
+    # Access check
+    allowed, reason = check_access(chat_id, "queue")
+    if not allowed:
+        await query.answer(f"⏳ {reason}")
+        return
+
     jobs = await get_user_jobs(chat_id)
     text = f"📋 <b>Мои загрузки</b>\n\nВсего: {len(jobs)}"
+    record_action(chat_id, "queue")
     await query.answer()
     try:
         await query.edit_message_text(text, parse_mode="HTML", reply_markup=build_queue_keyboard(jobs))
@@ -1013,7 +1632,15 @@ async def callback_queue_clear(update: Update, context: ContextTypes.DEFAULT_TYP
     """Drop this chat's job registry (app-side library/downloads untouched)."""
     query = update.callback_query
     chat_id = query.message.chat_id
+
+    # Access check
+    allowed, reason = check_access(chat_id, "queue")
+    if not allowed:
+        await query.answer(f"⏳ {reason}")
+        return
+
     conn = get_db_connection()
+    record_action(chat_id, "queue")
     conn.execute("DELETE FROM bot_jobs WHERE chat_id = ?", (chat_id,))
     conn.commit()
     conn.close()
@@ -1028,6 +1655,14 @@ async def callback_retry(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Retry a failed job via the app API and watch it to deliver the file."""
     query = update.callback_query
     chat_id = query.message.chat_id
+
+    # Access check
+    allowed, reason = check_access(chat_id, "download")
+    if not allowed:
+        await query.answer(f"⏳ {reason}")
+        return
+    record_action(chat_id, "download")
+
     job_id = query.data.split("_", 1)[1]
     await query.answer()
 
@@ -1085,6 +1720,10 @@ def setup_bot():
     app.add_handler(CommandHandler("queue", cmd_queue))
     app.add_handler(CommandHandler("stats", cmd_stats))
     app.add_handler(CommandHandler("settings", cmd_settings))
+    app.add_handler(CommandHandler("history", cmd_history))
+    app.add_handler(CommandHandler("whoami", cmd_whoami))
+    app.add_handler(CommandHandler("debug", cmd_debug))
+    app.add_handler(CommandHandler("broadcast", cmd_broadcast))
     app.add_handler(CommandHandler("cancel", cmd_cancel))
 
     # Message handlers
@@ -1097,27 +1736,30 @@ def setup_bot():
     app.add_handler(CallbackQueryHandler(callback_stats, pattern="^menu_stats$"))
     app.add_handler(CallbackQueryHandler(callback_settings, pattern="^menu_settings$"))
     app.add_handler(CallbackQueryHandler(callback_help, pattern="^menu_help$"))
+    app.add_handler(CallbackQueryHandler(callback_menu_debug, pattern="^menu_debug$"))
+    app.add_handler(CallbackQueryHandler(callback_menu_broadcast, pattern="^menu_broadcast$"))
     app.add_handler(CallbackQueryHandler(callback_set_source, pattern="^set_source$"))
     app.add_handler(CallbackQueryHandler(callback_set_quality, pattern="^set_quality$"))
+    app.add_handler(CallbackQueryHandler(callback_set_folder, pattern="^set_folder$"))
     app.add_handler(CallbackQueryHandler(callback_download, pattern="^download_\\d+$"))
     app.add_handler(CallbackQueryHandler(callback_page, pattern="^page_\\d+$"))
     app.add_handler(CallbackQueryHandler(callback_search_cancel, pattern="^search_cancel$"))
     app.add_handler(CallbackQueryHandler(callback_queue_refresh, pattern="^queue_refresh$"))
     app.add_handler(CallbackQueryHandler(callback_queue_clear, pattern="^queue_clear$"))
     app.add_handler(CallbackQueryHandler(callback_retry, pattern="^retry_"))
-    app.add_handler(CallbackQueryHandler(callback_noop, pattern="^set_folder$|^cancel_|^noop$"))
+    app.add_handler(CallbackQueryHandler(callback_noop, pattern="^cancel_|^noop$"))
 
     return app
 
 
 def run_bot():
-    """Run bot (blocking)."""
+    """Run bot (blocking, polling mode)."""
     app = setup_bot()
     if not app:
         logger.error("Failed to setup bot")
         return
 
-    logger.info("Starting MusicGrabber Telegram bot...")
+    logger.info("Starting MusicGrabber Telegram bot (polling)...")
     app.run_polling(allowed_updates=["message", "callback_query"])
 
 
