@@ -42,7 +42,10 @@ from constants import (
     SEARCH_SLOT_WAIT_AUTOMATED,
 )
 from coverart import fetch_cover_art, get_album_art_context, ensure_album_cover_files, cache_cover_art, _fetch_caa_cover
-from db import db_conn, log_match_mismatch, get_album_track_lock, complete_album_track_lock
+from db import (
+    db_conn, log_match_mismatch, get_album_track_lock, complete_album_track_lock,
+    log_source_attempt,
+)
 from metadata import (
     lookup_metadata, lookup_musicbrainz_by_isrc, fetch_lyrics, save_lyrics_file,
     apply_metadata_to_file, read_existing_track_number, verify_recording,
@@ -1185,14 +1188,23 @@ def process_acquisition_cycle(
         status = row[0] if row else "failed"
         last_error = (row[1] if row else None) or "Download failed"
         if status in {"completed", "completed_with_errors"}:
+            log_source_attempt(
+                job_id, source, source_url, "completed", None, True
+            )
             finish_acquisition_attempt(attempt_id, "completed")
             finish_acquisition_cycle(target_id, "completed")
             return
         if status == "cancelled":
+            log_source_attempt(
+                job_id, source, source_url, "cancelled", last_error, True
+            )
             finish_acquisition_attempt(attempt_id, "cancelled", last_error)
             finish_acquisition_cycle(target_id, "cancelled", last_error)
             return
 
+        log_source_attempt(
+            job_id, source, source_url, "failed", last_error, True
+        )
         finish_acquisition_attempt(attempt_id, "failed", last_error)
         attempted_sources.add(source)
         if candidate_id:
