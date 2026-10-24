@@ -31,6 +31,9 @@ scripts/
 .DS_Store
 Thumbs.db
 
+# Logs
+*.log
+
 # Application data
 /data/
 

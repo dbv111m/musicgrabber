@@ -15,11 +15,11 @@ import re
 import signal
 import sqlite3
 from datetime import datetime, timezone
-from typing import Any, Optional
+from typing import Any
 
 import httpx
 from rapidfuzz import fuzz
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Message, Update
 from telegram.constants import ChatAction
 from telegram.ext import (
     Application,
@@ -288,6 +288,8 @@ def get_user_settings(chat_id: int) -> dict:
         "convert_to_flac": False,  # Default to original/MP3, not FLAC
         "download_folder": "Singles",
         "min_bitrate": 0,
+        "search_source_filter": "all",  # all, youtube, soundcloud, monochrome, freemp3cloud
+        "quality_filter": "all",  # all, flac, mp3
     }
 
 
@@ -1116,7 +1118,7 @@ async def search_music(query: str, source: str, limit: int = 10) -> list:
 async def download_track(video_id: str, title: str, artist: str, source: str,
                         convert_to_flac: bool, chat_id: int, source_url: str | None = None,
                         update: Update | None = None, query: str | None = None,
-                        candidate_pool: Optional[list[dict]] = None) -> dict | None:
+                        candidate_pool: list[dict] | None = None) -> dict | None:
     """Queue track download via the app API and return the job ID."""
     # Queue download
     try:
@@ -1282,6 +1284,31 @@ def build_settings_keyboard(settings: dict, admin: bool = False):
         [InlineKeyboardButton(f"🔊 Источник: {source_label}", callback_data="set_source")],
         [InlineKeyboardButton(f"🎼 Качество: {quality_label}", callback_data="set_quality")],
         [InlineKeyboardButton(f"📁 Папка: {settings['download_folder']}", callback_data="set_folder")],
+        [InlineKeyboardButton("◀️ Назад", callback_data="menu_main")],
+    ]
+    return InlineKeyboardMarkup(keyboard)
+
+
+def build_filters_keyboard(settings: dict):
+    """Build search filters keyboard."""
+    source_labels = {
+        "all": "Все источники",
+        "youtube": "YouTube",
+        "soundcloud": "SoundCloud",
+        "monochrome": "Monochrome",
+        "freemp3cloud": "FreeMp3Cloud",
+    }
+    quality_labels = {
+        "all": "Любое качество",
+        "flac": "FLAC (lossless)",
+        "mp3": "MP3",
+    }
+    source_label = source_labels.get(settings.get("search_source_filter", "all"), "Все источники")
+    quality_label = quality_labels.get(settings.get("quality_filter", "all"), "Любое качество")
+
+    keyboard = [
+        [InlineKeyboardButton(f"🔊 Источник: {source_label}", callback_data="filter_source")],
+        [InlineKeyboardButton(f"🎼 Качество: {quality_label}", callback_data="filter_quality")],
         [InlineKeyboardButton("◀️ Назад", callback_data="menu_main")],
     ]
     return InlineKeyboardMarkup(keyboard)
@@ -1835,6 +1862,155 @@ API MusicGrabber: {'✅ доступен' if api_ok else '❌ недоступе
     log_bot_action(chat_id, "ping")
 
 
+async def cmd_trending(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /trending — popular search queries."""
+    chat = update.effective_chat
+    assert chat is not None
+    chat_id = chat.id
+    message = update.message
+    assert message is not None
+
+    if not is_user_allowed(chat_id):
+        return
+
+    allowed, reason = check_access(chat_id, "default")
+    if not allowed:
+        await message.reply_text(f"⏳ {reason}")
+        return
+    record_action(chat_id, "default")
+
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(
+                f"{API_BASE_URL}/api/search/trending",
+                params={"limit": 10, "hours": 168},
+                headers=_api_headers(),
+            )
+        if resp.status_code != 200:
+            await message.reply_text("❌ Не удалось получить популярные запросы.")
+            return
+        data = resp.json()
+    except Exception as e:
+        logger.error(f"Trending error: {e}")
+        await message.reply_text("❌ Не удалось получить популярные запросы.")
+        return
+
+    trending = data.get("trending", [])
+    if not trending:
+        await message.reply_text("📭 Пока нет популярных запросов.")
+        return
+
+    lines = ["🔥 <b>Популярные запросы (за неделю):</b>"]
+    for i, item in enumerate(trending, 1):
+        lines.append(f"{i}. {html.escape(item['query'])} — {item['count']} поисков")
+
+    await message.reply_text("\n".join(lines), parse_mode="HTML")
+    log_bot_action(chat_id, "trending")
+
+
+async def cmd_search_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /search-history — recent searches with repeat buttons."""
+    chat = update.effective_chat
+    assert chat is not None
+    chat_id = chat.id
+    message = update.message
+    assert message is not None
+
+    if not is_user_allowed(chat_id):
+        return
+
+    allowed, reason = check_access(chat_id, "default")
+    if not allowed:
+        await message.reply_text(f"⏳ {reason}")
+        return
+    record_action(chat_id, "default")
+
+    try:
+        conn = get_db_connection()
+        rows = conn.execute(
+            "SELECT DISTINCT query FROM bot_logs "
+            "WHERE chat_id = ? AND action = 'search' AND details IS NOT NULL "
+            "ORDER BY created_at DESC LIMIT 10",
+            (chat_id,),
+        ).fetchall()
+        conn.close()
+    except Exception:
+        rows = []
+
+    if not rows:
+        await message.reply_text("📭 История поиска пуста.")
+        return
+
+    lines = ["🕘 <b>Ваши последние поиски:</b>"]
+    keyboard = []
+    for i, row in enumerate(rows):
+        query = row["query"]
+        lines.append(f"{i+1}. {html.escape(query)}")
+        keyboard.append([InlineKeyboardButton(
+            f"🔁 {html.escape(query)[:40]}",
+            callback_data=f"search_history_{i}"
+        )])
+        # Store query in context for callback
+        set_user_context(chat_id, f"history_query_{i}", query)
+
+    keyboard.append([InlineKeyboardButton("◀️ Главное меню", callback_data="menu_main")])
+
+    text = "\n".join(lines)
+    await message.reply_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
+    log_bot_action(chat_id, "search_history")
+
+
+async def cmd_filters(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle /filters — search filter settings."""
+    chat = update.effective_chat
+    assert chat is not None
+    chat_id = chat.id
+    message = update.message
+    assert message is not None
+
+    if not is_user_allowed(chat_id):
+        return
+
+    allowed, reason = check_access(chat_id, "default")
+    if not allowed:
+        await message.reply_text(f"⏳ {reason}")
+        return
+    record_action(chat_id, "default")
+
+    settings = get_user_settings(chat_id)
+    source_filter = settings.get("search_source_filter", "all")
+    quality_filter = settings.get("quality_filter", "all")
+
+    source_labels = {
+        "all": "Все источники",
+        "youtube": "YouTube",
+        "soundcloud": "SoundCloud",
+        "monochrome": "Monochrome",
+        "freemp3cloud": "FreeMp3Cloud",
+    }
+    quality_labels = {
+        "all": "Любое качество",
+        "flac": "Только FLAC (lossless)",
+        "mp3": "Только MP3",
+    }
+
+    text = f"""⚙️ <b>Фильтры поиска</b>
+
+Источник: {source_labels.get(source_filter, source_filter)}
+Качество: {quality_labels.get(quality_filter, quality_filter)}
+
+Выберите параметр для изменения:"""
+
+    keyboard = [
+        [InlineKeyboardButton(f"🔊 Источник: {source_labels.get(source_filter, source_filter)}", callback_data="filter_source")],
+        [InlineKeyboardButton(f"🎼 Качество: {quality_labels.get(quality_filter, quality_filter)}", callback_data="filter_quality")],
+        [InlineKeyboardButton("◀️ Главное меню", callback_data="menu_main")],
+    ]
+
+    await message.reply_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup(keyboard))
+    log_bot_action(chat_id, "filters")
+
+
 async def cmd_debug(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /debug — bot internals (admin only)."""
     chat = update.effective_chat
@@ -2035,7 +2211,8 @@ async def handle_search_query(update: Update, context: ContextTypes.DEFAULT_TYPE
 
     # Get user settings
     settings = get_user_settings(chat_id)
-    source = settings["search_source"]
+    source = settings.get("search_source_filter", "all")
+    quality_filter = settings.get("quality_filter", "all")
 
     # Search: check cache first, then fuzzy API
     cached = get_cached_search(query)
@@ -2064,6 +2241,13 @@ async def handle_search_query(update: Update, context: ContextTypes.DEFAULT_TYPE
                     f"{len(removed)} removed as duplicates"
                 )
             save_search_results(used_query, source, results)
+
+    # Apply quality filter after dedup
+    if quality_filter != "all" and results:
+        if quality_filter == "flac":
+            results = [r for r in results if r.get("quality", "").upper() in ("LOSSLESS", "HI_RES", "FLAC")]
+        elif quality_filter == "mp3":
+            results = [r for r in results if r.get("quality", "").upper() not in ("LOSSLESS", "HI_RES", "FLAC")]
 
     if not results:
         await status_msg.edit_text("❌ Ничего не найдено. Попробуйте другой запрос.")
@@ -2711,6 +2895,193 @@ async def callback_noop(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
 
 
+async def callback_filter_source(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle source filter selection."""
+    query = update.callback_query
+    assert query is not None
+    message = query.message
+    assert message is not None
+    assert message.chat is not None
+    chat_id = message.chat.id
+
+    allowed, reason = check_access(chat_id, "settings")
+    if not allowed:
+        await query.answer(f"⏳ {reason}")
+        return
+    record_action(chat_id, "settings")
+
+    await query.answer()
+
+    settings = get_user_settings(chat_id)
+    current = settings.get("search_source_filter", "all")
+
+    sources = ["all", "youtube", "soundcloud", "monochrome", "freemp3cloud"]
+    labels = {
+        "all": "Все источники",
+        "youtube": "YouTube",
+        "soundcloud": "SoundCloud",
+        "monochrome": "Monochrome",
+        "freemp3cloud": "FreeMp3Cloud",
+    }
+    current_idx = sources.index(current) if current in sources else 0
+    next_idx = (current_idx + 1) % len(sources)
+    settings["search_source_filter"] = sources[next_idx]
+    save_user_settings(chat_id, settings)
+
+    await query.edit_message_text(
+        f"🔊 <b>Источник: {labels[sources[next_idx]]}</b>",
+        parse_mode="HTML",
+        reply_markup=build_filters_keyboard(settings),
+    )
+    log_bot_action(chat_id, "filters", f"source: {sources[next_idx]}")
+
+
+async def callback_filter_quality(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle quality filter selection."""
+    query = update.callback_query
+    assert query is not None
+    message = query.message
+    assert message is not None
+    assert message.chat is not None
+    chat_id = message.chat.id
+
+    allowed, reason = check_access(chat_id, "settings")
+    if not allowed:
+        await query.answer(f"⏳ {reason}")
+        return
+    record_action(chat_id, "settings")
+
+    await query.answer()
+
+    settings = get_user_settings(chat_id)
+    current = settings.get("quality_filter", "all")
+
+    qualities = ["all", "flac", "mp3"]
+    labels = {
+        "all": "Любое качество",
+        "flac": "Только FLAC (lossless)",
+        "mp3": "Только MP3",
+    }
+    current_idx = qualities.index(current) if current in qualities else 0
+    next_idx = (current_idx + 1) % len(qualities)
+    settings["quality_filter"] = qualities[next_idx]
+    save_user_settings(chat_id, settings)
+
+    await query.edit_message_text(
+        f"🎼 <b>Качество: {labels[qualities[next_idx]]}</b>",
+        parse_mode="HTML",
+        reply_markup=build_filters_keyboard(settings),
+    )
+    log_bot_action(chat_id, "filters", f"quality: {qualities[next_idx]}")
+
+
+async def callback_search_history(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle search history repeat callback."""
+    query = update.callback_query
+    assert query is not None
+    message = query.message
+    assert message is not None
+    assert message.chat is not None
+    chat_id = message.chat.id
+
+    allowed, reason = check_access(chat_id, "search")
+    if not allowed:
+        await query.answer(f"⏳ {reason}")
+        return
+    record_action(chat_id, "search")
+
+    await query.answer()
+
+    assert query.data is not None
+    idx_str = query.data.split("_")[1]
+    query_text = get_user_context(chat_id, f"search_history_{idx_str}", "")
+    if not query_text:
+        await query.edit_message_text("❌ Запрос не найден.")
+        return
+
+    # Redo the search with this query
+    settings = get_user_settings(chat_id)
+    source = settings.get("search_source_filter", "all")
+    if source == "all":
+        source = "all"
+
+    # Clear context and set up for new search
+    clear_user_context(chat_id)
+    set_user_context(chat_id, "search_query", query_text)
+
+    await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.TYPING)
+    msg = query.message
+    assert msg is not None
+    if not isinstance(msg, Message):
+        await query.answer("Ошибка: сообщение недоступно.")
+        return
+    status_msg = await msg.reply_text(f"🔍 Ищу: <b>{query_text}</b>...", parse_mode="HTML")
+
+    cached = get_cached_search(query_text)
+    if cached:
+        results = cached
+        used_query = query_text
+        record_search_request(cache_hit=True)
+        if results:
+            results, removed = dedup_search_results(results, query_text)
+    else:
+        results, used_query = await search_music_fuzzy(query_text, source, limit=20)
+        record_search_request(cache_hit=False)
+        if results:
+            results, removed = dedup_search_results(results, query_text)
+            save_search_results(used_query, source, results)
+
+    if not results:
+        await status_msg.edit_text("❌ Ничего не найдено. Попробуйте другой запрос.")
+        return
+
+    set_user_context(chat_id, "search_results", results)
+    set_user_context(chat_id, "search_page", 0)
+
+    if len(results) == 1:
+        track = results[0]
+        await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.UPLOAD_DOCUMENT)
+        download_result = await download_track(
+            video_id=track["video_id"],
+            title=track.get("title", "Unknown"),
+            artist=track.get("artist") or track.get("channel", "Unknown"),
+            source="auto",
+            convert_to_flac=settings["convert_to_flac"],
+            chat_id=chat_id,
+            source_url=track.get("source_url"),
+            update=update,
+            query=query_text,
+            candidate_pool=results,
+        )
+        if not download_result:
+            await status_msg.edit_text("❌ Ошибка при добавлении в очередь.")
+            return
+        job_id = download_result.get("job_id")
+        if not job_id:
+            await status_msg.edit_text("❌ Ошибка при добавлении в очередь.")
+            return
+        await status_msg.edit_text(
+            f"⏳ <b>Добавлено в очередь</b>\n\n"
+            f"🎵 {html.escape(track.get('title', 'Unknown'))}\n"
+            f"🎤 {html.escape(track.get('artist') or track.get('channel', 'Unknown'))}\n\n"
+            f"Придёт уведомление о результате (или /queue для прогресса).",
+            parse_mode="HTML")
+        asyncio.create_task(_watch_job(job_id, chat_id, status_msg, track.get('title', 'Unknown')))
+        log_bot_action(chat_id, "download", f"{track.get('title')}, job: {job_id}")
+        return
+
+    total = len(results)
+    shown = min(5, total)
+    text = f"""🎵 <b>Найдено: {total}</b>
+
+Показано: {shown}
+Запрос: {html.escape(used_query)}
+
+Выберите трек для загрузки:"""
+
+    await status_msg.edit_text(text, parse_mode="HTML", reply_markup=build_results_keyboard(results))
+
+
 async def callback_queue_refresh(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Re-render the queue keyboard with fresh statuses."""
     query = update.callback_query
@@ -2889,6 +3260,9 @@ def setup_bot():
     app.add_handler(CommandHandler("broadcast", cmd_broadcast))
     app.add_handler(CommandHandler("cancel", cmd_cancel))
     app.add_handler(CommandHandler("clearcache", cmd_clearcache))
+    app.add_handler(CommandHandler("trending", cmd_trending))
+    app.add_handler(CommandHandler("search_history", cmd_search_history))
+    app.add_handler(CommandHandler("filters", cmd_filters))
 
     # Message handlers
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_search_query))
@@ -2913,6 +3287,9 @@ def setup_bot():
     app.add_handler(CallbackQueryHandler(callback_retry, pattern="^retry_"))
     app.add_handler(CallbackQueryHandler(callback_cancel, pattern="^cancel_"))
     app.add_handler(CallbackQueryHandler(callback_noop, pattern="^noop$"))
+    app.add_handler(CallbackQueryHandler(callback_filter_source, pattern="^filter_source$"))
+    app.add_handler(CallbackQueryHandler(callback_filter_quality, pattern="^filter_quality$"))
+    app.add_handler(CallbackQueryHandler(callback_search_history, pattern="^search_history_\\d+$"))
 
     return app
 

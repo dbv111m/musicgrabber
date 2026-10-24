@@ -13,6 +13,7 @@ import sqlite3
 import subprocess
 import tempfile
 import uuid
+from datetime import datetime, timedelta, timezone
 from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Optional
@@ -2353,6 +2354,24 @@ def search_artwork(artist: str, title: str = "", album: str = ""):
         return {"url": None}
     url = fetch_cover_art_url(artist, album or title, album=bool(album))
     return {"url": url}
+
+
+@app.get("/api/search/trending")
+def search_trending(limit: int = 10, hours: int = 168):
+    """Return the most popular search queries from search_logs.
+
+    Aggregates by lowercased query and returns the top ``limit`` queries by
+    search count over the last ``hours`` hours.
+    """
+    cutoff = (datetime.now(timezone.utc) - timedelta(hours=hours)).isoformat()
+    with db_conn() as conn:
+        rows = conn.execute(
+            "SELECT query, COUNT(*) as cnt FROM search_logs "
+            "WHERE query IS NOT NULL AND query != '' AND created_at >= ? "
+            "GROUP BY lower(query) ORDER BY cnt DESC LIMIT ?",
+            (cutoff, limit),
+        ).fetchall()
+    return {"trending": [{"query": r[0], "count": r[1]} for r in rows]}
 
 
 @app.post("/api/explore/similar")
