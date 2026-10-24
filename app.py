@@ -2444,35 +2444,87 @@ def download(body: DownloadRequest, http_request: Request):
         if source == "soulseek" and not (body.slskd_username and body.slskd_filename):
             source = "youtube"  # Fallback if slskd fields missing
 
-        # A retired source (MP3Phoenix, most recently) can still turn up from a
-        # browser tab opened before the upgrade. Without this it fell through to
-        # the YouTube path and failed with a baffling "truncated YouTube ID".
-        if source not in SOURCE_REGISTRY:
-            raise HTTPException(status_code=400, detail=f"Unknown source: {source}")
-
-        # Validate based on source
-        if source == "youtube":
-            if not body.video_id or not is_valid_youtube_id(body.video_id):
-                raise HTTPException(status_code=400, detail="Invalid YouTube video ID")
-        elif source in URL_BASED_SOURCES:
-            if not body.source_url:
-                raise HTTPException(status_code=400, detail=f"{source.capitalize()} download requires source_url")
-            # The caller picks both the source and the URL, so the two agreeing is
-            # something we check, not something we assume.
-            try:
-                validate_source_url(source, body.source_url)
-            except ValueError as e:
-                raise HTTPException(status_code=400, detail=str(e))
-
-        # Build source URL for tracking
-        if source == "soulseek":
-            source_url = f"soulseek://{body.slskd_username}/{body.slskd_filename}" if body.slskd_username else None
-        elif source in URL_BASED_SOURCES:
-            source_url = body.source_url
-        elif body.download_type == "playlist":
-            source_url = f"https://www.youtube.com/playlist?list={body.video_id}" if body.video_id else None
+        # Auto-source mode: try sources in priority order via candidate_pool.
+        # Priority: FreeMp3Cloud -> Monochrome -> SoundCloud -> YouTube.
+        # All requests go through proxy from the first attempt.
+        if source == "auto":
+            # Build candidate_pool from body.candidate_pool
+            candidate_pool = [
+                {
+                    "video_id": c.get("video_id") or "",
+                    "title": c.get("title") or title,
+                    "artist": c.get("artist") or artist or "",
+                    "channel": c.get("channel") or c.get("artist") or artist or "",
+                    "source": c.get("source") or "youtube",
+                    "source_url": c.get("source_url"),
+                    "slskd_username": c.get("slskd_username") or body.slskd_username,
+                    "slskd_filename": c.get("slskd_filename") or body.slskd_filename,
+                    "slskd_size": c.get("slskd_size") or body.slskd_size,
+                }
+                for c in (body.candidate_pool or [])
+                if c.get("video_id") or c.get("source_url")
+            ]
+            if not candidate_pool:
+                # Fallback to a single YouTube candidate
+                candidate_pool = [{
+                    "video_id": body.video_id,
+                    "title": title,
+                    "artist": artist or "",
+                    "channel": artist or "",
+                    "source": "youtube",
+                    "source_url": f"https://www.youtube.com/watch?v={body.video_id}" if body.video_id else None,
+                }]
+            # Use the first candidate's source_url for the job record
+            source_url = candidate_pool[0].get("source_url")
+            allowed_sources = {
+                (c.get("source") or "youtube").strip().lower()
+                for c in candidate_pool
+            } or {"youtube"}
+            priority_source = "freemp3cloud"
         else:
-            source_url = f"https://www.youtube.com/watch?v={body.video_id}" if body.video_id else None
+            # A retired source (MP3Phoenix, most recently) can still turn up from a
+            # browser tab opened before the upgrade. Without this it fell through to
+            # the YouTube path and failed with a baffling "truncated YouTube ID".
+            if source not in SOURCE_REGISTRY:
+                raise HTTPException(status_code=400, detail=f"Unknown source: {source}")
+
+            # Validate based on source
+            if source == "youtube":
+                if not body.video_id or not is_valid_youtube_id(body.video_id):
+                    raise HTTPException(status_code=400, detail="Invalid YouTube video ID")
+            elif source in URL_BASED_SOURCES:
+                if not body.source_url:
+                    raise HTTPException(status_code=400, detail=f"{source.capitalize()} download requires source_url")
+                # The caller picks both the source and the URL, so the two agreeing is
+                # something we check, not something we assume.
+                try:
+                    validate_source_url(source, body.source_url)
+                except ValueError as e:
+                    raise HTTPException(status_code=400, detail=str(e))
+
+            # Build source URL for tracking
+            if source == "soulseek":
+                source_url = f"soulseek://{body.slskd_username}/{body.slskd_filename}" if body.slskd_username else None
+            elif source in URL_BASED_SOURCES:
+                source_url = body.source_url
+            elif body.download_type == "playlist":
+                source_url = f"https://www.youtube.com/playlist?list={body.video_id}" if body.video_id else None
+            else:
+                source_url = f"https://www.youtube.com/watch?v={body.video_id}" if body.video_id else None
+
+            allowed_sources = {source}
+            priority_source = source
+            candidate_pool = [{
+                "video_id": body.video_id,
+                "title": title,
+                "artist": artist or "",
+                "channel": artist or "",
+                "source": source,
+                "source_url": source_url,
+                "slskd_username": body.slskd_username,
+                "slskd_filename": body.slskd_filename,
+                "slskd_size": body.slskd_size,
+            }]
 
         album_release_mbid = (body.album_release_mbid or "").strip() or None
         album_artist = (body.album_artist or "").strip() or None
@@ -2587,8 +2639,8 @@ def download(body: DownloadRequest, http_request: Request):
             artist=artist or "",
             title=title,
             user_id=user_id,
-            allowed_sources={source},
-            priority_source=source,
+            allowed_sources=allowed_sources,
+            priority_source=priority_source,
             convert_audio=body.convert_audio,
             destination={
                 "playlist_name": body.playlist_name,
@@ -2599,17 +2651,7 @@ def download(body: DownloadRequest, http_request: Request):
         )
         acquisition_cycle = begin_acquisition_cycle(acquisition_target_id)
         attach_job_to_acquisition(job_id, acquisition_target_id, acquisition_cycle)
-        selected_candidate = {
-            "video_id": body.video_id,
-            "title": title,
-            "artist": artist or "",
-            "channel": artist or "",
-            "source": source,
-            "source_url": source_url,
-            "slskd_username": body.slskd_username,
-            "slskd_filename": body.slskd_filename,
-            "slskd_size": body.slskd_size,
-        }
+        selected_candidate = dict(candidate_pool[0])
 
     # If this is an album-routed single track, register a lock so any retry
     # can skip dupe check without relying on the transient skip_dupe_check flag.
@@ -2632,8 +2674,10 @@ def download(body: DownloadRequest, http_request: Request):
             target_id=acquisition_target_id,
             cycle=acquisition_cycle,
             automatic=False,
-            allowed_sources={source},
-            priority_source=source,
+            allowed_sources=allowed_sources,
+            priority_source=priority_source,
+            candidate_pool=candidate_pool,
+            allow_cross_source_fallback=True,
             playlist_name=body.playlist_name,
             use_playlists_dir=body.use_playlists_dir,
             user_id=user_id,

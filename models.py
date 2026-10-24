@@ -104,8 +104,12 @@ class DownloadRequest(BaseModel):
     download_type: str = "single"  # "single" or "playlist"
     convert_audio: bool = _convert_audio_field()
     # Source routing
-    source: str = "youtube"  # Registry source ID
-    source_url: Optional[str] = None  # Full URL for non-YouTube sources (e.g. SoundCloud/zvu4no)
+    source: str = "youtube"  # Registry source ID, or "auto" for source ladder
+    source_url: Optional[str] = None  # Full URL for non-YouTube sources (e.g. SoundCloud/zzu4no)
+    # When source="auto", list of candidate dicts {source, source_url, video_id,
+    # title, artist} tried in priority order: FreeMp3Cloud -> Monochrome ->
+    # SoundCloud -> YouTube. All via proxy.
+    candidate_pool: Optional[list[dict]] = None
     # Soulseek-specific fields
     slskd_username: Optional[str] = None
     slskd_filename: Optional[str] = None

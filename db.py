@@ -1735,6 +1735,29 @@ def init_db():
         except sqlite3.OperationalError:
             pass
 
+        # Job source attempt log - records every source tried for auto-source
+        # downloads (FreeMp3Cloud -> Monochrome -> SoundCloud -> YouTube), so
+        # we can see which source actually delivered each track.
+        conn.execute("""
+        CREATE TABLE IF NOT EXISTS job_source_attempts (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_id TEXT NOT NULL,
+            source TEXT NOT NULL,
+            source_url TEXT,
+            status TEXT NOT NULL DEFAULT 'tried',
+            error TEXT,
+            tried_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            proxy_used INTEGER DEFAULT 1,
+            FOREIGN KEY (job_id) REFERENCES jobs(id) ON DELETE CASCADE
+        )
+        """)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_source_attempts_job ON job_source_attempts(job_id)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_source_attempts_tried ON job_source_attempts(tried_at)"
+        )
+
         conn.commit()
 
 
@@ -2372,3 +2395,30 @@ def is_video_blacklisted(video_id: str) -> bool:
             (video_id,)
         ).fetchone()
     return row is not None
+
+
+def log_source_attempt(
+    job_id: str,
+    source: str,
+    source_url: str | None = None,
+    status: str = "tried",
+    error: str | None = None,
+    proxy_used: bool = True,
+) -> None:
+    """Record a source download attempt for a job.
+
+    Used by auto-source downloads (FreeMp3Cloud -> Monochrome ->
+    SoundCloud -> YouTube) to keep an audit trail of which sources were
+    tried and which one ultimately delivered the file.
+    """
+    try:
+        with db_conn() as conn:
+            conn.execute(
+                """INSERT INTO job_source_attempts
+                   (job_id, source, source_url, status, error, proxy_used)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (job_id, source, source_url, status, error, int(proxy_used)),
+            )
+            conn.commit()
+    except Exception as e:
+        print(f"Failed to log source attempt: {e}")

@@ -15,7 +15,7 @@ import re
 import signal
 import sqlite3
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Optional
 
 import httpx
 from rapidfuzz import fuzz
@@ -1115,7 +1115,8 @@ async def search_music(query: str, source: str, limit: int = 10) -> list:
 
 async def download_track(video_id: str, title: str, artist: str, source: str,
                         convert_to_flac: bool, chat_id: int, source_url: str | None = None,
-                        update: Update | None = None, query: str | None = None) -> dict | None:
+                        update: Update | None = None, query: str | None = None,
+                        candidate_pool: Optional[list[dict]] = None) -> dict | None:
     """Queue track download via the app API and return the job ID."""
     # Queue download
     try:
@@ -1127,8 +1128,11 @@ async def download_track(video_id: str, title: str, artist: str, source: str,
                 "source": source,
                 "convert_audio": convert_to_flac,
             }
-            # Add source_url for non-YouTube sources
-            if source_url and source in ["soundcloud", "monochrome"]:
+            # Add candidate_pool for auto-source mode (tries sources in priority order)
+            if candidate_pool:
+                payload["candidate_pool"] = candidate_pool
+            # Add source_url for single-source downloads
+            elif source_url and source in ["soundcloud", "monochrome"]:
                 payload["source_url"] = source_url
 
             response = await client.post(
@@ -1291,13 +1295,6 @@ def build_results_keyboard(results: list, page: int = 0, per_page: int = 5):
 
     for i, result in enumerate(results[start:end]):
         idx = start + i + 1
-        source_emoji = {
-            "youtube": "🎞",
-            "soundcloud": "🎧",
-            "monochrome": "💿",
-            "soulseek": "🎶",
-            "freemp3cloud": "📻",
-        }.get(result.get("source", "youtube"), "🎵")
 
         quality_raw = result.get("quality", "N/A")
         quality_map = {
@@ -1309,10 +1306,10 @@ def build_results_keyboard(results: list, page: int = 0, per_page: int = 5):
         }
         quality = quality_map.get(quality_raw, quality_raw) if quality_raw else ""
         quality_str = f" [{quality}]" if quality else ""
-        title = (result.get("title") or "Unknown")[:30]
-        artist = (result.get("artist") or result.get("channel") or "Unknown")[:20]
+        title = (result.get("title") or "Unknown")[:35]
+        artist = (result.get("artist") or result.get("channel") or "Unknown")[:28]
 
-        label = f"⬇️ {idx}. {source_emoji} {artist} - {title}{quality_str}"
+        label = f"⬇️ {idx}. {artist} - {title}{quality_str}"
         keyboard.append([InlineKeyboardButton(label, callback_data=f"download_{start + i}")])
 
     # Navigation
@@ -2076,7 +2073,41 @@ async def handle_search_query(update: Update, context: ContextTypes.DEFAULT_TYPE
     set_user_context(chat_id, "search_results", results)
     set_user_context(chat_id, "search_page", 0)
 
-    # Update message with results
+    # If exactly one result after dedup — confident match, auto-download without asking
+    if len(results) == 1:
+        track = results[0]
+        settings = get_user_settings(chat_id)
+        await context.bot.send_chat_action(chat_id=chat_id, action=ChatAction.UPLOAD_DOCUMENT)
+        download_result = await download_track(
+            video_id=track["video_id"],
+            title=track.get("title", "Unknown"),
+            artist=track.get("artist") or track.get("channel", "Unknown"),
+            source="auto",
+            convert_to_flac=settings["convert_to_flac"],
+            chat_id=chat_id,
+            source_url=track.get("source_url"),
+            update=update,
+            query=get_user_context(chat_id, "search_query", ""),
+            candidate_pool=results,
+        )
+        if not download_result:
+            await status_msg.edit_text("❌ Ошибка при добавлении в очередь.")
+            return
+        job_id = download_result.get("job_id")
+        if not job_id:
+            await status_msg.edit_text("❌ Ошибка при добавлении в очередь.")
+            return
+        await status_msg.edit_text(
+            f"⏳ <b>Добавлено в очередь</b>\n\n"
+            f"🎵 {html.escape(track.get('title', 'Unknown'))}\n"
+            f"🎤 {html.escape(track.get('artist') or track.get('channel', 'Unknown'))}\n\n"
+            f"Придёт уведомление о результате (или /queue для прогресса).",
+            parse_mode="HTML")
+        asyncio.create_task(_watch_job(job_id, chat_id, status_msg, track.get('title', 'Unknown')))
+        log_bot_action(chat_id, "download", f"{track.get('title')}, job: {job_id}")
+        return
+
+    # Multiple results — show with download buttons
     total = len(results)
     shown = min(5, total)
     display_query = used_query if used_query != query else query
@@ -2598,12 +2629,13 @@ async def callback_download(update: Update, context: ContextTypes.DEFAULT_TYPE):
         video_id=track["video_id"],
         title=track.get("title", "Unknown"),
         artist=track.get("artist") or track.get("channel", "Unknown"),
-        source=track.get("source", "youtube"),
+        source="auto",
         convert_to_flac=settings["convert_to_flac"],
         chat_id=chat_id,
         source_url=track.get("source_url"),
         update=update,
         query=search_query,
+        candidate_pool=results,
     )
 
     if not download_result:
