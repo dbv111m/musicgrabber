@@ -13,6 +13,7 @@ import sqlite3
 import uuid
 from sqlite3 import Connection
 
+from artist_match import channel_trust, unwanted_version_keyword
 from constants import FALLBACK_MATCH_CONFIDENCE_FLOOR
 from db import db_conn
 from matching import compute_match_confidence
@@ -334,7 +335,11 @@ _UNKNOWN_SOURCE_RANK = {
 
 
 def automatic_candidate_sort_key(candidate: dict, priority_source: str | None = None) -> tuple:
-    """Sort an eligible result from best known quality towards worst lossy."""
+    """Sort an eligible result from best known quality towards worst lossy.
+
+    Inside a tier, the artist's own channel (a matching " - Topic" upload, then
+    VEVO/official) comes before a stranger's re-upload of the same song.
+    """
     source = (candidate.get("source") or "youtube").strip().lower()
     tier = int(candidate.get("quality_tier") or quality_tier_of_result(candidate) or 0)
     quality_rank = tier * 100 if tier else _UNKNOWN_SOURCE_RANK.get(source, 0)
@@ -342,6 +347,7 @@ def automatic_candidate_sort_key(candidate: dict, priority_source: str | None = 
     return (
         quality_rank,
         preferred,
+        int(candidate.get("_acquisition_channel_trust") or 0),
         float(candidate.get("_acquisition_confidence") or 0),
         float(candidate.get("relevance_score") or 0),
     )
@@ -352,28 +358,44 @@ def rank_automatic_candidates(
     expected_artist: str,
     expected_title: str,
     priority_source: str | None = None,
+    reject_keywords: list[str] | None = None,
 ) -> tuple[list[dict], list[dict]]:
     """Gate identity first, then order eligible candidates by quality tier.
 
     The preferred source only breaks ties inside a quality tier. It cannot make
     a lossy candidate jump ahead of an allowed, confident lossless result.
+
+    `reject_keywords` (the user's list, or the strict-mode default) drops any
+    candidate whose title carries one of them as a version annotation the
+    requested title does not: a "(Live)" or "(Cover)" is not the album track,
+    however well the rest of the title matches.
     """
     eligible: list[dict] = []
     rejected: list[dict] = []
     query = f"{expected_artist} - {expected_title}".strip(" -")
     for original in candidates:
         candidate = dict(original)
+        candidate_artist = (
+            candidate.get("artist") or candidate.get("channel") or candidate.get("uploader")
+        )
         confidence, breakdown = compute_match_confidence(
             expected_artist,
             expected_title,
             candidate.get("title") or "",
-            candidate_artist=(
-                candidate.get("artist") or candidate.get("channel") or candidate.get("uploader")
-            ),
+            candidate_artist=candidate_artist,
             query=query,
         )
+        keyword = unwanted_version_keyword(
+            candidate.get("title"), expected_title, reject_keywords or []
+        )
+        if keyword:
+            confidence = 0.0
+            breakdown = [*breakdown, f"reject_keyword={keyword!r}"]
         candidate["_acquisition_confidence"] = confidence
         candidate["_acquisition_match_breakdown"] = breakdown
+        candidate["_acquisition_channel_trust"] = channel_trust(
+            expected_artist, candidate.get("channel") or candidate.get("uploader")
+        )
         if confidence < FALLBACK_MATCH_CONFIDENCE_FLOOR:
             rejected.append(candidate)
         else:
