@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- **Album and bulk downloads could be filed under the wrong artist**: album-mode and bulk "Artist - Title" imports searched by title, accepted a result by whoever posted it, wrote it into the album folder and tagged ARTIST from the uploader or the video title. In one library of 1,150 album grabs, 160 landed this way: Shinedown's "Simple Man" inside a Lynyrd Skynyrd album, a "Stand By Me" tagged with ARTIST `Stand By Me`, and a track AcoustID had correctly identified as Genesis still filed under the album it was meant to complete. Automatic downloads now pass an artist gate ordered by trust: a confident fingerprint identification decides outright (agree and the file is kept, disagree and it is rejected and blacklisted); otherwise the file must match the MusicBrainz/Deezer expected length within 8 s and 5%; the source's own artist metadata (YouTube Music " - Topic" uploads) counts as strong evidence; the uploader's name and the title's "Artist - " prefix are tie-breakers only. Anything that cannot be confirmed is moved to Trash and logged under Mismatches, where Force Accept keeps it anyway, and the acquisition cycle moves on to the next candidate. ARTIST/TITLE/ALBUM/ALBUMARTIST on these downloads now come from the request and MusicBrainz, never from the uploader or video title. New setting **Strict Artist Match** (`STRICT_ARTIST_MATCH`, on by default) controls the holding; the fingerprint verdict applies regardless. Manual picks from Search are untouched.
+- **`REJECT_VERSION_KEYWORDS` has a default in strict mode**: with no list of your own, automatic downloads skip candidates whose title carries `cover, karaoke, tribute, live, acoustic, unplugged, remix, nightcore, slowed, sped up, 8d, instrumental, ai cover, suno` as a version annotation the requested title does not. Your own list still replaces it, and Reject Live Versions behaves as before.
+
+### Changed
+- Automatic candidate ranking prefers the artist's own channel inside a quality tier: a matching " - Topic" upload first, then VEVO/official, then everyone else.
+
 ## v4.3.1 (2026-10-08)
 
 Housekeeping. The backlog's to-do list, cleared in one sitting, which has never happened before and may never happen again.
