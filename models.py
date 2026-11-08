@@ -211,6 +211,7 @@ class SettingsUpdate(BaseModel):
     auto_import_dir: Optional[str] = None
     reject_live_versions: Optional[bool] = None
     reject_version_keywords: Optional[str] = None
+    strict_artist_match: Optional[bool] = None
     playlist_comment_tagging: Optional[bool] = None
     redownload_missing_files: Optional[bool] = None
     enable_track_upgrades: Optional[bool] = None

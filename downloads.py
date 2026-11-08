@@ -50,7 +50,6 @@ from metadata import (
     lookup_metadata, lookup_musicbrainz_by_isrc, fetch_lyrics, save_lyrics_file,
     apply_metadata_to_file, read_existing_track_number, verify_recording,
     apply_replaygain_tags, read_replaygain_tags, read_artist_title,
-    parse_reject_keywords, title_has_version_annotation,
 )
 from notifications import failure_notices_held, send_notification
 from settings import get_setting, get_setting_bool, get_setting_int, get_singles_dir, get_download_dir, get_playlists_dir, get_albums_dir, resolve_custom_subdir
@@ -84,10 +83,16 @@ from youtube import (
     run_ytdlp_with_retries,
 )
 from acquisition import (
+    acquisition_context_for_job,
     finish_acquisition_attempt,
     finish_acquisition_cycle,
     rank_automatic_candidates,
     start_acquisition_attempt,
+)
+from artist_match import (
+    effective_reject_keywords,
+    evaluate_artist_match,
+    unwanted_version_keyword,
 )
 
 
@@ -801,10 +806,25 @@ def _note_blacklist_entry(
         print(f"Blacklist write skipped: {e}")
 
 
+def strict_artist_match_enabled(user_id: str | None) -> bool:
+    """Whether album, bulk and watched downloads must verify the artist."""
+    return get_setting_bool("strict_artist_match", True, user_id=user_id)
+
+
+def automatic_reject_keywords(user_id: str | None) -> list[str]:
+    """Version keywords an automatic download must refuse: the user's own list,
+    or the built-in default when strict artist matching is on and they wrote none."""
+    return effective_reject_keywords(
+        get_setting("reject_version_keywords", "", user_id=user_id),
+        strict=strict_artist_match_enabled(user_id),
+    )
+
+
 def _unwanted_keyword_verdict(
     mb_metadata: dict,
     requested_title: str,
     user_id: str | None,
+    strict_defaults: bool = False,
 ) -> str | None:
     """Return the user keyword this recording trips, or None.
 
@@ -812,24 +832,18 @@ def _unwanted_keyword_verdict(
     annotation on the AcoustID-identified title. If they asked for the acoustic
     version by name, they get the acoustic version; refusing to deliver what
     somebody explicitly typed would be a special kind of rude.
-    """
-    keywords = parse_reject_keywords(get_setting("reject_version_keywords", "", user_id=user_id))
-    if not keywords:
-        return None
 
+    strict_defaults (automatic downloads under strict artist matching) falls
+    back to the built-in list when the user has not written one.
+    """
+    keywords = effective_reject_keywords(
+        get_setting("reject_version_keywords", "", user_id=user_id),
+        strict=strict_defaults,
+    )
     # Whole words only, same as the annotation matcher. A plain substring test
     # meant asking for "Demolition Man" quietly switched off "demo", which is
     # precisely the song the feature promises to protect from it.
-    wanted = (requested_title or "").lower()
-    keywords = [
-        kw for kw in keywords
-        if not re.search(rf'(?<!\w){re.escape(kw)}(?!\w)', wanted)
-    ]
-    if not keywords:
-        return None
-
-    identified_title = (mb_metadata.get("title") or "")
-    return title_has_version_annotation(identified_title, keywords)
+    return unwanted_version_keyword(mb_metadata.get("title") or "", requested_title, keywords)
 
 
 def _reject_if_unwanted_version(
@@ -842,6 +856,7 @@ def _reject_if_unwanted_version(
     video_id: str | None,
     source: str,
     user_id: str | None,
+    strict_defaults: bool = False,
 ) -> str | None:
     """Layer 3 single-flow backstop for unwanted versions.
 
@@ -874,7 +889,9 @@ def _reject_if_unwanted_version(
 
     keyword = None
     if verdict is None:
-        keyword = _unwanted_keyword_verdict(mb_metadata, title, user_id=user_id)
+        keyword = _unwanted_keyword_verdict(
+            mb_metadata, title, user_id=user_id, strict_defaults=strict_defaults
+        )
         if keyword:
             verdict = "reject_keyword"
 
@@ -916,6 +933,162 @@ def _reject_if_unwanted_version(
         if keyword
         else "Rejected live version (AcoustID)"
     )
+
+
+def _expected_track_identity(job_id: str, album_ctx: dict) -> tuple[str | None, str | None, bool]:
+    """Who an automatic download is supposed to be by: (artist, title, automatic).
+
+    Album imports, bulk imports and watched playlists/artists state the artist
+    up front, on the acquisition target (or, for older rows, the bulk album
+    context or the watched-track link). That is the identity the file must be
+    verified against and tagged with. A manual pick from Search has none: the
+    user chose that result by hand, so (None, None, False).
+    """
+    try:
+        ctx = acquisition_context_for_job(job_id)
+    except Exception:
+        ctx = None
+    artist = title = None
+    automatic = False
+    if ctx:
+        artist = (ctx.get("artist") or "").strip() or None
+        title = (ctx.get("title") or "").strip() or None
+        automatic = (ctx.get("mode") or "automatic") != "manual"
+    if album_ctx.get("track_artist"):
+        # Albums-tab imports know the performer per track, which beats the
+        # import-wide artist for compilations and guest spots. Rows from before
+        # acquisition targets existed have only this context and were always
+        # automatic; an album repair carries it too but is a hand-picked result.
+        artist = album_ctx["track_artist"]
+        title = album_ctx.get("track_title") or title
+        if not ctx:
+            automatic = True
+    if not ctx and not automatic:
+        try:
+            with db_conn() as conn:
+                link = conn.execute(
+                    "SELECT artist, title FROM watched_playlist_tracks WHERE job_id = ? LIMIT 1",
+                    (job_id,),
+                ).fetchone()
+        except Exception:
+            link = None
+        if link:
+            artist = (link[0] or "").strip() or artist
+            title = (link[1] or "").strip() or title
+            automatic = True
+    if not automatic or not artist:
+        return None, None, False
+    return artist, title, True
+
+
+def _job_force_accepted(job_id: str) -> bool:
+    """True when the user has said "I know better" for this job."""
+    try:
+        with db_conn() as conn:
+            row = conn.execute(
+                "SELECT skip_mismatch_check FROM jobs WHERE id = ?", (job_id,)
+            ).fetchone()
+        return bool(row and row[0])
+    except Exception:
+        return False
+
+
+def _watched_link_playlist_id(job_id: str) -> str | None:
+    try:
+        with db_conn() as conn:
+            row = conn.execute(
+                "SELECT playlist_id FROM watched_playlist_tracks WHERE job_id = ? LIMIT 1",
+                (job_id,),
+            ).fetchone()
+        return row[0] if row else None
+    except Exception:
+        return None
+
+
+def _artist_gate(
+    job_id: str,
+    audio_file: Path,
+    *,
+    expected_artist: str,
+    expected_title: str | None,
+    source: str,
+    video_id: str | None,
+    uploader: str | None,
+    video_title: str | None,
+    provider_artist: str | None,
+    mb_metadata: dict | None,
+    fingerprint: dict | None,
+    actual_duration_secs: float | None,
+    user_id: str | None,
+) -> str | None:
+    """Verify an automatic download is by the artist that was asked for.
+
+    Returns None when the file may be kept. Otherwise the file has been moved
+    to Trash, a mismatch logged (so Force Accept can bring it back), a confident
+    wrong identification blacklisted, and the returned reason is what the job
+    should fail with; the acquisition cycle then tries the next candidate.
+
+    The ordering of evidence lives in artist_match.evaluate_artist_match. This
+    function only gathers it: the AcoustID identification (adopted or not), an
+    ISRC-resolved MusicBrainz credit, the requested recording's expected length,
+    and whatever free text the source offered.
+    """
+    if _job_force_accepted(job_id):
+        print(f"Artist check skipped for job {job_id} (force-accepted)")
+        return None
+    strict = strict_artist_match_enabled(user_id)
+
+    recording_artist = None
+    recording_title = None
+    if fingerprint and fingerprint.get("artist"):
+        recording_artist = fingerprint["artist"]
+        recording_title = fingerprint.get("title")
+    elif mb_metadata and mb_metadata.get("metadata_source") == "musicbrainz_isrc":
+        recording_artist = mb_metadata.get("artist")
+        recording_title = mb_metadata.get("title")
+
+    verdict = evaluate_artist_match(
+        expected_artist,
+        recording_artist=recording_artist,
+        provider_artist=provider_artist,
+        uploader=uploader,
+        video_title=video_title,
+        actual_duration_secs=actual_duration_secs,
+        expected_duration_secs=(mb_metadata or {}).get("expected_duration_secs"),
+        strict=strict,
+    )
+    label = f"{expected_artist} - {expected_title or '?'} [{source}:{video_id or '-'}]"
+    print(
+        f"Artist check for {label}: {verdict.decision} ({verdict.reason}); "
+        + "; ".join(verdict.evidence)
+    )
+    if verdict.accepted:
+        return None
+
+    actual_artist = recording_artist or provider_artist or uploader or ""
+    actual_title = recording_title or video_title or ""
+    log_match_mismatch(
+        job_id=job_id,
+        playlist_id=_watched_link_playlist_id(job_id),
+        expected_artist=expected_artist,
+        expected_title=expected_title or "",
+        actual_artist=actual_artist,
+        actual_title=actual_title,
+        exp_normalised=f"{_normalise_watched_match_text(expected_artist)} - {_normalise_watched_match_text(expected_title or '')}",
+        got_normalised=f"{_normalise_watched_match_text(actual_artist)} - {_normalise_watched_match_text(actual_title)}",
+    )
+    if verdict.rejected and video_id:
+        _note_blacklist_entry(
+            source=source,
+            reason="wrong_artist",
+            note=verdict.reason,
+            job_id=job_id,
+            video_id=video_id,
+            uploader=uploader,
+        )
+    move_to_trash(audio_file, user_id=user_id)
+    headline = "Artist mismatch" if verdict.rejected else "Artist unverified"
+    return f"{headline}: {verdict.reason}. The file is in Trash; use Force Accept to keep it."
 
 
 def _normalise_source_allowlist(raw_sources) -> set[str] | None:
@@ -973,6 +1146,7 @@ def _find_alternate_search_candidate(
     expected_title: str | None = None,
     allowed_sources: set[str] | None = None,
     priority_source: str | None = None,
+    reject_keywords: list[str] | None = None,
 ) -> dict | None:
     """Search across sources and return the best untried candidate.
 
@@ -1018,6 +1192,7 @@ def _find_alternate_search_candidate(
             expected_artist or "",
             expected_title or "",
             priority_source=priority_source,
+            reject_keywords=reject_keywords,
         )
         for cand in ranked:
             cand_id = (cand.get("video_id") or "").strip()
@@ -1234,6 +1409,7 @@ def process_acquisition_cycle(
                 expected_title=expected_title,
                 allowed_sources=allowed_sources,
                 priority_source=priority_source,
+                reject_keywords=automatic_reject_keywords(user_id),
             )
         if candidate is None and not requested_video_tried:
             requested_video_tried = True
@@ -2318,8 +2494,21 @@ def _tag_track_comment(file_path, artist: str, title: str, conn=None) -> None:
         print(f"Playlist COMMENT tag failed for {file_path}: {e}")
 
 
-def _mark_watched_track_downloaded(job_id: str, resolved_path: Optional[Path] = None, skip_mismatch: bool = False) -> bool:
+def _mark_watched_track_downloaded(
+    job_id: str,
+    resolved_path: Optional[Path] = None,
+    skip_mismatch: bool = False,
+    observed_artist: str | None = None,
+    observed_title: str | None = None,
+    verified: bool = False,
+) -> bool:
     """Mark a watched playlist track as downloaded and rebuild the M3U if enabled.
+
+    observed_artist/observed_title are what the source itself called the track
+    (uploader-derived artist, video title). Automatic downloads are now tagged
+    from the request, so the job row no longer records that; pass the observed
+    values to keep the name comparison honest. verified=True means the artist
+    gate has already confirmed the identity, which makes the comparison moot.
 
     resolved_path, when provided, is stored on the track record so M3U rebuilds can
     use the actual on-disk path instead of reconstructing it from artist/title metadata.
@@ -2354,14 +2543,19 @@ def _mark_watched_track_downloaded(job_id: str, resolved_path: Optional[Path] = 
             (job_id,),
         ).fetchone()
 
-        got_artist_raw = job["artist"] or ""
-        got_title_raw = job["title"] or ""
+        got_artist_raw = observed_artist if observed_artist is not None else (job["artist"] or "")
+        got_title_raw = observed_title if observed_title is not None else (job["title"] or "")
         if link:
-            # User said "I know better, just download it", or the track was found
-            # via duplicate check (already on disk, no fresh file to verify).
-            skip_check = skip_mismatch or bool(job["skip_mismatch_check"])
+            # User said "I know better, just download it", the track was found
+            # via duplicate check (already on disk, no fresh file to verify), or
+            # the artist gate has already vouched for it.
+            skip_check = skip_mismatch or verified or bool(job["skip_mismatch_check"])
             if skip_check:
-                reason = "duplicate-skip" if skip_mismatch else "force-accepted"
+                reason = (
+                    "duplicate-skip" if skip_mismatch
+                    else "artist-verified" if verified
+                    else "force-accepted"
+                )
                 print(f"Mismatch check skipped for job {job_id} ({reason})")
 
             exp_artist_raw = link["expected_artist"] or ""
@@ -4426,6 +4620,13 @@ def process_slskd_download(job_id: str, username: str, filename: str, artist: st
             if path_artist and path_artist != "Unknown":
                 print(f"slskd: ignoring uploader name as artist, using '{path_artist}' from the path")
                 artist = path_artist
+        # The path-derived guess, kept as evidence for the artist gate.
+        source_artist, source_title = artist, title
+        expected_artist, expected_title, automatic = _expected_track_identity(job_id, album_ctx)
+        if expected_artist:
+            artist = expected_artist
+        if expected_title:
+            title = expected_title
         if forced_track_title:
             title = forced_track_title
 
@@ -4546,7 +4747,10 @@ def process_slskd_download(job_id: str, username: str, filename: str, artist: st
         # lookup, tagging, or library placement. AcoustID/MusicBrainz can still
         # canonicalise it later; untagged files retain the path fallback.
         guessed_artist = artist
-        artist = _prefer_slskd_embedded_artist(downloaded_file, guessed_artist)
+        embedded_artist = _prefer_slskd_embedded_artist(downloaded_file, guessed_artist)
+        # An automatic download keeps the requested artist; the file's own tag
+        # is evidence for the gate below, not a correction.
+        artist = expected_artist or embedded_artist
         if artist != guessed_artist:
             print(
                 f"slskd: embedded ARTIST tag corrected path guess "
@@ -4660,7 +4864,27 @@ def process_slskd_download(job_id: str, username: str, filename: str, artist: st
         # Apply metadata (AcoustID fingerprinting first, then text-based MusicBrainz fallback)
         _update_job(job_id, progress_stage="Looking up metadata")
         metadata_source = _default_metadata_source("soulseek")
-        mb_metadata = lookup_metadata(artist, title, final_file)
+        fingerprint: dict = {}
+        mb_metadata = lookup_metadata(artist, title, final_file, identification=fingerprint)
+
+        # Artist gate for automatic downloads. A peer's username says nothing
+        # about the music; the shared path and the file's own ARTIST tag are
+        # the free-text evidence here.
+        artist_verified = False
+        if automatic:
+            gate_error = _artist_gate(
+                job_id, final_file,
+                expected_artist=artist, expected_title=title,
+                source="soulseek", video_id=None,
+                uploader=embedded_artist if embedded_artist != source_artist else None,
+                video_title=f"{source_artist} - {source_title}".strip(" -"),
+                provider_artist=None,
+                mb_metadata=mb_metadata, fingerprint=fingerprint,
+                actual_duration_secs=actual_duration_secs, user_id=user_id,
+            )
+            if gate_error:
+                raise Exception(gate_error)
+            artist_verified = True
 
         # Duration sanity check against MusicBrainz expected length
         dur_ok, dur_reason = _check_duration_against_mb(actual_duration_secs, mb_metadata, artist, title, job_id=job_id)
@@ -4681,9 +4905,9 @@ def process_slskd_download(job_id: str, username: str, filename: str, artist: st
         tag_album_artist = forced_album_artist
         if mb_metadata:
             metadata_source = mb_metadata.get("metadata_source", metadata_source)
-            mb_artist = album_ctx.get("track_artist") or mb_metadata.get("artist", artist)
+            mb_artist = expected_artist or album_ctx.get("track_artist") or mb_metadata.get("artist", artist)
             mb_title = mb_metadata.get("title", title)
-            tag_title = forced_track_title or mb_title
+            tag_title = forced_track_title or expected_title or mb_title
             tag_album = forced_album_name or mb_metadata.get("album", "")
             tag_album_artist = forced_album_artist or mb_metadata.get("album_artist")
             tag_track_num, tag_track_total = _resolve_track_number(
@@ -4771,6 +4995,7 @@ def process_slskd_download(job_id: str, username: str, filename: str, artist: st
             job_id, final_file, mb_metadata,
             artist=artist, title=title,
             video_id=None, source="soulseek", user_id=user_id,
+            strict_defaults=automatic and strict_artist_match_enabled(user_id),
         )
         if rejection:
             _update_job(job_id, status="failed", error=rejection, final_path=str(final_file), progress_stage=None, completed_at=datetime.now(timezone.utc).isoformat())
@@ -4789,7 +5014,11 @@ def process_slskd_download(job_id: str, username: str, filename: str, artist: st
             progress_stage=None,
             completed_at=datetime.now(timezone.utc).isoformat()
         )
-        marked = _mark_watched_track_downloaded(job_id, resolved_path=final_file)
+        marked = _mark_watched_track_downloaded(
+            job_id, resolved_path=final_file,
+            observed_artist=source_artist, observed_title=source_title,
+            verified=artist_verified,
+        )
         _mark_watched_artist_track_downloaded(job_id, resolved_path=final_file)
         if marked:
             _append_to_physical_m3u(final_file, playlist_name, use_playlists_dir, user_id=user_id, custom_subdir=custom_subdir)
@@ -4894,6 +5123,12 @@ def _process_direct_mp3_download(job_id: str, download_url: str, artist_hint: st
     forced_album_name = album_ctx.get("album_name")
     forced_track_title = album_ctx.get("track_title")
     forced_album_year = album_ctx.get("year")
+    expected_artist, expected_title, automatic = _expected_track_identity(job_id, album_ctx)
+    reject_keywords = automatic_reject_keywords(user_id) if automatic else None
+    if expected_artist:
+        artist = expected_artist
+    if expected_title:
+        title = expected_title
     if forced_track_title:
         title = forced_track_title
     album_track_number, album_track_total = _get_album_track_tag_context(job_id)
@@ -4926,6 +5161,7 @@ def _process_direct_mp3_download(job_id: str, download_url: str, artist_hint: st
             exclude_sources=excluded or None,
             expected_artist=artist, expected_title=title,
             allowed_sources=fallback_allowed_sources,
+            reject_keywords=reject_keywords,
         )
         if not alternate:
             return False
@@ -5159,11 +5395,32 @@ def _process_direct_mp3_download(job_id: str, download_url: str, artist_hint: st
             isrc = (parse_qs(urlparse(download_url).query).get("isrc") or [""])[0]
             if isrc:
                 mb_metadata = lookup_musicbrainz_by_isrc(isrc, expected_artist=artist, expected_title=title)
+        fingerprint: dict = {}
         if not mb_metadata:
-            mb_metadata = lookup_metadata(artist, title, output_path)
+            mb_metadata = lookup_metadata(artist, title, output_path, identification=fingerprint)
         metadata_source = _default_metadata_source(source_label)
         if mb_metadata:
             metadata_source = mb_metadata.get("source", metadata_source)
+
+        # Artist gate for automatic downloads. The site's own artist string is
+        # free text here, so it only ever counts as a tie-breaker; Monochrome's
+        # ISRC-resolved credit arrives inside mb_metadata and counts as identity.
+        artist_verified = False
+        if automatic:
+            gate_error = _artist_gate(
+                job_id, output_path,
+                expected_artist=artist, expected_title=title,
+                source=source_label, video_id=video_id or None,
+                uploader=artist_hint, video_title=f"{artist_hint} - {title_hint}".strip(" -"),
+                provider_artist=None,
+                mb_metadata=mb_metadata, fingerprint=fingerprint,
+                actual_duration_secs=actual_duration_secs, user_id=user_id,
+            )
+            if gate_error:
+                if _try_alternate_candidate(gate_error):
+                    return
+                raise Exception(gate_error)
+            artist_verified = True
 
         dur_ok, dur_reason = _check_duration_against_mb(actual_duration_secs, mb_metadata, artist, title, job_id=job_id)
         if not dur_ok:
@@ -5181,8 +5438,8 @@ def _process_direct_mp3_download(job_id: str, download_url: str, artist_hint: st
             raise Exception(dur_reason)
 
         if mb_metadata:
-            artist = album_ctx.get("track_artist") or mb_metadata.get("artist") or artist
-            title  = forced_track_title or mb_metadata.get("title") or title
+            artist = expected_artist or album_ctx.get("track_artist") or mb_metadata.get("artist") or artist
+            title  = forced_track_title or expected_title or mb_metadata.get("title") or title
             _update_job(job_id, artist=artist, title=title)
         else:
             title = forced_track_title or title
@@ -5261,7 +5518,9 @@ def _process_direct_mp3_download(job_id: str, download_url: str, artist_hint: st
             progress_stage=None,
             completed_at=datetime.now(timezone.utc).isoformat()
         )
-        marked = _mark_watched_track_downloaded(job_id, resolved_path=output_path)
+        marked = _mark_watched_track_downloaded(
+            job_id, resolved_path=output_path, verified=artist_verified
+        )
         _mark_watched_artist_track_downloaded(job_id, resolved_path=output_path)
         if marked:
             _append_to_physical_m3u(output_path, playlist_name, use_playlists_dir, user_id=user_id, custom_subdir=custom_subdir)
@@ -5437,6 +5696,11 @@ def process_download(job_id: str, video_id: str, convert_audio: bool = True, sou
     forced_album_name = album_ctx.get("album_name")
     forced_track_title = album_ctx.get("track_title")
     forced_album_year = album_ctx.get("year")
+    # Album, bulk and watched downloads say who the track is by before we fetch
+    # anything. That identity is what the file is verified against and tagged
+    # with; the uploader and the video title are merely how we found it.
+    expected_artist, expected_title, automatic = _expected_track_identity(job_id, album_ctx)
+    reject_keywords = automatic_reject_keywords(user_id) if automatic else None
     album_track_number, album_track_total = _get_album_track_tag_context(job_id)
     album_art_bytes, album_art_mime = get_album_art_context(job_id)
     # For single jobs routed into an album folder via "Add to..." (no bulk_imports row),
@@ -5555,7 +5819,12 @@ def process_download(job_id: str, video_id: str, convert_audio: bool = True, sou
         full_title = info.get("title", "Unknown")
         channel = info.get("uploader", info.get("channel", "Unknown")) if is_url_source else info.get("channel", info.get("uploader", "Unknown"))
         artist, title = extract_artist_title(full_title, channel)
-        artist = album_ctx.get("track_artist") or artist
+        # What the source called it, kept for the watched-track name check and
+        # the mismatch log. Never a tag.
+        source_artist, source_title = artist, title
+        artist = expected_artist or album_ctx.get("track_artist") or artist
+        if expected_title:
+            title = expected_title
         if forced_track_title:
             title = forced_track_title
 
@@ -5752,6 +6021,7 @@ def process_download(job_id: str, video_id: str, convert_audio: bool = True, sou
                     query, attempted_ids,
                     expected_artist=artist, expected_title=title,
                     allowed_sources=fallback_allowed_sources,
+                    reject_keywords=reject_keywords,
                 )
                 if alternate:
                     alt_id = alternate.get("video_id")
@@ -5836,7 +6106,26 @@ def process_download(job_id: str, video_id: str, convert_audio: bool = True, sou
         # Try to enrich metadata with AcoustID fingerprinting, then MusicBrainz
         _update_job(job_id, progress_stage="Looking up metadata")
         metadata_source = _default_metadata_source(source_label)
-        mb_metadata = lookup_metadata(artist, title, audio_file)
+        fingerprint: dict = {}
+        mb_metadata = lookup_metadata(artist, title, audio_file, identification=fingerprint)
+
+        # Artist gate for automatic downloads: fingerprint, then duration, then
+        # the source's own metadata; uploader and title are only tie-breakers.
+        # A failure here has already binned the file and logged the mismatch.
+        artist_verified = False
+        if automatic:
+            gate_error = _artist_gate(
+                job_id, audio_file,
+                expected_artist=artist, expected_title=title,
+                source=source_label, video_id=video_id,
+                uploader=channel, video_title=full_title,
+                provider_artist=info.get("artist") or ", ".join(info.get("artists") or []) or None,
+                mb_metadata=mb_metadata, fingerprint=fingerprint,
+                actual_duration_secs=actual_duration_secs, user_id=user_id,
+            )
+            if gate_error:
+                raise Exception(gate_error)
+            artist_verified = True
 
         # Duration sanity check: if MusicBrainz knows the expected length, verify we're within 10%.
         # Catches wrong tracks that passed the corruption check but are wildly the wrong length.
@@ -5851,6 +6140,7 @@ def process_download(job_id: str, video_id: str, convert_audio: bool = True, sou
                     query, attempted_ids,
                     expected_artist=artist, expected_title=title,
                     allowed_sources=fallback_allowed_sources,
+                    reject_keywords=reject_keywords,
                 )
                 if alternate:
                     alt_id = alternate.get("video_id")
@@ -5901,9 +6191,13 @@ def process_download(job_id: str, video_id: str, convert_audio: bool = True, sou
         tag_album_artist = forced_album_artist
         if mb_metadata:
             metadata_source = mb_metadata.get("metadata_source", metadata_source)
-            mb_artist = album_ctx.get("track_artist") or mb_metadata.get("artist", artist)
+            # ARTIST and TITLE come from the request when there is one; MusicBrainz
+            # supplies the album, year and position. A text search can land on a
+            # neighbouring recording, and its spelling of someone else's name
+            # must not end up on this file.
+            mb_artist = expected_artist or album_ctx.get("track_artist") or mb_metadata.get("artist", artist)
             mb_title = mb_metadata.get("title", title)
-            tag_title = forced_track_title or mb_title
+            tag_title = forced_track_title or expected_title or mb_title
             tag_album = forced_album_name or mb_metadata.get("album", "")
             tag_album_artist = forced_album_artist or mb_metadata.get("album_artist")
             tag_track_num, tag_track_total = _resolve_track_number(
@@ -5992,6 +6286,7 @@ def process_download(job_id: str, video_id: str, convert_audio: bool = True, sou
             job_id, audio_file, mb_metadata,
             artist=artist, title=title,
             video_id=video_id, source=source_label, user_id=user_id,
+            strict_defaults=automatic and strict_artist_match_enabled(user_id),
         )
         if rejection:
             _update_job(job_id, status="failed", error=rejection, final_path=str(audio_file), progress_stage=None, completed_at=datetime.now(timezone.utc).isoformat())
@@ -6020,7 +6315,11 @@ def process_download(job_id: str, video_id: str, convert_audio: bool = True, sou
                 album_ctx.get("album_name") or "",
             )
 
-        marked = _mark_watched_track_downloaded(job_id, resolved_path=audio_file)
+        marked = _mark_watched_track_downloaded(
+            job_id, resolved_path=audio_file,
+            observed_artist=source_artist, observed_title=source_title,
+            verified=artist_verified,
+        )
         _mark_watched_artist_track_downloaded(job_id, resolved_path=audio_file)
         if marked:
             _append_to_physical_m3u(audio_file, playlist_name, use_playlists_dir, user_id=user_id, custom_subdir=custom_subdir)
@@ -6065,6 +6364,7 @@ def process_download(job_id: str, video_id: str, convert_audio: bool = True, sou
                 exclude_sources=excluded or None,
                 expected_artist=artist, expected_title=title,
                 allowed_sources=fallback_allowed_sources,
+                reject_keywords=reject_keywords,
             )
             if alternate:
                 alt_id = (alternate.get("video_id") or "").strip()

@@ -367,6 +367,13 @@ ACOUSTID_MIN_SCORE = 0.8         # Below this, the match is too dodgy to trust
 MIN_SONG_DURATION_SECS = 30      # Files shorter than this are too brief to fingerprint reliably
 MAX_AUDIO_START_OFFSET_SECS = 1.0  # Start offsets above this indicate a preview segment, not a full track
 MB_DURATION_TOLERANCE = 0.10     # 10% either side of MusicBrainz expected duration; outside = wrong track
+# Strict artist matching (album, bulk and watched downloads). A candidate whose
+# length disagrees with the requested recording by more than 8 s or 5% (the
+# tighter of the two) is somebody else's version; a name has to score at least
+# the threshold to count as the same act. See artist_match.py.
+STRICT_DURATION_TOLERANCE_SECS = float(os.getenv("STRICT_DURATION_TOLERANCE_SECS", "8"))
+STRICT_DURATION_TOLERANCE_FRAC = float(os.getenv("STRICT_DURATION_TOLERANCE_FRAC", "0.05"))
+STRICT_ARTIST_MATCH_THRESHOLD = 0.8
 # Manual picks may intentionally differ from MusicBrainz, but the downloaded
 # bytes should still resemble the duration advertised by the exact result the
 # user clicked. Only reject a substantial shortfall so rounding and metadata

@@ -9,6 +9,7 @@ import base64
 import math
 import re
 import subprocess
+import threading
 import uuid
 from pathlib import Path
 from typing import Optional
@@ -901,6 +902,24 @@ def _extract_recording_metadata(recording: dict, expected_artist: str = "") -> d
     return metadata
 
 
+# What the fingerprint said the audio is, whether or not we adopted it for
+# tagging. `_lookup_acoustid` only returns a recording that fits the expected
+# artist, which is right for tagging and useless for noticing that the file is
+# somebody else's version of the song. Thread-local because downloads run in a
+# pool; read it through `lookup_metadata(..., identification=...)`.
+_fingerprint_identification = threading.local()
+
+
+def _remember_fingerprint_identification(identification: Optional[dict]) -> None:
+    _fingerprint_identification.value = identification
+
+
+def last_fingerprint_identification() -> Optional[dict]:
+    """The confident AcoustID identification from the most recent lookup on this
+    thread: {artist, title, recording_id, fp_score, match_score, adopted}, or None."""
+    return getattr(_fingerprint_identification, "value", None)
+
+
 def _lookup_acoustid(duration: int, fingerprint: str,
                      expected_artist: str = "", expected_title: str = "") -> Optional[dict]:
     """Ask AcoustID what this audio actually is.
@@ -956,6 +975,20 @@ def _lookup_acoustid(duration: int, fingerprint: str,
         )
         fp_score, recording = best_rec
         match_score = _score_recording(recording, expected_artist, expected_title)
+
+        # Whatever we decide below, this is what the audio fingerprints as. The
+        # artist gate in downloads.py needs that even when, especially when, it
+        # is not who we were expecting.
+        _remember_fingerprint_identification({
+            "artist": " & ".join(
+                a.get("name", "") for a in recording.get("artists", []) if a.get("name")
+            ) or None,
+            "title": recording.get("title"),
+            "recording_id": recording.get("id"),
+            "fp_score": fp_score,
+            "match_score": match_score,
+            "adopted": match_score >= 10,
+        })
 
         # Require a meaningful positive signal. Score breakdown: artist match=+10,
         # exact title=+8, partial title=+5, release groups=+1. A score of 0-9 means
@@ -1480,7 +1513,8 @@ def lookup_deezer_album(artist: str, title: str) -> Optional[dict]:
         return None
 
 
-def lookup_metadata(artist: str, title: str, file_path: Path = None) -> Optional[dict]:
+def lookup_metadata(artist: str, title: str, file_path: Path = None,
+                    identification: Optional[dict] = None) -> Optional[dict]:
     """Look up track metadata, trying audio fingerprinting first.
 
     The hierarchy of increasingly desperate measures:
@@ -1490,8 +1524,16 @@ def lookup_metadata(artist: str, title: str, file_path: Path = None) -> Optional
     4. If MusicBrainz still gave us no album, ask Deezer to fill that one field
 
     Returns a dict with 'title', 'artist', 'album', 'year' or None.
+
+    Pass a dict as `identification` to also receive what the fingerprint said
+    the audio is (see `last_fingerprint_identification`), including when that
+    disagreed with the expected artist and was therefore not used for tagging.
     """
+    _remember_fingerprint_identification(None)
     result = _lookup_metadata_musicbrainz(artist, title, file_path)
+    if identification is not None:
+        identification.clear()
+        identification.update(last_fingerprint_identification() or {})
 
     # Step 4: MusicBrainz couldn't pin down an album (common for brand-new
     # releases it hasn't ingested yet). Deezer usually can, so let it fill the

@@ -11324,6 +11324,7 @@
             'min_audio_bitrate': 'settingMinBitrate',
             'reject_live_versions': 'settingRejectLiveVersions',
             'reject_version_keywords': 'settingRejectVersionKeywords',
+            'strict_artist_match': 'settingStrictArtistMatch',
             'playlist_comment_tagging': 'settingPlaylistCommentTagging',
             'redownload_missing_files': 'settingRedownloadMissingFiles',
             'enable_track_upgrades': 'settingEnableTrackUpgrades',

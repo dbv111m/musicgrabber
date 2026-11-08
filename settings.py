@@ -203,6 +203,13 @@ SETTINGS_SCHEMA = {
     # list such as "demo, acoustic, radio edit, remix". Only matched inside a version
     # annotation, so "Demolition Man" survives the word "demo" (GitLab #96).
     "reject_version_keywords": {"type": "str", "default": "", "env": "REJECT_VERSION_KEYWORDS"},
+    # Album, bulk and watched downloads already know who the track is by. Strict
+    # mode refuses to file a download under that artist unless a fingerprint,
+    # the expected duration or the source's own metadata confirms it, and holds
+    # anything unverifiable for the user to force-accept. Manual picks are never
+    # affected: the user chose that result by hand. On by default (GitHub PR
+    # "strict artist match"); the fingerprint verdict applies even when off.
+    "strict_artist_match": {"type": "bool", "default": True, "env": "STRICT_ARTIST_MATCH"},
     # Bake EBU R128 loudness normalisation into downloads from lossy web sources
     # (YouTube et al are all over the shop volume-wise). Lossless sources are never
     # touched; their masters stay exactly as mastered. Off by default.

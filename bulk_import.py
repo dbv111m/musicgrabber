@@ -19,7 +19,7 @@ from constants import (
     BULK_IMPORT_SEARCH_RETRY_MAX_DELAY,
 )
 from db import db_conn, upsert_album_track_lock
-from downloads import process_acquisition_cycle, create_bulk_playlist
+from downloads import process_acquisition_cycle, create_bulk_playlist, automatic_reject_keywords
 from acquisition import (
     acquisition_candidate_summary,
     begin_acquisition_cycle,
@@ -780,6 +780,7 @@ def process_bulk_import_worker(import_id: str):
                         artist or "",
                         song or "",
                         priority_source=priority_source,
+                        reject_keywords=automatic_reject_keywords(user_id),
                     )
 
                     log_ranked_results(f"Bulk import {import_id}", search_query, search_results)

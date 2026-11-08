@@ -928,8 +928,16 @@
                     <div class="settings-row admin-only">
                         <label for="settingRejectVersionKeywords">Reject Other Versions</label>
                         <input type="text" id="settingRejectVersionKeywords" placeholder="demo, acoustic, radio edit, remix" autocomplete="off">
-                        <span class="settings-hint-sm">Comma-separated. A downloaded track confidently identified as one of these versions gets binned and retried, same as the live check above. Only matched inside a version annotation such as '(Acoustic)', '[Demo]' or '- Radio Edit', so 'Demolition Man' is safe from the word 'demo'. Anything you explicitly asked for by name is never rejected.</span>
+                        <span class="settings-hint-sm">Comma-separated. A downloaded track confidently identified as one of these versions gets binned and retried, same as the live check above. Only matched inside a version annotation such as '(Acoustic)', '[Demo]' or '- Radio Edit', so 'Demolition Man' is safe from the word 'demo'. Anything you explicitly asked for by name is never rejected. Leave it blank with Strict Artist Match on and album, bulk and watched downloads use a built-in list (cover, karaoke, tribute, live, acoustic, unplugged, remix, nightcore, slowed, sped up, 8d, instrumental, ai cover, suno).</span>
                     </div>
+                    <label class="settings-label settings-label-wrap admin-only">
+                        <span>Strict Artist Match</span>
+                        <div class="toggle-switch">
+                            <input type="checkbox" id="settingStrictArtistMatch">
+                            <span class="toggle-slider"></span>
+                        </div>
+                        <span class="settings-hint settings-hint-full">Album, bulk and watched downloads know who the track is by. With this on, a download is only filed under that artist when the audio fingerprint, the expected duration or the source's own metadata confirms it; the uploader's name and the video title alone are not enough. Anything unconfirmed is moved to Trash and listed under Mismatches, where Force Accept keeps it anyway. A fingerprint that identifies a different artist is always rejected. Tracks you pick by hand from Search are never affected.</span>
+                    </label>
                     <label class="settings-label settings-label-wrap admin-only">
                         <span>Tag Playlist Names in Comment</span>
                         <div class="toggle-switch">
